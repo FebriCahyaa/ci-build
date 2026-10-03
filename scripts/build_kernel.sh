@@ -49,6 +49,25 @@ UPSTREAM_PROFILE="${UPSTREAM_PROFILE:-auto}"
 LTO_PLUS="${LTO_PLUS:-false}"
 KERNEL_NAME="${KERNEL_NAME:-}"
 
+# A blank/auto value means kernel-name is the single source of truth.
+if [[ -z "$KERNEL_NAME" || "$KERNEL_NAME" == "auto" ]]; then
+  if [[ -f "$SCRIPT_DIR/../kernel-name" ]]; then
+    mapfile -t _kernel_name_values < <(sed -e 's/\r$//' \
+      -e '/^[[:space:]]*#/d' \
+      -e '/^[[:space:]]*$/d' \
+      "$SCRIPT_DIR/../kernel-name")
+    if ((${#_kernel_name_values[@]} > 1)); then
+      echo "ERROR: $SCRIPT_DIR/../kernel-name must contain exactly one non-empty value" >&2
+      exit 1
+    fi
+    if ((${#_kernel_name_values[@]} == 1)); then
+      KERNEL_NAME="${_kernel_name_values[0]}"
+    else
+      KERNEL_NAME=""
+    fi
+  fi
+fi
+
 # KernelSU:
 #   false = never install missing KernelSU
 #   true  = install when required/missing

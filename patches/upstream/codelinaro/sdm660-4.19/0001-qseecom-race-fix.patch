@@ -1,10 +1,13 @@
 From 7d789e8d52e3949b1a60b8bc6a72ed7794a4e054 Mon Sep 17 00:00:00 2001
 Subject: [PATCH] msm-4.19: qseecom: Fix possible race condition
 
+Fix possible race condition in data->type value in case of multithreaded
+listener or app IOCTLs.
+
 diff --git a/drivers/misc/qseecom.c b/drivers/misc/qseecom.c
 --- a/drivers/misc/qseecom.c
 +++ b/drivers/misc/qseecom.c
-@@
+@@ -7790,11 +7790,11 @@ static long qseecom_ioctl(struct file *file,
  			ret = -EINVAL;
  			break;
  		}

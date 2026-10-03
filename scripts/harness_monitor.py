@@ -5,6 +5,7 @@ import html
 import json
 import os
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -27,6 +28,8 @@ GITHUB_API = os.environ.get("GITHUB_API", "https://api.github.com")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GH_REPOSITORY = os.environ.get("GH_REPOSITORY", "")
 MAX_SECONDS = max(60, int(os.environ.get("HARNESS_MAX_SECONDS", "8100")))
+TG_EDIT_MIN_SECONDS = max(3.0, float(os.environ.get("TG_EDIT_MIN_SECONDS", str(POLL))))
+TG_MAX_RETRIES = max(1, int(os.environ.get("TG_MAX_RETRIES", "3")))
 RELEASE_TAG = f"harness-{PLAN}"
 
 TERMINAL = {"SUCCEEDED","SUCCESS","FAILED","FAILURE","ERROR","ERRORED","ABORTED","EXPIRED","REJECTED","STOPPED","CANCELED"}
@@ -76,11 +79,6 @@ GENERIC_NAMES = {
     "items",
     "item",
 }
-
-# Telegram live-progress animation.
-SPINNER_FRAMES = ("⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏")
-BAR_WIDTH = 16
-DONE_STATES = TERMINAL | {"SKIPPED","IGNORED","NOT_RUN"}
 
 
 def norm(v: object) -> str:
@@ -192,6 +190,7 @@ def node_name(obj: dict) -> str:
         "displayName",
         "stageName",
         "stepName",
+        "identifier",
     ):
         name = clean_name(obj.get(key))
 
@@ -209,6 +208,8 @@ def node_status(obj: dict) -> str:
         "stageStatus",
         "state",
         "executionStatus",
+        "nodeExecutionStatus",
+        "executionState",
     ):
         value = obj.get(key)
 
@@ -594,37 +595,131 @@ def error_of(obj: object) -> str:
     return ""
 
 
-def tg(method: str, data: dict[str,str]) -> object | None:
+def _telegram_request(
+    method: str,
+    data: dict[str, str],
+    *,
+    include_topic: bool = True,
+) -> object | None:
+    global TG_LAST_ERROR
+
     if not TG_TOKEN or not TG_CHAT:
+        TG_LAST_ERROR = "Telegram credentials are not configured"
         return None
+
     body = dict(data)
     body["chat_id"] = TG_CHAT
-    if TG_TOPIC:
+    if include_topic and TG_TOPIC:
         body["message_thread_id"] = TG_TOPIC
+
+    payload = urllib.parse.urlencode(body).encode()
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{TG_TOKEN}/{method}",
-        data=urllib.parse.urlencode(body).encode(),
-        headers={"Content-Type":"application/x-www-form-urlencoded"},
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            return json.load(resp)
-    except Exception:
-        return None
+
+    last_error = ""
+
+    for attempt in range(1, TG_MAX_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                result = json.load(resp)
+
+            if isinstance(result, dict) and not result.get("ok", True):
+                description = str(result.get("description") or "Telegram API returned ok=false")
+                TG_LAST_ERROR = description
+                last_error = description
+
+                if "message is not modified" in description.lower():
+                    return {"ok": True, "result": {}}
+            else:
+                TG_LAST_ERROR = ""
+                return result
+        except urllib.error.HTTPError as exc:
+            body_text = ""
+            try:
+                body_text = exc.read().decode("utf-8", "replace")[:1000]
+            except Exception:
+                pass
+            last_error = f"HTTP {exc.code}: {body_text or exc.reason}"
+            TG_LAST_ERROR = last_error
+
+            if exc.code == 429:
+                retry_after = 1
+                try:
+                    decoded = json.loads(body_text)
+                    retry_after = int(((decoded.get("parameters") or {}).get("retry_after")) or 1)
+                except Exception:
+                    pass
+                if attempt < TG_MAX_RETRIES:
+                    time.sleep(min(max(retry_after, 1), 15))
+                    continue
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+            TG_LAST_ERROR = last_error
+
+        if attempt < TG_MAX_RETRIES:
+            time.sleep(min(1.0 * attempt, 4.0))
+
+    if last_error:
+        print(f"[telegram] {method} failed: {last_error}", file=os.sys.stderr, flush=True)
+    return None
+
+
+TG_LAST_ERROR = ""
+
+
+def tg(method: str, data: dict[str, str], *, include_topic: bool = True) -> object | None:
+    return _telegram_request(method, data, include_topic=include_topic)
 
 
 def send(text: str) -> str:
-    result = tg("sendMessage", {"text":text,"parse_mode":"HTML","disable_web_page_preview":"true"})
+    result = tg(
+        "sendMessage",
+        {
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": "true",
+        },
+        include_topic=True,
+    )
     try:
         return str(result["result"]["message_id"])
     except Exception:
         return ""
 
 
-def edit(message_id: str, text: str) -> None:
-    if message_id:
-        tg("editMessageText", {"message_id":message_id,"text":text,"parse_mode":"HTML","disable_web_page_preview":"true"})
+def edit(message_id: str, text: str) -> bool:
+    if not message_id:
+        return False
+
+    result = tg(
+        "editMessageText",
+        {
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": "true",
+        },
+        include_topic=False,
+    )
+
+    return bool(isinstance(result, dict) and result.get("ok"))
+
+
+def write_monitor_state(data: dict[str, object]) -> None:
+    """Persist the current monitor state on every polling cycle."""
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    tmp = OUT.with_name(f".{OUT.name}.tmp")
+    payload = dict(data)
+    payload["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    tmp.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    tmp.replace(OUT)
 
 
 def github_release_state() -> tuple[str, str]:
@@ -728,12 +823,17 @@ def progress_bar(
 
         pct = max(0, min(100, pct))
         filled = int(round(BAR_WIDTH * pct / 100))
+        bar = list("█" * filled + "░" * (BAR_WIDTH - filled))
 
-        return (
-            "█" * filled
-            + "░" * (BAR_WIDTH - filled),
-            f"{pct:3d}%",
-        )
+        # Even when completed/total does not change, animate a live marker
+        # through the remaining segment so Telegram visibly updates.
+        if state not in TERMINAL:
+            start_pos = min(filled, BAR_WIDTH - 1)
+            span = max(1, BAR_WIDTH - start_pos)
+            pos = start_pos + (frame % span)
+            bar[pos] = "●"
+
+        return "".join(bar), f"{pct:3d}%"
 
     pos = frame % BAR_WIDTH
 
@@ -876,6 +976,8 @@ def main() -> int:
 
     last_signature = ""
     last_text = ""
+    last_edit_at = 0.0
+    edit_failures = 0
 
     final: dict[str, object] = {}
     api_failures = 0
@@ -966,7 +1068,7 @@ def main() -> int:
             err = err or release_error
             completion_source = "github_release"
 
-        state = norm(status)
+        state = norm(status) or "UNKNOWN"
 
         # Keep the last useful graph visible during transient API failures.
         if not raw_nodes and last_tree:
@@ -981,37 +1083,87 @@ def main() -> int:
             last_total = total_nodes
             last_active = active_nodes_count
 
+        message_text = render(
+            status or "RUNNING",
+            stage,
+            step,
+            elapsed,
+            err,
+            done_nodes,
+            total_nodes,
+            active_nodes_count,
+            frame,
+            tree_text,
+        )
+
         signature = (
             f"{state}|{stage}|{step}|{err[:300]}|"
             f"{done_nodes}|{total_nodes}|{active_nodes_count}|"
             f"{tree_text}|{frame}"
         )
 
-        # Force edit every polling cycle so the spinner visibly moves even
-        # when Harness remains on the same step.
-        if signature != last_signature:
-            text = render(
-                status or "RUNNING",
-                stage,
-                step,
-                elapsed,
-                err,
-                done_nodes,
-                total_nodes,
-                active_nodes_count,
-                frame,
-                tree_text,
-            )
-
-            if text != last_text:
-                if message_id:
-                    edit(message_id, text)
+        now = time.monotonic()
+        if (
+            message_text != last_text
+            and (now - last_edit_at) >= TG_EDIT_MIN_SECONDS
+        ):
+            if message_id:
+                if edit(message_id, message_text):
+                    edit_failures = 0
+                    last_edit_at = now
                 else:
-                    message_id = send(text)
+                    edit_failures += 1
 
-                last_text = text
+                    # Do not let one broken Telegram message freeze the monitor.
+                    # After two consecutive edit failures, create a replacement
+                    # message and continue editing that one.
+                    if edit_failures >= 2:
+                        replacement_id = send(message_text)
+                        if replacement_id:
+                            message_id = replacement_id
+                            edit_failures = 0
+                            last_edit_at = now
+            else:
+                message_id = send(message_text)
+                if message_id:
+                    edit_failures = 0
+                    last_edit_at = now
 
+            last_text = message_text
             last_signature = signature
+
+        # Persist a live snapshot, not only the final state.
+        write_monitor_state({
+            "plan_execution_id": PLAN,
+            "status": state,
+            "stage": stage,
+            "step": step,
+            "error": err,
+            "elapsed_seconds": elapsed,
+            "execution_url": RUN_URL,
+            "completion_source": completion_source or "live_poll",
+            "terminal": state in TERMINAL,
+            "poll": frame,
+            "api_failures": api_failures,
+            "telegram": {
+                "configured": bool(TG_TOKEN and TG_CHAT),
+                "message_id": message_id,
+                "edit_failures": edit_failures,
+                "last_error": TG_LAST_ERROR,
+            },
+            "progress": {
+                "completed": done_nodes,
+                "total": total_nodes,
+                "active": active_nodes_count,
+            },
+        })
+
+        print(
+            f"[monitor] poll={frame} status={state} "
+            f"progress={done_nodes}/{total_nodes} active={active_nodes_count} "
+            f"current={step or stage or '-'} elapsed={elapsed}s",
+            flush=True,
+        )
 
         if state in TERMINAL:
             final = {
@@ -1080,17 +1232,9 @@ def main() -> int:
 
         time.sleep(POLL)
 
-    OUT.write_text(
-        json.dumps(
-            final,
-            indent=2,
-            ensure_ascii=False,
-        ) + "\n",
-        encoding="utf-8",
-    )
+    write_monitor_state(final)
 
     final_progress = final.get("progress")
-
     if not isinstance(final_progress, dict):
         final_progress = {}
 
@@ -1108,7 +1252,10 @@ def main() -> int:
     )
 
     if message_id:
-        edit(message_id, final_text)
+        if not edit(message_id, final_text):
+            replacement_id = send(final_text)
+            if replacement_id:
+                message_id = replacement_id
     else:
         send(final_text)
 

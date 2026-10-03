@@ -12,7 +12,7 @@ on:
         description: "Kernel branch, tag, or ref"
         required: true
         type: string
-        default: "main"
+        default: "cr11_lavender-dynamic-root"
       device:
         description: "Device codename"
         required: true
@@ -112,7 +112,7 @@ on:
         description: "Kernel LOCALVERSION suffix"
         required: false
         type: string
-        default: "-Febri-Lavender"
+        default: ""
 
       package_anykernel:
         description: "Package AnyKernel3"
@@ -151,10 +151,12 @@ jobs:
       - name: Verify CI monitor scripts
         run: |
           set -euo pipefail
-          test -f scripts/harness_monitor.py
+          chmod +x scripts/harness_monitor.py scripts/send_release_to_telegram.sh scripts/publish_ci_release.sh scripts/*.sh
+          test -x scripts/harness_monitor.py
+          test -f kernel-name
           test -f scripts/send_release_to_telegram.sh
           test -f scripts/publish_ci_release.sh
-          echo "CI monitor scripts are present"
+          echo "CI monitor and kernel-name files are present"
           git rev-parse HEAD
 
       - name: Build Harness API payload

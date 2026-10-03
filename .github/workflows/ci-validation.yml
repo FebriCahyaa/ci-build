@@ -60,16 +60,26 @@ jobs:
       - name: Patch registry structure
         run: |
           set -euo pipefail
+          chmod +x scripts/*.sh
           test -x scripts/apply_patch_series.sh
           test -x scripts/set_kernel_name.sh
+          test -f kernel-name
+          test "$(awk 'NF && $0 !~ /^[[:space:]]*#/ {count++} END {print count+0}' kernel-name)" -eq 1
+          ! grep -R -nE '^@@$' patches --include='*.patch'
           test -f patches/devices/lavender/4.19/series.conf
           test -f patches/root-manager/resukisu/4.19/series.conf
           test -f patches/upstream/codelinaro/sdm660-4.19/series.conf
           test -f patches/features/lto-plus/lavender-4.19/thinlto.config
 
+      - name: Patch format and series validation
+        run: |
+          set -euo pipefail
+          python3 scripts/validate_patch_format.py
+
       - name: Modular patch registry
         run: |
           set -euo pipefail
+          chmod +x scripts/*.sh
           test -x scripts/apply_patch_series.sh
           test -x scripts/set_kernel_name.sh
           test -f patches/devices/lavender/4.19/series.conf

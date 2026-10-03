@@ -45,6 +45,7 @@ backup_file scripts/build_kernel.sh
 backup_file scripts/apply_patch_series.sh
 backup_file scripts/set_kernel_name.sh
 backup_file scripts/install_modular_patch_registry.sh
+backup_file kernel-name
 backup_file harness/kernel-pipeline.yaml
 backup_file .github/workflows/ci-validation.yml
 backup_file README.md
@@ -53,6 +54,7 @@ copy_file scripts/build_kernel.sh
 copy_file scripts/apply_patch_series.sh
 copy_file scripts/set_kernel_name.sh
 copy_file scripts/install_modular_patch_registry.sh
+copy_file kernel-name
 copy_file harness/kernel-pipeline.yaml
 copy_file .github/workflows/ci-validation.yml
 copy_file README.md

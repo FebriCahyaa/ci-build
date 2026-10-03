@@ -263,6 +263,8 @@ pipeline:
                         "$CI_BUILD_DIR/scripts/build_kernel.sh" \
                         "$CI_BUILD_DIR/scripts/detect_defconfig.sh" \
                         "$CI_BUILD_DIR/scripts/toolchain_resolver.sh" \
+                        "$CI_BUILD_DIR/scripts/apply_patch_series.sh" \
+                        "$CI_BUILD_DIR/scripts/set_kernel_name.sh" \
                         "$CI_BUILD_DIR/scripts/publish_ci_release.sh" \
                         "$CI_BUILD_DIR/scripts/github_harness_preflight.sh"
 

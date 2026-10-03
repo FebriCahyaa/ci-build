@@ -3,10 +3,10 @@
 ReSukiSU + SUSFS is the root-manager path used by the current Lavender
 build configuration.
 
-The current source contains the modern handler calls expected by ReSukiSU,
-but the tree still carries two legacy boolean guards and uses static
-SELinux file-operation objects. The following patches separate those
-compatibility changes from the build orchestrator:
+The current source exposes the handler calls expected by ReSukiSU, but
+the tree still carries two legacy boolean guards and uses static SELinux
+file-operation objects. The following patches provide the narrow 4.19
+compatibility changes required by the current ReSukiSU SUSFS checks:
 
 1. SELinux static exports
 2. `ksu_vfs_read_hook` legacy guard removal

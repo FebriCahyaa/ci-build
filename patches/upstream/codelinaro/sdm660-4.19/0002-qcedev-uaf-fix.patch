@@ -1,12 +1,17 @@
 From 468a3b3df8591092985b063b3a8fc0d34199bec5 Mon Sep 17 00:00:00 2001
 Subject: [PATCH] qcedev: fix UAF in qcedev_smmu
 
+External researcher found UAF in qcedev_smmu.c on an error condition in
+qcedev_check_and_map_buffer. When an error occurs, we free binfo, but it
+is still kept in the registeredbufs list. The fix removes it from the
+list before freeing binfo.
+
 diff --git a/drivers/crypto/msm/qcedev_smmu.c b/drivers/crypto/msm/qcedev_smmu.c
 --- a/drivers/crypto/msm/qcedev_smmu.c
 +++ b/drivers/crypto/msm/qcedev_smmu.c
-@@
+@@ -350,8 +350,12 @@ int qcedev_check_and_map_buffer(void *handle,
  	return 0;
-
+ 
  unmap:
 -	if (!found)
 +	if (!found) {
@@ -15,6 +20,6 @@ diff --git a/drivers/crypto/msm/qcedev_smmu.c b/drivers/crypto/msm/qcedev_smmu.c
 +		list_del(&binfo->list);
 +		mutex_unlock(&qce_hndl->registeredbufs.lock);
 +	}
-
+ 
  error:
  	kfree(binfo);

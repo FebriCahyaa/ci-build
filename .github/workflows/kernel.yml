@@ -91,7 +91,7 @@ on:
         description: "KernelSU provider branch/tag/commit"
         required: false
         type: string
-        default: "main"
+        default: "cr11_lavender-dynamic-root"
       patch_profile:
         description: "Modular source patch profile"
         required: true
@@ -112,7 +112,7 @@ on:
         description: "Kernel LOCALVERSION suffix"
         required: false
         type: string
-        default: "-Febri-Lavender"
+        default: ""
       package_anykernel:
         description: "Package an AnyKernel3 ZIP"
         required: true

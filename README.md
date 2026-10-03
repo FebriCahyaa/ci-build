@@ -185,3 +185,7 @@ From a checkout containing this bundle:
 ```
 
 The installer backs up modified files under `.ci-build-backup-YYYYMMDD-HHMMSS/`.
+
+## Kernel name
+
+`kernel-name` is the single source of truth for the kernel `CONFIG_LOCALVERSION` suffix when no workflow-specific name is supplied. Put one value per file, without surrounding quotes; the build helper adds a leading `-` automatically when needed.
