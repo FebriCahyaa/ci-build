@@ -80,13 +80,6 @@ pipeline:
     - name: ANYKERNEL3_REF
       type: String
       value: master
-    - name: ANYKERNEL_REPO
-      type: String
-      value: https://github.com/osm0sis/AnyKernel3
-    - name: ANYKERNEL_BRANCH
-      type: String
-      value: master
-
   stages:
     - stage:
         name: Kernel Build
@@ -137,8 +130,6 @@ pipeline:
                       ANYKERNEL_PROFILE: <+pipeline.variables.ANYKERNEL_PROFILE>
                       ANYKERNEL3_REPO: <+pipeline.variables.ANYKERNEL3_REPO>
                       ANYKERNEL3_REF: <+pipeline.variables.ANYKERNEL3_REF>
-                      ANYKERNEL_REPO: <+pipeline.variables.ANYKERNEL_REPO>
-                      ANYKERNEL_BRANCH: <+pipeline.variables.ANYKERNEL_BRANCH>
                       RUN_URL: <+pipeline.executionUrl>
                     command: |
                       set -euo pipefail

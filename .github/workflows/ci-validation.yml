@@ -22,6 +22,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends shellcheck ruby
 
+      - name: Workflow dispatch input limits
+        run: |
+          ruby - <<'RUBY'
+          require "yaml"
+
+          files = [
+            ".github/workflows/kernel.yml",
+            ".github/workflows/harness-kernel.yml",
+            ".github/workflows/ci-validation.yml",
+            ".github/workflows/rom.yml"
+          ]
+
+          files.each do |file|
+            data = YAML.load_file(file)
+            triggers = data["on"] || data[true] || {}
+            dispatch = triggers["workflow_dispatch"]
+            next unless dispatch
+
+            inputs = dispatch["inputs"] || {}
+            count = inputs.length
+            abort "#{file}: workflow_dispatch has #{count} inputs; GitHub allows at most 25" if count > 25
+            puts "workflow_dispatch inputs OK: #{file} (#{count})"
+          end
+          RUBY
+
       - name: Bash syntax
         run: |
           set -euo pipefail

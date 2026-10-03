@@ -129,17 +129,6 @@ on:
         required: true
         type: string
         default: "master"
-      anykernel_repo:
-        description: "AnyKernel3 repository"
-        required: false
-        type: string
-        default: "https://github.com/osm0sis/AnyKernel3"
-      anykernel_branch:
-        description: "AnyKernel3 branch"
-        required: false
-        type: string
-        default: "master"
-
 permissions:
   contents: read
 
@@ -191,8 +180,6 @@ jobs:
           ANYKERNEL_PROFILE: ${{ inputs.anykernel_profile }}
           ANYKERNEL3_REPO: ${{ inputs.anykernel_repo }}
           ANYKERNEL3_REF: ${{ inputs.anykernel3_ref }}
-          ANYKERNEL_REPO: ${{ inputs.anykernel_repo }}
-          ANYKERNEL_BRANCH: ${{ inputs.anykernel_branch }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
