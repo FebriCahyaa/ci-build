@@ -135,6 +135,20 @@ jobs:
   trigger-harness:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout CI repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Verify CI monitor scripts
+        run: |
+          set -euo pipefail
+          test -f scripts/harness_monitor.py
+          test -f scripts/send_release_to_telegram.sh
+          test -f scripts/publish_ci_release.sh
+          echo "CI monitor scripts are present"
+          git rev-parse HEAD
+
       - name: Build Harness API payload
         env:
           HARNESS_API_KEY: ${{ secrets.HARNESS_API_KEY }}
