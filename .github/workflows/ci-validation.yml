@@ -1,0 +1,49 @@
+name: CI Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck ruby
+
+      - name: Bash syntax
+        run: |
+          set -euo pipefail
+          find scripts -maxdepth 1 -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+
+      - name: ShellCheck errors
+        run: |
+          set -euo pipefail
+          find scripts -maxdepth 1 -type f -name '*.sh' -print0 | xargs -0 -r shellcheck -S error
+
+      - name: YAML parse
+        run: |
+          set -euo pipefail
+          ruby -e '
+            require "yaml"
+            ARGV.each do |file|
+              YAML.load_file(file)
+              puts "OK #{file}"
+            end
+          ' \
+            .github/workflows/kernel.yml \
+            .github/workflows/harness-kernel.yml \
+            .github/workflows/rom.yml \
+            harness/kernel-pipeline.yaml \
+            harness/rom-pipeline.yaml

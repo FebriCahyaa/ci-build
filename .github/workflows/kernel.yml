@@ -13,6 +13,12 @@ on:
         required: true
         type: string
         default: "cr11_lavender-dynamic-root"
+      kernel_ref_type:
+        description: "Kernel ref type"
+        required: true
+        type: choice
+        options: [auto, branch, tag, commit]
+        default: auto
       device:
         description: "Device/codename label"
         required: true
@@ -146,6 +152,7 @@ jobs:
           TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
           KERNEL_REPO: ${{ inputs.kernel_repo }}
           KERNEL_BRANCH: ${{ inputs.kernel_branch }}
+          KERNEL_REF_TYPE: ${{ inputs.kernel_ref_type }}
           DEVICE: ${{ inputs.device }}
           ARCH: ${{ inputs.arch }}
           DEFCONFIG: ${{ inputs.defconfig }}

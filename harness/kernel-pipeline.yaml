@@ -11,6 +11,9 @@ pipeline:
     - name: KERNEL_BRANCH
       type: String
       value: main
+    - name: KERNEL_REF_TYPE
+      type: String
+      value: auto
     - name: DEVICE
       type: String
       value: generic
@@ -99,6 +102,7 @@ pipeline:
                       TG_CHAT_ID: <+secrets.getValue("tg_chat_id")>
                       KERNEL_REPO: <+pipeline.variables.KERNEL_REPO>
                       KERNEL_BRANCH: <+pipeline.variables.KERNEL_BRANCH>
+                      KERNEL_REF_TYPE: <+pipeline.variables.KERNEL_REF_TYPE>
                       DEVICE: <+pipeline.variables.DEVICE>
                       ARCH: <+pipeline.variables.ARCH>
                       DEFCONFIG: <+pipeline.variables.DEFCONFIG>

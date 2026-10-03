@@ -73,3 +73,53 @@ Use `harness/rom-pipeline.yaml` with a self-managed Harness Docker Runner. It us
    dengan `runner: self-hosted`.
 5. Server mati sendiri setelah 1 job selesai, idle `IDLE_MINUTES`, atau umur `MAX_HOURS`.
    Dengan `terminate` ccache ikut hilang; pakai `SPOT=false BEHAVIOR=stop` bila ingin menyimpan cache (disk tetap ditagih).
+
+# CI-Build update
+
+Files are ready to replace in `FebriCahyaa/ci-build`:
+
+- `harness/kernel-pipeline.yaml`
+- `scripts/build_kernel.sh`
+- `.github/workflows/harness-kernel.yml`
+
+Key changes:
+- Harness stage no longer asks for a Codebase checkout, avoiding the manual-codebase branch/commit error.
+- Harness clones `ci-build` explicitly to obtain the build script, then clones the requested kernel repository.
+- Universal toolchain mode: `auto`, `clang`, `gcc`.
+- Kernel-version detection and architecture auto-detection.
+- Supports old 4.x kernels (including 4.4/4.19) and modern 5.x/GKI kernels such as Garnet workflows.
+- Optional custom Clang/GCC tarballs.
+- Scheduler profile is reporting-only: the source/defconfig remains authoritative for EAS/HMP.
+- Artifact collection covers Image, compressed images, dt/dtbo, modules, vmlinux, System.map, and config.
+- GitHub Actions uses the current Harness pipeline identifier and sends runtime variables with safe JSON construction.
+
+Suggested commit:
+`feat(ci): support universal 4.x and 5.x kernel builds via Harness`
+
+## Kernel CI hardening
+
+The kernel builder is shared by GitHub Actions and Harness Cloud. The intended execution path is:
+
+```text
+GitHub Actions inputs
+        |
+        v
+Harness API
+        |
+        v
+Harness Cloud
+        |
+        v
+ci-build/scripts/build_kernel.sh
+        |
+        +--> external kernel repository
+        +--> auto ARCH / defconfig / fragment
+        +--> resolved toolchain
+        +--> kernel artifacts
+```
+
+Kernel refs support `auto`, `branch`, `tag`, and `commit`. In `auto` mode, a 40- or 64-character hexadecimal ref is treated as a commit and any other ref is treated as a branch/tag ref.
+
+The toolchain resolver now returns the selected compiler directory to the caller, so downloaded AOSP, Proton, Neutron, and custom toolchains are actually placed first on `PATH` during compilation. The selected LLVM and LLVM IAS mode is also propagated from the resolver.
+
+The validation workflow checks Bash syntax, ShellCheck errors, and YAML parseability before a kernel build is attempted.

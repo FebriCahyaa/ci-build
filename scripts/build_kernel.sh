@@ -10,6 +10,7 @@ DEVICE="${DEVICE:-generic}"
 ARCH="${ARCH:-auto}"
 DEFCONFIG="${DEFCONFIG:-auto}"
 CONFIG_FRAGMENT="${CONFIG_FRAGMENT:-auto}"
+KERNEL_REF_TYPE="${KERNEL_REF_TYPE:-auto}"
 JOBS="${JOBS:-0}"
 KERNEL_TARGET="${KERNEL_TARGET:-}"
 TOOLCHAIN="${TOOLCHAIN:-auto}"
@@ -56,9 +57,33 @@ if [[ "$JOBS" == "0" || -z "$JOBS" ]]; then JOBS="$(nproc 2>/dev/null || echo 2)
 
 # ---- Source checkout ----
 rm -rf "$SRC_DIR"
-git clone --depth=1 --branch "$KERNEL_BRANCH" "$KERNEL_REPO" "$SRC_DIR" || fail "clone kernel"
+case "$KERNEL_REF_TYPE" in
+  auto)
+    if [[ "$KERNEL_BRANCH" =~ ^[0-9a-fA-F]{40}$ || "$KERNEL_BRANCH" =~ ^[0-9a-fA-F]{64}$ ]]; then
+      KERNEL_REF_TYPE=commit
+    else
+      KERNEL_REF_TYPE=branch
+    fi
+    ;;
+  branch|tag|commit)
+    ;;
+  *)
+    fail "invalid KERNEL_REF_TYPE=$KERNEL_REF_TYPE"
+    ;;
+esac
+
+if [[ "$KERNEL_REF_TYPE" == commit ]]; then
+  git init "$SRC_DIR" >/dev/null
+  git -C "$SRC_DIR" remote add origin "$KERNEL_REPO"
+  git -C "$SRC_DIR" fetch --depth=1 origin "$KERNEL_BRANCH" || fail "fetch kernel commit"
+  git -C "$SRC_DIR" checkout --detach FETCH_HEAD || fail "checkout kernel commit"
+else
+  git clone --depth=1 --branch "$KERNEL_BRANCH" "$KERNEL_REPO" "$SRC_DIR" || fail "clone kernel"
+fi
+
 cd "$SRC_DIR"
 COMMIT="$(git log -1 --pretty='%h %s')"
+COMMIT_SHA="$(git rev-parse HEAD)"
 
 # ---- Auto-detect architecture / defconfig / fragment ----
 DETECT_ENV="$WORK/detection.env"
@@ -83,7 +108,11 @@ TOOLCHAIN="$TOOLCHAIN" TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" ARCH="$DETECTED_AR
   "$SCRIPT_DIR/toolchain_resolver.sh" "$SRC_DIR" "$WORK" > "$TOOLCHAIN_ENV" || fail "toolchain resolution"
 source "$TOOLCHAIN_ENV"
 
+if [[ -n "${RESOLVED_TOOLCHAIN_BIN:-}" ]]; then
+  export PATH="${RESOLVED_TOOLCHAIN_BIN}:$PATH"
+fi
 export PATH
+
 if [[ -n "${CROSS_COMPILE:-}" && "$CROSS_COMPILE" != auto ]]; then
   CROSS_DEFAULT="$CROSS_COMPILE"
 else
@@ -91,13 +120,8 @@ else
 fi
 CLANG_TRIPLE="${RESOLVED_CLANG_TRIPLE:-}"
 
-if [[ "$RESOLVED_TOOLCHAIN" == gcc ]]; then
-  LLVM_VALUE=0
-  LLVM_IAS_VALUE=0
-else
-  LLVM_VALUE=1
-  LLVM_IAS_VALUE=1
-fi
+LLVM_VALUE="${RESOLVED_LLVM:-1}"
+LLVM_IAS_VALUE="${RESOLVED_LLVM_IAS:-1}"
 [[ "$LLVM" != auto ]] && LLVM_VALUE="$LLVM"
 [[ "$LLVM_IAS" != auto ]] && LLVM_IAS_VALUE="$LLVM_IAS"
 
@@ -126,8 +150,8 @@ MID="$(tg_msg "🚀 <b>Universal Kernel Build</b>
 🧵 Jobs: <code>$JOBS</code>
 🔗 <a href=\"$RUN_URL\">CI log</a>")"
 
-printf 'device=%s\narch=%s\nkernel_version=%s\nbranch=%s\ncommit=%s\ndefconfig=%s\nfragment=%s\ntoolchain=%s\ntoolchain_version=%s\nllvm=%s\nllvm_ias=%s\nclang_triple=%s\ncross_compile=%s\nscheduler_profile=%s\n' \
-  "$DEVICE" "$DETECTED_ARCH" "$DETECTED_KERNEL_VERSION" "$KERNEL_BRANCH" "$COMMIT" \
+printf 'device=%s\narch=%s\nkernel_version=%s\nref_type=%s\nref=%s\ncommit=%s\ncommit_sha=%s\ndefconfig=%s\nfragment=%s\ntoolchain=%s\ntoolchain_version=%s\nllvm=%s\nllvm_ias=%s\nclang_triple=%s\ncross_compile=%s\nscheduler_profile=%s\n' \
+  "$DEVICE" "$DETECTED_ARCH" "$DETECTED_KERNEL_VERSION" "$KERNEL_REF_TYPE" "$KERNEL_BRANCH" "$COMMIT" "$COMMIT_SHA" \
   "$DETECTED_DEFCONFIG" "${DETECTED_FRAGMENT:-}" "$RESOLVED_TOOLCHAIN" "$RESOLVED_TOOLCHAIN_VERSION" \
   "$LLVM_VALUE" "$LLVM_IAS_VALUE" "$CLANG_TRIPLE" "$CROSS_DEFAULT" "$SCHEDULER_PROFILE" > "$ARTIFACTS/build-info.txt"
 

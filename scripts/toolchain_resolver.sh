@@ -49,6 +49,7 @@ fi
 
 CLANG_TRIPLE_VALUE=""
 RESOLVED_VERSION="${VERSION_REQUEST:-auto}"
+TOOLCHAIN_BIN=""
 
 case "$family" in
   custom-clang)
@@ -63,7 +64,8 @@ case "$family" in
     esac
     BIN="$(find "$TC_ROOT/custom-clang" -type f -path '*/bin/clang' -print -quit)"
     [[ -n "$BIN" ]] || { echo "ERROR: custom Clang archive contains no bin/clang" >&2; exit 1; }
-    export PATH="$(dirname "$BIN"):$PATH"
+    TOOLCHAIN_BIN="$(dirname "$BIN")"
+    export PATH="$TOOLCHAIN_BIN:$PATH"
     CROSS_DEFAULT=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
     CLANG_TRIPLE_VALUE=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
     LLVM_VALUE=1
@@ -94,7 +96,8 @@ case "$family" in
       CROSS_DEFAULT=""
       [[ -n "$GCC_BIN" ]] || { echo "ERROR: custom GCC archive contains no gcc" >&2; exit 1; }
     fi
-    export PATH="$(dirname "$GCC_BIN"):$PATH"
+    TOOLCHAIN_BIN="$(dirname "$GCC_BIN")"
+    export PATH="$TOOLCHAIN_BIN:$PATH"
     CLANG_TRIPLE_VALUE=""
     LLVM_VALUE=0
     LLVM_IAS_VALUE=0
@@ -164,7 +167,8 @@ case "$family" in
     tar -xzf "$archive" -C "$TC_ROOT/aosp"
     BIN="$(find "$TC_ROOT/aosp" -type f -path '*/bin/clang' -print -quit)"
     [[ -n "$BIN" ]] || { echo "ERROR: AOSP clang binary not found" >&2; exit 1; }
-    export PATH="$(dirname "$BIN"):$PATH"
+    TOOLCHAIN_BIN="$(dirname "$BIN")"
+    export PATH="$TOOLCHAIN_BIN:$PATH"
     CROSS_DEFAULT=""
     CLANG_TRIPLE_VALUE=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
     LLVM_VALUE=1
@@ -183,7 +187,8 @@ case "$family" in
     mkdir -p "$TC_ROOT/proton"
     tar -xzf "$archive" -C "$TC_ROOT/proton" --strip-components=1
     [[ -x "$TC_ROOT/proton/bin/clang" ]] || { echo "ERROR: Proton Clang bin/clang not found" >&2; exit 1; }
-    export PATH="$TC_ROOT/proton/bin:$PATH"
+    TOOLCHAIN_BIN="$TC_ROOT/proton/bin"
+    export PATH="$TOOLCHAIN_BIN:$PATH"
     CROSS_DEFAULT=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
     CLANG_TRIPLE_VALUE=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
     LLVM_VALUE=1
@@ -228,7 +233,8 @@ PY
     tar --zstd -xf "$archive" -C "$TC_ROOT/neutron"
     BIN="$(find "$TC_ROOT/neutron" -type f -path '*/bin/clang' -print -quit)"
     [[ -n "$BIN" ]] || { echo "ERROR: Neutron clang binary not found" >&2; exit 1; }
-    export PATH="$(dirname "$BIN"):$PATH"
+    TOOLCHAIN_BIN="$(dirname "$BIN")"
+    export PATH="$TOOLCHAIN_BIN:$PATH"
     CROSS_DEFAULT=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
     CLANG_TRIPLE_VALUE=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
     LLVM_VALUE=1
@@ -249,6 +255,7 @@ if [[ "$LLVM_VALUE" == 1 && -z "$CLANG_PATH" ]]; then
 fi
 
 printf 'RESOLVED_TOOLCHAIN=%q\n' "$family"
+printf 'RESOLVED_TOOLCHAIN_BIN=%q\n' "$TOOLCHAIN_BIN"
 printf 'RESOLVED_TOOLCHAIN_VERSION=%q\n' "${RESOLVED_VERSION:-${ver:-${BUILD_CONFIG_CLANG_REV:-system}}}"
 printf 'RESOLVED_CLANG=%q\n' "$CLANG_PATH"
 printf 'RESOLVED_CLANG_TRIPLE=%q\n' "$CLANG_TRIPLE_VALUE"
