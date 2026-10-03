@@ -8,78 +8,103 @@ pipeline:
     - name: KERNEL_REPO
       type: String
       value: <+input>
+
     - name: KERNEL_BRANCH
       type: String
       value: <+input>
+
     - name: KERNEL_REF_TYPE
       type: String
-      value: auto
+      value: <+input>
+
     - name: DEVICE
       type: String
-      value: generic
+      value: <+input>
+
     - name: ARCH
       type: String
-      value: auto
+      value: <+input>
+
     - name: DEFCONFIG
       type: String
-      value: auto
+      value: <+input>
+
     - name: CONFIG_FRAGMENT
       type: String
-      value: auto
+      value: <+input>
+
     - name: JOBS
       type: String
-      value: "0"
+      value: <+input>
+
     - name: TOOLCHAIN
       type: String
-      value: auto
+      value: <+input>
+
     - name: TOOLCHAIN_VERSION
       type: String
-      value: auto
+      value: <+input>
+
     - name: LLVM_IAS
       type: String
-      value: auto
+      value: <+input>
+
     - name: CROSS_COMPILE
       type: String
-      value: auto
+      value: <+input>
+
     - name: CROSS_COMPILE_ARM32
       type: String
-      value: ""
+      value: <+input>
+
     - name: CLANG_URL
       type: String
-      value: ""
+      value: <+input>
+
     - name: GCC_URL
       type: String
-      value: ""
+      value: <+input>
+
     - name: APT_PACKAGES
       type: String
-      value: ""
+      value: <+input>
+
     - name: EXTRA_MAKE_ARGS
       type: String
-      value: ""
+      value: <+input>
+
     - name: SCHEDULER_PROFILE
       type: String
-      value: auto
+      value: <+input>
+
     - name: ENABLE_KSU
       type: String
-      value: "false"
+      value: <+input>
+
     - name: KSU_REF
       type: String
-      value: ""
+      value: <+input>
+
     - name: PACKAGE_ANYKERNEL
       type: String
-      value: "false"
+      value: <+input>
+
     - name: ROM_FAMILY
       type: String
-      value: auto
+      value: <+input>
+
     - name: ANYKERNEL_PROFILE
       type: String
-      value: auto
+      value: <+input>
+
     - name: ANYKERNEL3_REPO
       type: String
-      value: https://github.com/osm0sis/AnyKernel3
+      value: <+input>
+
     - name: ANYKERNEL3_REF
       type: String
-      value: master
+      value: <+input>
+
   stages:
     - stage:
         name: Kernel Build
@@ -87,12 +112,15 @@ pipeline:
         type: CI
         spec:
           cloneCodebase: false
+
           platform:
             os: Linux
             arch: Amd64
+
           runtime:
             type: Cloud
             spec: {}
+
           execution:
             steps:
               - step:
@@ -100,65 +128,173 @@ pipeline:
                   name: Build Universal Kernel
                   identifier: build_universal_kernel
                   timeout: 2h
+
                   spec:
                     shell: Bash
+
                     envVariables:
                       GH_TOKEN: <+secrets.getValue("github_token")>
                       GH_REPOSITORY: FebriCahyaa/ci-build
+
                       HARNESS_EXECUTION_ID: <+pipeline.executionId>
+
                       KERNEL_REPO: <+pipeline.variables.KERNEL_REPO>
                       KERNEL_BRANCH: <+pipeline.variables.KERNEL_BRANCH>
                       KERNEL_REF_TYPE: <+pipeline.variables.KERNEL_REF_TYPE>
+
                       DEVICE: <+pipeline.variables.DEVICE>
                       ARCH: <+pipeline.variables.ARCH>
+
                       DEFCONFIG: <+pipeline.variables.DEFCONFIG>
                       CONFIG_FRAGMENT: <+pipeline.variables.CONFIG_FRAGMENT>
+
                       JOBS: <+pipeline.variables.JOBS>
+
                       TOOLCHAIN: <+pipeline.variables.TOOLCHAIN>
                       TOOLCHAIN_VERSION: <+pipeline.variables.TOOLCHAIN_VERSION>
                       LLVM_IAS: <+pipeline.variables.LLVM_IAS>
+
                       CROSS_COMPILE: <+pipeline.variables.CROSS_COMPILE>
                       CROSS_COMPILE_ARM32: <+pipeline.variables.CROSS_COMPILE_ARM32>
+
                       CLANG_URL: <+pipeline.variables.CLANG_URL>
                       GCC_URL: <+pipeline.variables.GCC_URL>
+
                       APT_PACKAGES: <+pipeline.variables.APT_PACKAGES>
                       EXTRA_MAKE_ARGS: <+pipeline.variables.EXTRA_MAKE_ARGS>
+
                       SCHEDULER_PROFILE: <+pipeline.variables.SCHEDULER_PROFILE>
+
                       ENABLE_KSU: <+pipeline.variables.ENABLE_KSU>
                       KSU_REF: <+pipeline.variables.KSU_REF>
+
                       PACKAGE_ANYKERNEL: <+pipeline.variables.PACKAGE_ANYKERNEL>
+
                       ROM_FAMILY: <+pipeline.variables.ROM_FAMILY>
                       ANYKERNEL_PROFILE: <+pipeline.variables.ANYKERNEL_PROFILE>
                       ANYKERNEL3_REPO: <+pipeline.variables.ANYKERNEL3_REPO>
                       ANYKERNEL3_REF: <+pipeline.variables.ANYKERNEL3_REF>
+
                       RUN_URL: <+pipeline.executionUrl>
+
                     command: |
                       set -euo pipefail
                       export DEBIAN_FRONTEND=noninteractive
 
-                      # Clone ci-build first so the release/error bridge is available
-                      # even when dependency installation or the kernel build fails.
+                      echo "=================================================="
+                      echo " Universal Kernel Build"
+                      echo "=================================================="
+
+                      # --------------------------------------------------
+                      # Clone ci-build first so all helper scripts are
+                      # available before dependency installation/build.
+                      # --------------------------------------------------
                       CI_BUILD_DIR="$PWD/ci-build"
+
                       rm -rf "$CI_BUILD_DIR"
+
                       git clone --depth=1 --branch main \
-                        https://github.com/FebriCahyaa/ci-build.git "$CI_BUILD_DIR"
+                        https://github.com/FebriCahyaa/ci-build.git \
+                        "$CI_BUILD_DIR"
+
+                      echo
+                      echo "==> ci-build revision"
+                      git -C "$CI_BUILD_DIR" log -1 --oneline
+                      git -C "$CI_BUILD_DIR" rev-parse HEAD
+
+                      # --------------------------------------------------
+                      # Verify required scripts exist before continuing.
+                      # --------------------------------------------------
+                      for script in \
+                        build_kernel.sh \
+                        detect_defconfig.sh \
+                        toolchain_resolver.sh \
+                        publish_ci_release.sh \
+                        github_harness_preflight.sh
+                      do
+                        test -f "$CI_BUILD_DIR/scripts/$script" || {
+                          echo "ERROR: missing ci-build script: $script" >&2
+                          exit 1
+                        }
+                      done
 
                       chmod +x \
                         "$CI_BUILD_DIR/scripts/build_kernel.sh" \
                         "$CI_BUILD_DIR/scripts/detect_defconfig.sh" \
                         "$CI_BUILD_DIR/scripts/toolchain_resolver.sh" \
-                        "$CI_BUILD_DIR/scripts/publish_ci_release.sh"
-                      chmod +x "$CI_BUILD_DIR/scripts/github_harness_preflight.sh"
+                        "$CI_BUILD_DIR/scripts/publish_ci_release.sh" \
+                        "$CI_BUILD_DIR/scripts/github_harness_preflight.sh"
 
+                      # --------------------------------------------------
+                      # GitHub credential preflight.
+                      # --------------------------------------------------
+                      echo
                       echo "==> GitHub credential preflight"
+
                       GH_TOKEN="$GH_TOKEN" \
                       GH_REPOSITORY="$GH_REPOSITORY" \
                         "$CI_BUILD_DIR/scripts/github_harness_preflight.sh"
 
+                      # --------------------------------------------------
+                      # Print values actually resolved by Harness.
+                      # This prevents GitHub/Harness input mismatches
+                      # from wasting a full kernel build.
+                      # --------------------------------------------------
+                      echo
+                      echo "=================================================="
+                      echo " RESOLVED HARNESS INPUTS"
+                      echo "=================================================="
+
+                      printf 'KERNEL_REPO=%s\n' "$KERNEL_REPO"
+                      printf 'KERNEL_BRANCH=%s\n' "$KERNEL_BRANCH"
+                      printf 'KERNEL_REF_TYPE=%s\n' "$KERNEL_REF_TYPE"
+                      printf 'DEVICE=%s\n' "$DEVICE"
+                      printf 'ARCH=%s\n' "$ARCH"
+                      printf 'DEFCONFIG=%s\n' "$DEFCONFIG"
+                      printf 'CONFIG_FRAGMENT=%s\n' "$CONFIG_FRAGMENT"
+                      printf 'JOBS=%s\n' "$JOBS"
+                      printf 'TOOLCHAIN=%s\n' "$TOOLCHAIN"
+                      printf 'TOOLCHAIN_VERSION=%s\n' "$TOOLCHAIN_VERSION"
+                      printf 'LLVM_IAS=%s\n' "$LLVM_IAS"
+                      printf 'CROSS_COMPILE=%s\n' "$CROSS_COMPILE"
+                      printf 'CROSS_COMPILE_ARM32=%s\n' "$CROSS_COMPILE_ARM32"
+                      printf 'SCHEDULER_PROFILE=%s\n' "$SCHEDULER_PROFILE"
+                      printf 'ENABLE_KSU=%s\n' "$ENABLE_KSU"
+                      printf 'KSU_REF=%s\n' "$KSU_REF"
+                      printf 'PACKAGE_ANYKERNEL=%s\n' "$PACKAGE_ANYKERNEL"
+                      printf 'ROM_FAMILY=%s\n' "$ROM_FAMILY"
+                      printf 'ANYKERNEL_PROFILE=%s\n' "$ANYKERNEL_PROFILE"
+                      printf 'ANYKERNEL3_REPO=%s\n' "$ANYKERNEL3_REPO"
+                      printf 'ANYKERNEL3_REF=%s\n' "$ANYKERNEL3_REF"
+
+                      # --------------------------------------------------
+                      # Hard guard against accidental generic builds.
+                      # --------------------------------------------------
+                      if [[ -z "$KERNEL_REPO" ]]; then
+                        echo "ERROR: KERNEL_REPO is empty" >&2
+                        exit 2
+                      fi
+
+                      if [[ -z "$KERNEL_BRANCH" ]]; then
+                        echo "ERROR: KERNEL_BRANCH is empty" >&2
+                        exit 2
+                      fi
+
+                      if [[ -z "$DEVICE" || "$DEVICE" == "generic" ]]; then
+                        echo "ERROR: DEVICE is missing or still 'generic'." >&2
+                        echo "GitHub → Harness input propagation failed." >&2
+                        exit 2
+                      fi
+
+                      # --------------------------------------------------
+                      # Release bridge.
+                      # --------------------------------------------------
                       RELEASE_DIR="$PWD/work/ci-release-assets"
                       RELEASE_TAG="harness-$HARNESS_EXECUTION_ID"
 
-                      # Always preserve the original Harness step exit code.
+                      # --------------------------------------------------
+                      # Always preserve the original build exit code.
+                      # --------------------------------------------------
                       trap '
                         rc=$?
                         set +e
@@ -168,21 +304,27 @@ pipeline:
                         if [ "$rc" -eq 0 ]; then
                           cp -f "$PWD"/work/Kernel-${DEVICE}-*.tar.gz \
                             "$RELEASE_DIR/" 2>/dev/null || true
+
                           cp -f "$PWD"/work/artifacts/*-AnyKernel3.zip \
                             "$RELEASE_DIR/" 2>/dev/null || true
+
                           cp -f "$PWD"/work/build.log \
                             "$RELEASE_DIR/" 2>/dev/null || true
+
                           cp -f "$PWD"/work/artifacts/build-info.txt \
                             "$RELEASE_DIR/" 2>/dev/null || true
 
                           printf "status=success\nexecution_id=%s\n" \
                             "$HARNESS_EXECUTION_ID" \
                             > "$RELEASE_DIR/build-result.txt"
+
                         else
                           cp -f "$PWD"/work/build.log \
                             "$RELEASE_DIR/" 2>/dev/null || true
+
                           cp -f "$PWD"/work/error_tail.log \
                             "$RELEASE_DIR/" 2>/dev/null || true
+
                           cp -f "$PWD"/work/artifacts/build-info.txt \
                             "$RELEASE_DIR/" 2>/dev/null || true
 
@@ -209,15 +351,43 @@ pipeline:
                         exit "$rc"
                       ' EXIT
 
+                      # --------------------------------------------------
                       # Install dependencies only once.
+                      # --------------------------------------------------
+                      echo
+                      echo "==> Installing build dependencies"
+
                       apt-get update
+
                       apt-get install -y --no-install-recommends \
-                        bc bison flex libssl-dev libelf-dev clang lld llvm \
-                        gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-                        build-essential cpio git curl python3 zip xz-utils zstd \
-                        ca-certificates tar gzip \
+                        bc \
+                        bison \
+                        flex \
+                        libssl-dev \
+                        libelf-dev \
+                        clang \
+                        lld \
+                        llvm \
+                        gcc-aarch64-linux-gnu \
+                        gcc-arm-linux-gnueabi \
+                        build-essential \
+                        cpio \
+                        git \
+                        curl \
+                        python3 \
+                        zip \
+                        xz-utils \
+                        zstd \
+                        ca-certificates \
+                        tar \
+                        gzip \
                         ${APT_PACKAGES:-}
 
-                      # Execute the universal kernel builder.
+                      # --------------------------------------------------
+                      # Execute universal kernel builder.
+                      # --------------------------------------------------
+                      echo
+                      echo "==> Starting kernel builder"
+
                       WORK_DIR="$PWD/work" \
                         "$CI_BUILD_DIR/scripts/build_kernel.sh"
