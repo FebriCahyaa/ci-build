@@ -283,7 +283,10 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
           HARNESS_POLL_SECONDS: "10"
+          HARNESS_MAX_SECONDS: "8100"
         run: python3 scripts/harness_monitor.py
 
       - name: Relay Harness logs and artifacts to Telegram

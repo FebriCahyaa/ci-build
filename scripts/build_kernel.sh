@@ -56,9 +56,6 @@ KSU_REPO="${KSU_REPO:-}"
 KSU_REF="${KSU_REF:-}"
 KSU_LAYOUT="${KSU_LAYOUT:-auto}"
 KSU_HOOK_MODE="${KSU_HOOK_MODE:-auto}"
-KSU_REPO="${KSU_REPO:-https://github.com/tiann/KernelSU}"
-KSU_REF="${KSU_REF:-}"
-KSU_LAYOUT="${KSU_LAYOUT:-auto}"
 
 PACKAGE_ANYKERNEL="${PACKAGE_ANYKERNEL:-false}"
 ROM_FAMILY="${ROM_FAMILY:-oss}"
@@ -273,20 +270,20 @@ resolve_ksu_provider() {
   case "$KSU_PROVIDER" in
     official|kernelsu)
       KSU_PROVIDER="official"
-      KSU_REPO="${KSU_REPO:-https://github.com/tiann/KernelSU}"
+      KSU_REPO="https://github.com/tiann/KernelSU"
       # Official KernelSU documents v0.9.5 as the final non-GKI release.
       KSU_REF="${KSU_REF:-v0.9.5}"
       ;;
     kernelsu-next|ksu-next|next)
       KSU_PROVIDER="kernelsu-next"
-      KSU_REPO="${KSU_REPO:-https://github.com/KernelSU-Next/KernelSU-Next}"
+      KSU_REPO="https://github.com/KernelSU-Next/KernelSU-Next"
       # The upstream setup entrypoint is on the "next" branch; legacy is
       # the explicit non-GKI/legacy mode used by current examples.
       KSU_REF="${KSU_REF:-legacy}"
       ;;
     resukisu|re-sukisu)
       KSU_PROVIDER="resukisu"
-      KSU_REPO="${KSU_REPO:-https://github.com/ReSukiSU/ReSukiSU}"
+      KSU_REPO="https://github.com/ReSukiSU/ReSukiSU"
       KSU_REF="${KSU_REF:-main}"
       ;;
     custom)
