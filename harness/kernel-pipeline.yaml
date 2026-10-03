@@ -85,6 +85,22 @@ pipeline:
       type: String
       value: <+input>
 
+    - name: KSU_PROVIDER
+      type: String
+      value: <+input>
+
+    - name: KSU_REPO
+      type: String
+      value: <+input>
+
+    - name: KSU_LAYOUT
+      type: String
+      value: <+input>
+
+    - name: KSU_HOOK_MODE
+      type: String
+      value: <+input>
+
     - name: PACKAGE_ANYKERNEL
       type: String
       value: <+input>
@@ -167,6 +183,10 @@ pipeline:
 
                       ENABLE_KSU: <+pipeline.variables.ENABLE_KSU>
                       KSU_REF: <+pipeline.variables.KSU_REF>
+                      KSU_PROVIDER: <+pipeline.variables.KSU_PROVIDER>
+                      KSU_REPO: <+pipeline.variables.KSU_REPO>
+                      KSU_LAYOUT: <+pipeline.variables.KSU_LAYOUT>
+                      KSU_HOOK_MODE: <+pipeline.variables.KSU_HOOK_MODE>
 
                       PACKAGE_ANYKERNEL: <+pipeline.variables.PACKAGE_ANYKERNEL>
 
@@ -245,27 +265,27 @@ pipeline:
                       echo " RESOLVED HARNESS INPUTS"
                       echo "=================================================="
 
-                      printf 'KERNEL_REPO=%s\n' "$KERNEL_REPO"
-                      printf 'KERNEL_BRANCH=%s\n' "$KERNEL_BRANCH"
-                      printf 'KERNEL_REF_TYPE=%s\n' "$KERNEL_REF_TYPE"
-                      printf 'DEVICE=%s\n' "$DEVICE"
-                      printf 'ARCH=%s\n' "$ARCH"
-                      printf 'DEFCONFIG=%s\n' "$DEFCONFIG"
-                      printf 'CONFIG_FRAGMENT=%s\n' "$CONFIG_FRAGMENT"
-                      printf 'JOBS=%s\n' "$JOBS"
-                      printf 'TOOLCHAIN=%s\n' "$TOOLCHAIN"
-                      printf 'TOOLCHAIN_VERSION=%s\n' "$TOOLCHAIN_VERSION"
-                      printf 'LLVM_IAS=%s\n' "$LLVM_IAS"
-                      printf 'CROSS_COMPILE=%s\n' "$CROSS_COMPILE"
-                      printf 'CROSS_COMPILE_ARM32=%s\n' "$CROSS_COMPILE_ARM32"
-                      printf 'SCHEDULER_PROFILE=%s\n' "$SCHEDULER_PROFILE"
-                      printf 'ENABLE_KSU=%s\n' "$ENABLE_KSU"
-                      printf 'KSU_REF=%s\n' "$KSU_REF"
-                      printf 'PACKAGE_ANYKERNEL=%s\n' "$PACKAGE_ANYKERNEL"
-                      printf 'ROM_FAMILY=%s\n' "$ROM_FAMILY"
-                      printf 'ANYKERNEL_PROFILE=%s\n' "$ANYKERNEL_PROFILE"
-                      printf 'ANYKERNEL3_REPO=%s\n' "$ANYKERNEL3_REPO"
-                      printf 'ANYKERNEL3_REF=%s\n' "$ANYKERNEL3_REF"
+                      printf 'KERNEL_REPO=%s\n' "${KERNEL_REPO:-}"
+                      printf 'KERNEL_BRANCH=%s\n' "${KERNEL_BRANCH:-}"
+                      printf 'KERNEL_REF_TYPE=%s\n' "${KERNEL_REF_TYPE:-}"
+                      printf 'DEVICE=%s\n' "${DEVICE:-}"
+                      printf 'ARCH=%s\n' "${ARCH:-}"
+                      printf 'DEFCONFIG=%s\n' "${DEFCONFIG:-}"
+                      printf 'CONFIG_FRAGMENT=%s\n' "${CONFIG_FRAGMENT:-}"
+                      printf 'JOBS=%s\n' "${JOBS:-}"
+                      printf 'TOOLCHAIN=%s\n' "${TOOLCHAIN:-}"
+                      printf 'TOOLCHAIN_VERSION=%s\n' "${TOOLCHAIN_VERSION:-}"
+                      printf 'LLVM_IAS=%s\n' "${LLVM_IAS:-}"
+                      printf 'CROSS_COMPILE=%s\n' "${CROSS_COMPILE:-}"
+                      printf 'CROSS_COMPILE_ARM32=%s\n' "${CROSS_COMPILE_ARM32:-}"
+                      printf 'SCHEDULER_PROFILE=%s\n' "${SCHEDULER_PROFILE:-}"
+                      printf 'ENABLE_KSU=%s\n' "${ENABLE_KSU:-}"
+                      printf 'KSU_REF=%s\n' "${KSU_REF:-}"
+                      printf 'PACKAGE_ANYKERNEL=%s\n' "${PACKAGE_ANYKERNEL:-}"
+                      printf 'ROM_FAMILY=%s\n' "${ROM_FAMILY:-}"
+                      printf 'ANYKERNEL_PROFILE=%s\n' "${ANYKERNEL_PROFILE:-}"
+                      printf 'ANYKERNEL3_REPO=%s\n' "${ANYKERNEL3_REPO:-}"
+                      printf 'ANYKERNEL3_REF=%s\n' "${ANYKERNEL3_REF:-}"
 
                       # --------------------------------------------------
                       # Hard guard against accidental generic builds.
