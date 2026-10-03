@@ -1,0 +1,64 @@
+
+name: Harness Kernel Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_repo:
+        description: "Kernel repository URL"
+        required: true
+        type: string
+      kernel_branch:
+        description: "Kernel branch"
+        required: true
+        default: "main"
+        type: string
+      device:
+        description: "Device codename"
+        required: true
+        default: "garnet"
+        type: string
+      defconfig:
+        description: "Kernel defconfig"
+        required: true
+        type: string
+      jobs:
+        description: "Build jobs"
+        required: true
+        default: "4"
+        type: string
+
+jobs:
+  trigger-harness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Harness pipeline
+        env:
+          HARNESS_API_KEY: ${{ secrets.HARNESS_API_KEY }}
+          HARNESS_ACCOUNT: ${{ secrets.HARNESS_ACCOUNT_ID }}
+          HARNESS_ORG: default
+          HARNESS_PROJECT: ci_build
+          PIPELINE_ID: AndroidKernelBuild
+          KERNEL_REPO: ${{ inputs.kernel_repo }}
+          KERNEL_BRANCH: ${{ inputs.kernel_branch }}
+          DEVICE: ${{ inputs.device }}
+          DEFCONFIG: ${{ inputs.defconfig }}
+          JOBS: ${{ inputs.jobs }}
+        run: |
+          echo "Triggering Harness pipeline..."
+          curl --fail-with-body -X POST \
+            "https://app.harness.io/pipeline/api/pipeline/execute/${PIPELINE_ID}?accountIdentifier=${HARNESS_ACCOUNT}&orgIdentifier=${HARNESS_ORG}&projectIdentifier=${HARNESS_PROJECT}" \
+            -H "x-api-key: ${HARNESS_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"pipeline\": {
+                \"identifier\": \"${PIPELINE_ID}\",
+                \"variables\": [
+                  {\"name\":\"KERNEL_REPO\",\"type\":\"String\",\"value\":\"${KERNEL_REPO}\"},
+                  {\"name\":\"KERNEL_BRANCH\",\"type\":\"String\",\"value\":\"${KERNEL_BRANCH}\"},
+                  {\"name\":\"DEVICE\",\"type\":\"String\",\"value\":\"${DEVICE}\"},
+                  {\"name\":\"DEFCONFIG\",\"type\":\"String\",\"value\":\"${DEFCONFIG}\"},
+                  {\"name\":\"JOBS\",\"type\":\"String\",\"value\":\"${JOBS}\"}
+                ]
+              }
+            }"
