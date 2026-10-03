@@ -44,11 +44,25 @@ series_apply() {
     [[ "$patch" = /* ]] || patch="$(dirname "$series")/$patch"
     [[ -f "$patch" ]] || fail "patch listed by series is missing: $patch"
 
+    # Some vendor kernels already contain an upstream commit represented by
+    # this patch, but later changes may make a strict reverse applicability
+    # check fail. Prefer the patch commit metadata when the source history
+    # proves that exact commit is already an ancestor.
+    patch_commit="$(sed -n '1{/^From [0-9a-fA-F]\{40\} /{s/^From \([0-9a-fA-F]\{40\}\) .*/\1/p;};}' "$patch")"
+    if [[ -n "$patch_commit" ]] &&
+       git -C "$SOURCE_DIR" cat-file -e "${patch_commit}^{commit}" 2>/dev/null &&
+       git -C "$SOURCE_DIR" merge-base --is-ancestor "$patch_commit" HEAD 2>/dev/null; then
+      echo "[patches] ALREADY APPLIED $patch (commit ${patch_commit:0:12} is an ancestor)"
+      continue
+    fi
+
     if git -C "$SOURCE_DIR" apply --check --whitespace=nowarn "$patch" >/dev/null 2>&1; then
       echo "[patches] APPLY $patch"
       git -C "$SOURCE_DIR" apply --whitespace=nowarn "$patch"
     elif git -C "$SOURCE_DIR" apply -R --check --whitespace=nowarn "$patch" >/dev/null 2>&1; then
       echo "[patches] ALREADY APPLIED $patch"
+    elif python3 "$REPO_ROOT/scripts/patch_content_check.py" "$SOURCE_DIR" "$patch" >/dev/null 2>&1; then
+      echo "[patches] ALREADY APPLIED $patch (content already present)"
     else
       echo "[patches] FAILED CHECK $patch" >&2
       git -C "$SOURCE_DIR" apply --check --whitespace=nowarn "$patch" || true

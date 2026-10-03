@@ -189,3 +189,36 @@ The installer backs up modified files under `.ci-build-backup-YYYYMMDD-HHMMSS/`.
 ## Kernel name
 
 `kernel-name` is the single source of truth for the kernel `CONFIG_LOCALVERSION` suffix when no workflow-specific name is supplied. Put one value per file, without surrounding quotes; the build helper adds a leading `-` automatically when needed.
+
+## Local trigger
+
+The `kernel.yml` workflow is exposed through `workflow_dispatch`, so it can be started directly from a local Ubuntu/Termux environment with GitHub CLI.
+
+Use the helper below to send the complete kernel build parameter set from local to GitHub Actions:
+
+```bash
+./scripts/start_local_kernel.sh
+```
+
+Override values with environment variables, for example:
+
+```bash
+KERNEL_NAME=Febri-Lavender \
+ENABLE_KSU=resukisu \
+PATCH_PROFILE=auto \
+UPSTREAM_PROFILE=auto \
+./scripts/start_local_kernel.sh
+```
+
+The default kernel source is `gianogli/android_kernel_xiaomi_lavender_4.19` on `cr11_lavender-dynamic-root`.
+
+## Trigger Harness dari local
+
+Untuk menjalankan pipeline Harness melalui GitHub Actions bridge:
+
+```bash
+chmod +x scripts/start_local_harness.sh
+./scripts/start_local_harness.sh
+```
+
+GitHub Actions menyimpan secret `HARNESS_API_KEY`, `HARNESS_ACCOUNT_ID`, dan Telegram secrets. Local hanya mengirim input workflow, jadi secret tidak perlu ditaruh di Termux/Ubuntu.
