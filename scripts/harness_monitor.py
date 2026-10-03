@@ -32,6 +32,11 @@ RELEASE_TAG = f"harness-{PLAN}"
 TERMINAL = {"SUCCEEDED","SUCCESS","FAILED","FAILURE","ERROR","ERRORED","ABORTED","EXPIRED","REJECTED","STOPPED","CANCELED"}
 ACTIVE = {"RUNNING","IN_PROGRESS","QUEUED","NOT_STARTED","PAUSED","WAITING"}
 
+# Telegram live-progress animation.
+SPINNER_FRAMES = ("⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏")
+BAR_WIDTH = 16
+DONE_STATES = TERMINAL | {"SKIPPED","IGNORED","NOT_RUN"}
+
 
 def norm(v: object) -> str:
     return str(v or "").strip().upper().replace("-", "_").replace(" ", "_")
@@ -109,6 +114,59 @@ def nodes_of(obj: object, stage: str = "", depth: int = 0) -> list[tuple[int,str
         for value in obj:
             out.extend(nodes_of(value, stage, depth))
     return out
+
+
+def progress_of(obj: object) -> tuple[int, int, int]:
+    """Return completed, total and active execution-node counts."""
+    states: dict[tuple[str, str], str] = {}
+
+    for _depth, stage, name, state in nodes_of(obj):
+        if not name:
+            continue
+        states[(stage, name)] = norm(state)
+
+    total = len(states)
+    done = sum(1 for state in states.values() if state in DONE_STATES)
+    active = sum(1 for state in states.values() if state in ACTIVE)
+
+    return done, total, active
+
+
+def progress_bar(
+    status: str,
+    done: int,
+    total: int,
+    frame: int,
+) -> tuple[str, str]:
+    """
+    Render an actual progress bar when graph nodes are available.
+    Otherwise render an indeterminate moving bar.
+    """
+    state = norm(status)
+
+    if total > 0:
+        pct = int(round(done * 100 / total))
+
+        # Keep an active build below 100% until it reaches terminal state.
+        if state not in TERMINAL:
+            pct = min(pct, 99)
+
+        pct = max(0, min(100, pct))
+
+        filled = int(round(BAR_WIDTH * pct / 100))
+        bar = "█" * filled + "░" * (BAR_WIDTH - filled)
+
+        return bar, f"{pct:3d}%"
+
+    # No graph progress available yet:
+    # move a single marker across the bar.
+    pos = frame % BAR_WIDTH
+    bar = "".join(
+        "●" if i == pos else "─"
+        for i in range(BAR_WIDTH)
+    )
+
+    return bar, "LIVE"
 
 
 def error_of(obj: object) -> str:
@@ -209,13 +267,43 @@ def github_release_state() -> tuple[str, str]:
 
 
 
+
 def duration(sec: int) -> str:
     return f"{sec // 60}m {sec % 60}s"
 
 
-def render(status: str, stage: str, step: str, elapsed: int, err: str = "") -> str:
+def render(
+    status: str,
+    stage: str,
+    step: str,
+    elapsed: int,
+    err: str = "",
+    done: int = 0,
+    total: int = 0,
+    active: int = 0,
+    frame: int = 0,
+) -> str:
     st = norm(status)
-    icon = "✅" if st in {"SUCCESS","SUCCEEDED"} else ("❌" if st in TERMINAL else "🟡")
+
+    icon = (
+        "✅"
+        if st in {"SUCCESS", "SUCCEEDED"}
+        else ("❌" if st in TERMINAL else "🟡")
+    )
+
+    spinner = (
+        ""
+        if st in TERMINAL
+        else SPINNER_FRAMES[frame % len(SPINNER_FRAMES)]
+    )
+
+    bar, pct = progress_bar(
+        status,
+        done,
+        total,
+        frame,
+    )
+
     msg = (
         f"{icon} <b>Universal Kernel Build</b>\n"
         f"📱 <code>{html.escape(DEVICE)}</code>\n"
@@ -223,15 +311,26 @@ def render(status: str, stage: str, step: str, elapsed: int, err: str = "") -> s
         f"🧩 Status: <code>{html.escape(status or 'UNKNOWN')}</code>\n"
         f"📍 Stage: <code>{html.escape(stage or '-')}</code>\n"
         f"🔧 Step: <code>{html.escape(step or '-')}</code>\n"
+        f"📊 <code>{bar}</code> <b>{pct}</b>  <code>{spinner}</code>\n"
+        f"✅ Nodes: <code>{done}/{total}</code>\n"
+        f"⚡ Active: <code>{active}</code>\n"
         f"⏱ <code>{duration(elapsed)}</code>\n"
         f"🆔 <code>{html.escape(PLAN)}</code>"
     )
-    if RUN_URL:
-        msg += f'\n🔗 <a href="{html.escape(RUN_URL, quote=True)}">Harness execution</a>'
-    if err:
-        msg += f"\n\n<b>Error:</b> <code>{html.escape(err[:800])}</code>"
-    return msg
 
+    if RUN_URL:
+        msg += (
+            f'\n🔗 <a href="{html.escape(RUN_URL, quote=True)}">'
+            f'Harness execution</a>'
+        )
+
+    if err:
+        msg += (
+            f"\n\n<b>Error:</b> "
+            f"<code>{html.escape(err[:800])}</code>"
+        )
+
+    return msg
 
 def main() -> int:
     started = time.time()
@@ -273,6 +372,11 @@ def main() -> int:
         err = error_of(details) or error_of(graph)
         elapsed = int(time.time() - started)
 
+        done_nodes, total_nodes, active_nodes = progress_of(graph)
+
+        # One animation frame per Harness polling cycle.
+        animation_frame = max(0, int(elapsed / max(POLL, 1)))
+
         # Harness creates the release only from the EXIT trap after the build
         # process terminates. Use it as an independent terminal signal.
         release_status, release_error = github_release_state()
@@ -281,9 +385,23 @@ def main() -> int:
             status = release_status
             err = err or release_error
             completion_source = "github_release"
-        signature = f"{norm(status)}|{stage}|{step}|{err[:300]}"
+        signature = (
+            f"{norm(status)}|{stage}|{step}|{err[:300]}|"
+            f"{done_nodes}|{total_nodes}|{animation_frame}"
+        )
+
         if signature != last_signature:
-            text = render(status or "RUNNING", stage, step, elapsed, err)
+            text = render(
+                status or "RUNNING",
+                stage,
+                step,
+                elapsed,
+                err,
+                done_nodes,
+                total_nodes,
+                active_nodes,
+                animation_frame,
+            )
             if text != last_text:
                 if message_id:
                     edit(message_id, text)
@@ -333,7 +451,17 @@ def main() -> int:
         time.sleep(POLL)
 
     OUT.write_text(json.dumps(final, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    final_text = render(str(final.get("status", "UNKNOWN")), str(final.get("stage", "")), str(final.get("step", "")), int(final.get("elapsed_seconds", 0)), str(final.get("error", "")))
+    final_text = render(
+        str(final.get("status", "UNKNOWN")),
+        str(final.get("stage", "")),
+        str(final.get("step", "")),
+        int(final.get("elapsed_seconds", 0)),
+        str(final.get("error", "")),
+        done_nodes if "done_nodes" in locals() else 0,
+        total_nodes if "total_nodes" in locals() else 0,
+        active_nodes if "active_nodes" in locals() else 0,
+        animation_frame if "animation_frame" in locals() else 0,
+    )
     if message_id:
         edit(message_id, final_text)
     else:
