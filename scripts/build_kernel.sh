@@ -401,6 +401,174 @@ fi
 KSU_LAYOUT_RESOLVED="$([[ "$KSU_NESTED_EXPECTED" == true ]] && echo nested || echo symlink)"
 
 # ------------------------------------------------------------
+# ReSukiSU SUSFS inline-hook compatibility layer
+#
+# Applied only for the ReSukiSU + SUSFS path in the ephemeral
+# CI checkout. The upstream kernel repository is not modified.
+# ------------------------------------------------------------
+
+apply_resukisu_susfs_inline_compat() {
+  [[ "${KSU_PROVIDER:-}" == "resukisu" ]] || return 0
+  [[ "${KSU_SUSFS_REQUIRED:-false}" == "true" ]] || return 0
+  [[ -n "${SRC_DIR:-}" && -d "$SRC_DIR" ]] || fail "ReSukiSU compatibility: kernel source directory is unavailable: ${SRC_DIR:-<empty>}"
+
+  echo "[ksu] Applying ReSukiSU SUSFS inline-hook compatibility layer"
+
+  python3 - "$SRC_DIR" <<'PY2'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+
+
+def replace_once(relpath, old, new):
+    path = root / relpath
+    text = path.read_text()
+
+    if new in text:
+        return
+
+    if old not in text:
+        raise SystemExit(f"[ksu] expected pattern not found: {relpath}")
+
+    path.write_text(text.replace(old, new, 1))
+    print(f"[ksu] patched {relpath}")
+
+
+# ------------------------------------------------------------
+# kernel/sys.c
+# ReSukiSU requires ksu_handle_setresuid() at __sys_setresuid()
+# ------------------------------------------------------------
+
+replace_once(
+    "kernel/sys.c",
+    """long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
+{
+""",
+    """#ifdef CONFIG_KSU_SUSFS
+extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);
+#endif
+
+long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
+{
+#ifdef CONFIG_KSU_SUSFS
+    (void)ksu_handle_setresuid(ruid, euid, suid);
+#endif
+"""
+)
+
+
+# ------------------------------------------------------------
+# fs/read_write.c
+# Remove legacy ksu_vfs_read_hook marker completely.
+# ReSukiSU checker requires direct ksu_handle_sys_read().
+# ------------------------------------------------------------
+
+replace_once(
+    "fs/read_write.c",
+    """#ifdef CONFIG_KSU
+extern bool ksu_vfs_read_hook __read_mostly;
+extern __attribute__((cold)) int ksu_handle_sys_read(unsigned int fd,
+                        char __user **buf_ptr, size_t *count_ptr);
+#endif
+""",
+    """#ifdef CONFIG_KSU
+extern __attribute__((cold)) int ksu_handle_sys_read(
+        unsigned int fd, char __user **buf_ptr, size_t *count_ptr);
+#endif
+"""
+)
+
+replace_once(
+    "fs/read_write.c",
+    """#ifdef CONFIG_KSU
+    if (unlikely(ksu_vfs_read_hook))
+        ksu_handle_sys_read(fd, &buf, &count);
+#endif
+""",
+    """#ifdef CONFIG_KSU
+    ksu_handle_sys_read(fd, &buf, &count);
+#endif
+"""
+)
+
+
+# ------------------------------------------------------------
+# drivers/input/input.c
+# Remove legacy ksu_input_hook marker completely.
+# ReSukiSU checker requires direct input hook.
+# ------------------------------------------------------------
+
+replace_once(
+    "drivers/input/input.c",
+    """#ifdef CONFIG_KSU
+extern bool ksu_input_hook __read_mostly;
+extern __attribute__((cold)) int ksu_handle_input_handle_event(
+            unsigned int *type, unsigned int *code, int *value);
+#endif
+""",
+    """#ifdef CONFIG_KSU
+extern __attribute__((cold)) int ksu_handle_input_handle_event(
+            unsigned int *type, unsigned int *code, int *value);
+#endif
+"""
+)
+
+replace_once(
+    "drivers/input/input.c",
+    """#ifdef CONFIG_KSU
+    if (unlikely(ksu_input_hook))
+        ksu_handle_input_handle_event(&type, &code, &value);
+#endif
+""",
+    """#ifdef CONFIG_KSU
+    ksu_handle_input_handle_event(&type, &code, &value);
+#endif
+"""
+)
+
+
+# ------------------------------------------------------------
+# Validation
+# ------------------------------------------------------------
+
+required = {
+    "kernel/sys.c": [
+        "ksu_handle_setresuid",
+    ],
+    "fs/read_write.c": [
+        "ksu_handle_sys_read",
+    ],
+    "drivers/input/input.c": [
+        "ksu_handle_input_handle_event",
+    ],
+}
+
+for relpath, needles in required.items():
+    text = (root / relpath).read_text()
+    for needle in needles:
+        if needle not in text:
+            raise SystemExit(
+                f"[ksu] validation failed: {relpath}: {needle}"
+            )
+
+for relpath, forbidden in {
+    "fs/read_write.c": "ksu_vfs_read_hook",
+    "drivers/input/input.c": "ksu_input_hook",
+}.items():
+    text = (root / relpath).read_text()
+    if forbidden in text:
+        raise SystemExit(
+            f"[ksu] legacy hook still present: {relpath}: {forbidden}"
+        )
+
+print("[ksu] source compatibility validation: PASS")
+PY2
+}
+
+apply_resukisu_susfs_inline_compat
+
+# ------------------------------------------------------------
 # Toolchain resolution
 # ------------------------------------------------------------
 
