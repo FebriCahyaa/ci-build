@@ -23,6 +23,11 @@ DEVICE = os.environ.get("DEVICE", "unknown")
 BRANCH = os.environ.get("KERNEL_BRANCH", "unknown")
 OUT = Path(os.environ.get("HARNESS_MONITOR_FILE", "harness-monitor.json"))
 RUN_URL = os.environ.get("HARNESS_EXECUTION_URL", "")
+GITHUB_API = os.environ.get("GITHUB_API", "https://api.github.com")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+GH_REPOSITORY = os.environ.get("GH_REPOSITORY", "")
+MAX_SECONDS = max(60, int(os.environ.get("HARNESS_MAX_SECONDS", "8100")))
+RELEASE_TAG = f"harness-{PLAN}"
 
 TERMINAL = {"SUCCEEDED","SUCCESS","FAILED","FAILURE","ERROR","ERRORED","ABORTED","EXPIRED","REJECTED","STOPPED","CANCELED"}
 ACTIVE = {"RUNNING","IN_PROGRESS","QUEUED","NOT_STARTED","PAUSED","WAITING"}
@@ -162,6 +167,48 @@ def edit(message_id: str, text: str) -> None:
         tg("editMessageText", {"message_id":message_id,"text":text,"parse_mode":"HTML","disable_web_page_preview":"true"})
 
 
+def github_release_state() -> tuple[str, str]:
+    """
+    Secondary completion signal.
+
+    Harness creates the GitHub Release from the EXIT trap only after the
+    build process terminates.
+    """
+    if not GH_REPOSITORY:
+        return "", ""
+
+    url = (
+        f"{GITHUB_API}/repos/{urllib.parse.quote(GH_REPOSITORY, safe='')}"
+        f"/releases/tags/{urllib.parse.quote(RELEASE_TAG, safe='')}"
+    )
+
+    headers = {"Accept": "application/vnd.github+json"}
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            release = json.load(resp)
+    except Exception:
+        return "", ""
+
+    assets = {
+        str(asset.get("name", "")).strip()
+        for asset in release.get("assets", [])
+        if isinstance(asset, dict)
+    }
+
+    if "build-result.txt" in assets:
+        return "SUCCEEDED", ""
+
+    if "failure-summary.txt" in assets:
+        return "FAILED", "Harness build failed; see GitHub Release failure-summary.txt."
+
+    return "", ""
+
+
+
 def duration(sec: int) -> str:
     return f"{sec // 60}m {sec % 60}s"
 
@@ -222,8 +269,18 @@ def main() -> int:
         step = active[0][2] if active else ""
         if active and not status:
             status = active[0][3]
+
         err = error_of(details) or error_of(graph)
         elapsed = int(time.time() - started)
+
+        # Harness creates the release only from the EXIT trap after the build
+        # process terminates. Use it as an independent terminal signal.
+        release_status, release_error = github_release_state()
+        completion_source = ""
+        if release_status:
+            status = release_status
+            err = err or release_error
+            completion_source = "github_release"
         signature = f"{norm(status)}|{stage}|{step}|{err[:300]}"
         if signature != last_signature:
             text = render(status or "RUNNING", stage, step, elapsed, err)
@@ -245,8 +302,23 @@ def main() -> int:
                 "error": err,
                 "elapsed_seconds": elapsed,
                 "execution_url": RUN_URL,
+                "completion_source": completion_source or "harness_api",
             }
             break
+
+        if elapsed >= MAX_SECONDS:
+            final = {
+                "plan_execution_id": PLAN,
+                "status": "MONITOR_TIMEOUT",
+                "stage": stage,
+                "step": step,
+                "error": f"Monitor exceeded {MAX_SECONDS}s without a terminal Harness/release state.",
+                "elapsed_seconds": elapsed,
+                "execution_url": RUN_URL,
+                "completion_source": "monitor_timeout",
+            }
+            break
+
         if api_failures >= 12:
             final = {
                 "plan_execution_id": PLAN,

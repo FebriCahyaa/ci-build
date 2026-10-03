@@ -59,12 +59,22 @@ fi
 
 TAG_ENC="$(urlencode "$RELEASE_TAG")"
 RELEASE_JSON="$WORK/release.json"
-if ! curl -fsSL \
-    -H "Authorization: Bearer $GITHUB_TOKEN" \
-    -H "Accept: application/vnd.github+json" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "$API_GH/repos/${GH_REPOSITORY}/releases/tags/${TAG_ENC}" > "$RELEASE_JSON"; then
-  tg_text "❌ <b>Harness Build</b>\nTidak menemukan release artifact: <code>$RELEASE_TAG</code>"
+
+release_found=false
+for attempt in $(seq 1 36); do
+  if curl -fsSL \
+      -H "Authorization: Bearer $GITHUB_TOKEN" \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "$API_GH/repos/${GH_REPOSITORY}/releases/tags/${TAG_ENC}" > "$RELEASE_JSON"; then
+    release_found=true
+    break
+  fi
+  sleep 10
+done
+
+if [[ "$release_found" != true ]]; then
+  tg_text "❌ <b>Harness Build</b>\nRelease artifact belum tersedia setelah 6 menit: <code>$RELEASE_TAG</code>"
   [[ -f "$MONITOR" ]] && tg_file "$MONITOR" "📄 Harness monitor result" || true
   exit 0
 fi

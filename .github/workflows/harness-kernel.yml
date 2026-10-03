@@ -107,6 +107,32 @@ on:
         required: false
         type: string
         default: ""
+      ksu_provider:
+        description: "KernelSU provider"
+        required: true
+        type: choice
+        options: [auto, official, kernelsu-next, resukisu, custom]
+        default: auto
+
+      ksu_repo:
+        description: "Custom KernelSU repository"
+        required: false
+        type: string
+        default: ""
+
+      ksu_layout:
+        description: "KernelSU layout"
+        required: true
+        type: choice
+        options: [auto, nested, symlink]
+        default: auto
+
+      ksu_hook_mode:
+        description: "KernelSU hook mode"
+        required: true
+        type: choice
+        options: [auto, kprobe, manual, susfs]
+        default: auto
       package_anykernel:
         description: "Package AnyKernel3"
         required: true
@@ -134,6 +160,7 @@ permissions:
 jobs:
   trigger-harness:
     runs-on: ubuntu-latest
+    timeout-minutes: 140
     steps:
       - name: Checkout CI repository
         uses: actions/checkout@v4
@@ -176,6 +203,10 @@ jobs:
           SCHEDULER_PROFILE: ${{ inputs.scheduler_profile }}
           ENABLE_KSU: ${{ inputs.enable_ksu }}
           KSU_REF: ${{ inputs.ksu_ref }}
+          KSU_PROVIDER: ${{ inputs.ksu_provider }}
+          KSU_REPO: ${{ inputs.ksu_repo }}
+          KSU_LAYOUT: ${{ inputs.ksu_layout }}
+          KSU_HOOK_MODE: ${{ inputs.ksu_hook_mode }}
           PACKAGE_ANYKERNEL: ${{ inputs.package_anykernel }}
           ROM_FAMILY: ${{ inputs.rom_family }}
           ANYKERNEL_PROFILE: ${{ inputs.anykernel_profile }}
@@ -189,7 +220,7 @@ jobs:
             "KERNEL_REPO","KERNEL_BRANCH","KERNEL_REF_TYPE","DEVICE","ARCH","DEFCONFIG","CONFIG_FRAGMENT","JOBS",
             "TOOLCHAIN","TOOLCHAIN_VERSION","LLVM_IAS","CROSS_COMPILE","CROSS_COMPILE_ARM32",
             "CLANG_URL","GCC_URL","APT_PACKAGES","EXTRA_MAKE_ARGS","SCHEDULER_PROFILE",
-            "ENABLE_KSU","KSU_REF","PACKAGE_ANYKERNEL","ROM_FAMILY","ANYKERNEL_PROFILE","ANYKERNEL3_REPO","ANYKERNEL3_REF"
+            "ENABLE_KSU","KSU_REF","KSU_PROVIDER","KSU_REPO","KSU_LAYOUT","KSU_HOOK_MODE","PACKAGE_ANYKERNEL","ROM_FAMILY","ANYKERNEL_PROFILE","ANYKERNEL3_REPO","ANYKERNEL3_REF"
           ]
           payload = {"pipeline": {"identifier": os.environ["PIPELINE_ID"], "variables": [
             {"name": n, "type": "String", "value": os.environ.get(n, "")} for n in names
