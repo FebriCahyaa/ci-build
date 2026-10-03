@@ -1,0 +1,51 @@
+name: Build Custom ROM
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_url:          { description: 'Manifest ROM', required: true, default: 'https://github.com/LineageOS/android.git' }
+      manifest_branch:       { description: 'Branch manifest', required: true, default: 'lineage-22.2' }
+      local_manifest_url:    { description: 'Repo local_manifests (device/vendor/kernel tree)', required: false, default: '' }
+      local_manifest_branch: { description: 'Branch local_manifests', required: false, default: '' }
+      device:                { description: 'Codename device', required: true, default: 'garnet' }
+      lunch_target:          { description: 'Target lunch lengkap', required: true, default: 'lineage_garnet-bp1a-userdebug' }
+      build_cmd:             { description: 'Perintah build', required: true, default: 'mka bacon' }
+      runner:                { description: 'Label runner (self-hosted sangat disarankan)', required: true, default: 'self-hosted' }
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 2160
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bebaskan disk (hanya runner GitHub)
+        if: inputs.runner == 'ubuntu-latest'
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          swap-storage: true
+      - name: Dependensi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git git-lfs \
+            gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libsdl1.2-dev libssl-dev \
+            libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 repo rclone
+      - name: Build
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
+          MANIFEST_URL: ${{ inputs.manifest_url }}
+          MANIFEST_BRANCH: ${{ inputs.manifest_branch }}
+          LOCAL_MANIFEST_URL: ${{ inputs.local_manifest_url }}
+          LOCAL_MANIFEST_BRANCH: ${{ inputs.local_manifest_branch }}
+          DEVICE: ${{ inputs.device }}
+          LUNCH_TARGET: ${{ inputs.lunch_target }}
+          BUILD_CMD: ${{ inputs.build_cmd }}
+          RCLONE_REMOTE: ${{ vars.RCLONE_REMOTE }}
+          ROM_DIR: ${{ github.workspace }}/../rom
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: ./scripts/build_rom.sh

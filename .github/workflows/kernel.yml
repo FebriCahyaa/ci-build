@@ -1,0 +1,54 @@
+name: Build Kernel
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_repo:    { description: 'URL repo kernel', required: true, default: 'https://github.com/USER/kernel_xiaomi_sm7435' }
+      kernel_branch:  { description: 'Branch', required: true, default: 'main' }
+      defconfig:      { description: 'Defconfig', required: true, default: 'garnet_defconfig' }
+      device:         { description: 'Codename device', required: true, default: 'garnet' }
+      enable_ksu:     { description: 'Integrasi KernelSU', type: boolean, default: false }
+      clang_url:      { description: 'URL tarball clang (kosong = clang dari apt)', required: false, default: '' }
+      anykernel_repo: { description: 'Repo AnyKernel3 kamu', required: false, default: 'https://github.com/osm0sis/AnyKernel3' }
+      release:        { description: 'Upload ke GitHub Release', type: boolean, default: true }
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependensi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bc bison flex libssl-dev libelf-dev \
+            clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi zip python3 curl git ccache cpio xz-utils
+      - name: Build
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
+          KERNEL_REPO: ${{ inputs.kernel_repo }}
+          KERNEL_BRANCH: ${{ inputs.kernel_branch }}
+          DEFCONFIG: ${{ inputs.defconfig }}
+          DEVICE: ${{ inputs.device }}
+          ENABLE_KSU: ${{ inputs.enable_ksu }}
+          CLANG_URL: ${{ inputs.clang_url }}
+          ANYKERNEL_REPO: ${{ inputs.anykernel_repo }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: ./scripts/build_kernel.sh
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ inputs.device }}
+          path: work/Kernel-*.zip
+      - name: GitHub Release
+        if: success() && inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="kernel-${{ inputs.device }}-$(date +%Y%m%d-%H%M)"
+          gh release create "$TAG" work/Kernel-*.zip -t "$TAG" -n "Build otomatis, run ${{ github.run_id }}"

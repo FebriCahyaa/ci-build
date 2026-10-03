@@ -1,0 +1,63 @@
+# ROM: JANGAN pakai runtime Cloud (disk/RAM tidak cukup).
+# Pakai Harness Docker Runner di VPS/PC sendiri (min 32GB RAM, 300GB+ SSD).
+pipeline:
+  name: Build ROM
+  identifier: Build_ROM
+  projectIdentifier: default_project
+  orgIdentifier: default
+  properties:
+    ci:
+      codebase:
+        connectorRef: github_connector
+        repoName: ci-build
+        build: <+input>
+  variables:
+    - name: MANIFEST_URL
+      type: String
+      value: <+input>
+    - name: MANIFEST_BRANCH
+      type: String
+      value: <+input>
+    - name: DEVICE
+      type: String
+      value: garnet
+    - name: LUNCH_TARGET
+      type: String
+      value: <+input>
+    - name: LOCAL_MANIFEST_URL
+      type: String
+      value: ""
+  stages:
+    - stage:
+        name: build rom
+        identifier: build_rom
+        type: CI
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Docker
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: build rom
+                  identifier: build_rom
+                  timeout: 10h
+                  spec:
+                    connectorRef: dockerhub_connector
+                    image: ubuntu:22.04   # ganti ke image build AOSP pilihanmu (butuh repo, git, toolchain AOSP)
+                    shell: Bash
+                    envVariables:
+                      TG_BOT_TOKEN: <+secrets.getValue("tg_bot_token")>
+                      TG_CHAT_ID: <+secrets.getValue("tg_chat_id")>
+                      MANIFEST_URL: <+pipeline.variables.MANIFEST_URL>
+                      MANIFEST_BRANCH: <+pipeline.variables.MANIFEST_BRANCH>
+                      DEVICE: <+pipeline.variables.DEVICE>
+                      LUNCH_TARGET: <+pipeline.variables.LUNCH_TARGET>
+                      LOCAL_MANIFEST_URL: <+pipeline.variables.LOCAL_MANIFEST_URL>
+                      RUN_URL: <+pipeline.executionUrl>
+                    command: ./scripts/build_rom.sh

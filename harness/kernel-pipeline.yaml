@@ -1,0 +1,68 @@
+pipeline:
+  name: Build Kernel
+  identifier: Build_Kernel
+  projectIdentifier: default_project   # ganti
+  orgIdentifier: default               # ganti
+  properties:
+    ci:
+      codebase:
+        connectorRef: github_connector # connector GitHub kamu
+        repoName: ci-build
+        build: <+input>
+  variables:
+    - name: KERNEL_REPO
+      type: String
+      value: <+input>
+    - name: KERNEL_BRANCH
+      type: String
+      value: <+input>
+    - name: DEFCONFIG
+      type: String
+      value: garnet_defconfig
+    - name: DEVICE
+      type: String
+      value: garnet
+    - name: ENABLE_KSU
+      type: String
+      value: "false"
+  stages:
+    - stage:
+        name: build
+        identifier: build
+        type: CI
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: deps
+                  identifier: deps
+                  spec:
+                    shell: Bash
+                    command: |
+                      sudo apt-get update
+                      sudo apt-get install -y bc bison flex libssl-dev libelf-dev clang lld llvm \
+                        gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi zip python3 curl git cpio xz-utils
+              - step:
+                  type: Run
+                  name: build kernel
+                  identifier: build_kernel
+                  spec:
+                    shell: Bash
+                    envVariables:
+                      TG_BOT_TOKEN: <+secrets.getValue("tg_bot_token")>
+                      TG_CHAT_ID: <+secrets.getValue("tg_chat_id")>
+                      KERNEL_REPO: <+pipeline.variables.KERNEL_REPO>
+                      KERNEL_BRANCH: <+pipeline.variables.KERNEL_BRANCH>
+                      DEFCONFIG: <+pipeline.variables.DEFCONFIG>
+                      DEVICE: <+pipeline.variables.DEVICE>
+                      ENABLE_KSU: <+pipeline.variables.ENABLE_KSU>
+                      RUN_URL: <+pipeline.executionUrl>
+                    command: ./scripts/build_kernel.sh
