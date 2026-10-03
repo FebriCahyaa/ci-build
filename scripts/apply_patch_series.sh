@@ -13,6 +13,7 @@ UPSTREAM_PROFILE="${UPSTREAM_PROFILE:-auto}"
 ROOT_MANAGER="${ROOT_MANAGER:-none}"
 KSU_REQUIRED="${KSU_REQUIRED:-false}"
 KSU_SUSFS_REQUIRED="${KSU_SUSFS_REQUIRED:-false}"
+KERNEL_REPO="${KERNEL_REPO:-}"
 PHASE="${PHASE:-source}"
 LTO_PLUS="${LTO_PLUS:-false}"
 
@@ -109,8 +110,25 @@ config_apply() {
 }
 
 if [[ "$PHASE" == "source" ]]; then
-  device_series="$PATCH_ROOT/devices/$DEVICE/$KERNEL_MM/series.conf"
-  series_apply "$device_series"
+  case "$PATCH_PROFILE" in
+    none|off|false|"")
+      echo "[patches] device profile disabled (PATCH_PROFILE=$PATCH_PROFILE)"
+      ;;
+    auto)
+      # The Southwest-NG source is already a complete SDM660/Lavender-capable
+      # tree. Do not apply legacy SUSFS-only Lavender patches to it.
+      if [[ "$KERNEL_REPO" == *"pix106/android_kernel_xiaomi_sdm660_southwest-ng"* ]]; then
+        echo "[patches] auto device profile: southwest-ng (no device source patch)"
+      else
+        device_series="$PATCH_ROOT/devices/$DEVICE/$KERNEL_MM/series.conf"
+        series_apply "$device_series"
+      fi
+      ;;
+    *)
+      device_series="$PATCH_ROOT/devices/$PATCH_PROFILE/$KERNEL_MM/series.conf"
+      series_apply "$device_series"
+      ;;
+  esac
 
   if [[ "$KSU_REQUIRED" == "true" && "$ROOT_MANAGER" != "none" ]]; then
     root_series="$PATCH_ROOT/root-manager/$ROOT_MANAGER/$KERNEL_MM/series.conf"
@@ -118,7 +136,16 @@ if [[ "$PHASE" == "source" ]]; then
   fi
 
   case "$UPSTREAM_PROFILE" in
-    auto|codelinaro-sdm660)
+    auto)
+      if [[ "$DEVICE" == "lavender" && "$KERNEL_MM" == "4.19" ]]; then
+        if [[ "$KERNEL_REPO" == *"pix106/android_kernel_xiaomi_sdm660_southwest-ng"* ]]; then
+          echo "[patches] auto upstream profile: southwest-ng (no legacy CodeLinaro patch set)"
+        else
+          series_apply "$PATCH_ROOT/upstream/codelinaro/sdm660-4.19/series.conf"
+        fi
+      fi
+      ;;
+    codelinaro-sdm660)
       if [[ "$DEVICE" == "lavender" && "$KERNEL_MM" == "4.19" ]]; then
         series_apply "$PATCH_ROOT/upstream/codelinaro/sdm660-4.19/series.conf"
       fi

@@ -210,7 +210,7 @@ UPSTREAM_PROFILE=auto \
 ./scripts/start_local_kernel.sh
 ```
 
-The default kernel source is `gianogli/android_kernel_xiaomi_lavender_4.19` on `cr11_lavender-dynamic-root`.
+The default kernel source is `pix106/android_kernel_xiaomi_sdm660_southwest-ng` on `main` (Xiaomi SDM660 / Lavender-capable SouthWest-NG 0.20.1 tree). The default build uses the source tree as-is: `ENABLE_KSU=false`, `PATCH_PROFILE=none`, and `UPSTREAM_PROFILE=none`.
 
 ## Trigger Harness dari local
 

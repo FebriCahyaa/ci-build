@@ -1,13 +1,10 @@
 # Lavender / 4.19
 
-Source: gianogli/android_kernel_xiaomi_lavender_4.19
-Branch: cr11_lavender-dynamic-root
+Source: pix106/android_kernel_xiaomi_sdm660_southwest-ng
+Branch: main
+Version: 4.19.325 / SouthWest-NG 0.20.1
 
-The branch currently ends at:
-
-dc6db28b9395a90ef80ba7c7997d80214ee17a5c
-susfs: fix fsnotify compatibility for kernel 4.19
-
-The patch is kept in the registry so the same CI machinery can build
-earlier Lavender 4.19 sources. On the current branch it is expected to
-be reported as `ALREADY APPLIED`.
+The current source already contains the Lavender device tree and device config.
+This profile intentionally has no source patch series. The previous SUSFS-only
+fsnotify patch belongs to the older gianogli Lavender tree and must not be
+forced onto Southwest-NG.

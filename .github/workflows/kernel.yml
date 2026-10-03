@@ -7,12 +7,12 @@ on:
         description: "Kernel repository URL"
         required: true
         type: string
-        default: "https://github.com/gianogli/android_kernel_xiaomi_lavender_4.19"
+        default: "https://github.com/pix106/android_kernel_xiaomi_sdm660_southwest-ng"
       kernel_branch:
         description: "Kernel branch, tag, or ref"
         required: true
         type: string
-        default: "cr11_lavender-dynamic-root"
+        default: "main"
       device:
         description: "Device/codename label"
         required: true
@@ -86,22 +86,22 @@ on:
         required: true
         type: choice
         options: [false, true, kernelsu-next, resukisu]
-        default: resukisu
+        default: false
       ksu_ref:
         description: "KernelSU provider branch/tag/commit"
         required: false
         type: string
-        default: "cr11_lavender-dynamic-root"
+        default: "main"
       patch_profile:
         description: "Modular source patch profile"
         required: true
         type: string
-        default: "auto"
+        default: "none"
       upstream_profile:
         description: "Upstream patch profile"
         required: true
         type: string
-        default: "auto"
+        default: "none"
       lto_plus:
         description: "Optional LTO+ feature profile"
         required: true

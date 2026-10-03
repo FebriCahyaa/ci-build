@@ -7,31 +7,31 @@ pipeline:
   variables:
     - name: KERNEL_REPO
       type: String
-      value: <+input>
+      value: https://github.com/pix106/android_kernel_xiaomi_sdm660_southwest-ng
 
     - name: KERNEL_BRANCH
       type: String
-      value: <+input>
+      value: main
 
     - name: KERNEL_REF_TYPE
       type: String
-      value: <+input>
+      value: branch
 
     - name: DEVICE
       type: String
-      value: <+input>
+      value: lavender
 
     - name: ARCH
       type: String
-      value: <+input>
+      value: auto
 
     - name: DEFCONFIG
       type: String
-      value: <+input>
+      value: auto
 
     - name: CONFIG_FRAGMENT
       type: String
-      value: <+input>
+      value: auto
 
     - name: JOBS
       type: String
@@ -79,11 +79,11 @@ pipeline:
 
     - name: ENABLE_KSU
       type: String
-      value: <+input>
+      value: false
 
     - name: KSU_REF
       type: String
-      value: <+input>
+      value: main
 
     - name: KSU_PROVIDER
       type: String
@@ -123,11 +123,11 @@ pipeline:
 
     - name: PATCH_PROFILE
       type: String
-      value: auto
+      value: none
 
     - name: UPSTREAM_PROFILE
       type: String
-      value: auto
+      value: none
 
     - name: LTO_PLUS
       type: String

@@ -36,15 +36,18 @@ continues when the reverse patch matches the source.
 
 ## Selection policy
 
-For `PATCH_PROFILE=auto` the builder selects the device profile from
-`DEVICE` + kernel major/minor.
+For `PATCH_PROFILE=none`, no device source patch is applied. This is the default
+for the Southwest-NG source because its Lavender device support is already in the
+source tree. For `PATCH_PROFILE=auto` the builder selects a device profile from
+`DEVICE` + kernel major/minor, except that the Southwest-NG source is recognized
+and kept patch-free.
 
 Root-manager patches are selected only when `KSU_REQUIRED=true` and a
 recognized `KSU_PROVIDER` is active.
 
-The CodeLinaro set is enabled for the Lavender 4.19 profile. The current
-Lavender branch already contains the enclosing CodeLinaro merge, so those
-atomic patches normally show as `ALREADY APPLIED`.
+The CodeLinaro set remains available for legacy Lavender 4.19 builds. It is not
+enabled by default for Southwest-NG; use an explicit upstream profile only after
+verifying that the selected commits are absent from the source.
 
 LTO+ is optional and disabled by default. Enable it with:
 
