@@ -109,7 +109,7 @@ on:
         options: [false, true]
         default: false
       kernel_name:
-        description: "Kernel LOCALVERSION suffix"
+        description: "Kernel display name (maps to localversion-cip)"
         required: false
         type: string
         default: ""
@@ -197,7 +197,9 @@ jobs:
             scripts/detect_defconfig.sh \
             scripts/toolchain_resolver.sh \
             scripts/apply_patch_series.sh \
-            scripts/set_kernel_name.sh
+            scripts/set_kernel_name.sh \
+            scripts/sync_localversion_files.sh \
+            scripts/bump_localversion_st.sh
 
           case "${ENABLE_KSU}" in
             false)

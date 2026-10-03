@@ -4,6 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 KERNEL_NAME_FILE="${KERNEL_NAME_FILE:-$REPO_ROOT/kernel-name}"
+KERNEL_LOCALVERSION_FILE="${KERNEL_LOCALVERSION_FILE:-$REPO_ROOT/localversion-cip}"
 CONFIG_FILE="${CONFIG_FILE:-}"
 KERNEL_NAME="${KERNEL_NAME:-}"
 
@@ -15,6 +16,8 @@ Usage:
 
 Behavior:
   empty/auto name -> read from kernel-name in the CI repository
+  the resolved name is stored in localversion-cip as a Kbuild suffix
+  CONFIG_LOCALVERSION is cleared to avoid duplicating the source LOCALVERSION
   blank/missing kernel-name -> no-op
   name without leading '-' -> '-'<name>
 EOF
@@ -73,7 +76,9 @@ case "$KERNEL_NAME" in
     ;;
 esac
 
-export KERNEL_NAME
+export KERNEL_NAME KERNEL_LOCALVERSION_FILE
+
+printf '%s\n' "$KERNEL_NAME" > "$KERNEL_LOCALVERSION_FILE"
 
 python3 - "$CONFIG_FILE" <<'PY'
 from pathlib import Path
@@ -82,10 +87,8 @@ import re
 import sys
 
 path = Path(sys.argv[1])
-name = os.environ["KERNEL_NAME"]
-
 text = path.read_text(encoding="utf-8")
-line = f'CONFIG_LOCALVERSION="{name}"'
+line = 'CONFIG_LOCALVERSION=""'
 
 if re.search(r'^CONFIG_LOCALVERSION=', text, flags=re.MULTILINE):
     text = re.sub(r'^CONFIG_LOCALVERSION=.*$', line, text, count=1, flags=re.MULTILINE)
@@ -93,5 +96,6 @@ else:
     text += ("\n" if text and not text.endswith("\n") else "") + line + "\n"
 
 path.write_text(text, encoding="utf-8")
-print(f"[kernel-name] CONFIG_LOCALVERSION={line.removeprefix('CONFIG_LOCALVERSION=')}")
+print(f"[kernel-name] localversion-cip={os.environ['KERNEL_NAME']}")
+print("[kernel-name] CONFIG_LOCALVERSION=\"\" (source-style localversion files remain authoritative)")
 PY

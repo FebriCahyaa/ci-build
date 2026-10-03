@@ -687,6 +687,12 @@ if ! CONFIG_FILE="$OUT/.config" \
   fail "kernel name"
 fi
 
+# Mirror the source repository's localversion-cip/localversion-st mechanism.
+# Kbuild reads localversion* from the kernel source tree, not from the CI repo.
+if ! "$SCRIPT_DIR/sync_localversion_files.sh" "$SRC_DIR" 2>&1 | tee -a "$BUILD_LOG"; then
+  fail "localversion sync"
+fi
+
 # ------------------------------------------------------------
 # Verify required KernelSU/SUSFS symbols AFTER config merge.
 # ------------------------------------------------------------

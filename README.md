@@ -166,12 +166,9 @@ LTO_PLUS=false
 KERNEL_NAME=""
 ```
 
-`KERNEL_NAME` changes `CONFIG_LOCALVERSION` in the generated build config.
-For example:
-
-```bash
-KERNEL_NAME="-Febri-Lavender" ./scripts/build_kernel.sh
-```
+`KERNEL_NAME` resolves to the CI repository's `kernel-name` and is written to
+`localversion-cip`. The generated `CONFIG_LOCALVERSION` is cleared so the
+source-style `localversion*` files remain authoritative.
 
 Harness also exposes `PATCH_PROFILE`, `UPSTREAM_PROFILE`, `LTO_PLUS`, and
 `KERNEL_NAME` as pipeline variables.
@@ -186,9 +183,36 @@ From a checkout containing this bundle:
 
 The installer backs up modified files under `.ci-build-backup-YYYYMMDD-HHMMSS/`.
 
-## Kernel name
+## Kernel name and codename
 
-`kernel-name` is the single source of truth for the kernel `CONFIG_LOCALVERSION` suffix when no workflow-specific name is supplied. Put one value per file, without surrounding quotes; the build helper adds a leading `-` automatically when needed.
+This repository mirrors the SouthWest-NG source's `localversion-cip` /
+`localversion-st` mechanism. The first Zairenkai build is configured as:
+
+```text
+kernel-name    = Zairenkai
+localversion-cip = -Zairenkai
+kernel-codename = VEGA
+kernel-build    = 1
+localversion-st  = -VEGA1
+```
+
+During a build, `scripts/set_kernel_name.sh` keeps `kernel-name` and
+`localversion-cip` aligned, then `scripts/sync_localversion_files.sh` copies
+`localversion-cip` and `localversion-st` into the kernel source tree.
+The resulting Kbuild release suffix is therefore `-Zairenkai-VEGA1` before
+any source-controlled SCM suffix is added.
+
+To bump the codename build number:
+
+```bash
+./scripts/bump_localversion_st.sh --bump
+```
+
+To explicitly set the first build:
+
+```bash
+./scripts/bump_localversion_st.sh --codename VEGA --build 1
+```
 
 ## Local trigger
 
@@ -203,10 +227,10 @@ Use the helper below to send the complete kernel build parameter set from local 
 Override values with environment variables, for example:
 
 ```bash
-KERNEL_NAME=Febri-Lavender \
-ENABLE_KSU=resukisu \
-PATCH_PROFILE=auto \
-UPSTREAM_PROFILE=auto \
+KERNEL_NAME=Zairenkai \
+ENABLE_KSU=false \
+PATCH_PROFILE=none \
+UPSTREAM_PROFILE=none \
 ./scripts/start_local_kernel.sh
 ```
 

@@ -11,6 +11,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-$ARTIFACT_DIR}"
 DEVICE="${DEVICE:-generic}"
 KERNEL_VERSION="${KERNEL_VERSION:-}"
 ROM_FAMILY="${ROM_FAMILY:-oss}"
+KERNEL_NAME="${KERNEL_NAME:-Zairenkai}"
 ANYKERNEL_PROFILE_REQUESTED="${ANYKERNEL_PROFILE:-auto}"
 ANYKERNEL3_REPO="${ANYKERNEL3_REPO:-https://github.com/osm0sis/AnyKernel3.git}"
 ANYKERNEL3_REF_REQUESTED="${ANYKERNEL3_REF:-}"
@@ -88,7 +89,7 @@ fi
 
 cat > "$AK_WORK/banner" <<EOF_BANNER
 ============================================
-              CI-Build AnyKernel3
+             $KERNEL_NAME AnyKernel3
 ============================================
 Profile : $PROFILE_ID
 Device  : $DEVICE

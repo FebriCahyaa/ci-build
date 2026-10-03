@@ -66,6 +66,20 @@ jobs:
           test -x scripts/set_kernel_name.sh
           test -f kernel-name
           test "$(awk 'NF && $0 !~ /^[[:space:]]*#/ {count++} END {print count+0}' kernel-name)" -eq 1
+          test -f kernel-codename
+          test "$(awk 'NF && $0 !~ /^[[:space:]]*#/ {count++} END {print count+0}' kernel-codename)" -eq 1
+          test -f kernel-build
+          test "$(awk 'NF && $0 !~ /^[[:space:]]*#/ {count++} END {print count+0}' kernel-build)" -eq 1
+          test -f localversion-cip
+          test "$(cat kernel-name)" = "Zairenkai"
+          test "$(cat localversion-cip)" = "-$(cat kernel-name)"
+          test -f localversion-st
+          test "$(cat kernel-codename)" = "$(sed -n '1p' kernel-codename)"
+          test "$(cat kernel-build)" = "$(sed -n '1p' kernel-build)"
+          test "$(cat localversion-st)" = "-$(cat kernel-codename)$(cat kernel-build)"
+          test "$(cat kernel-build)" -ge 1
+          test -x scripts/sync_localversion_files.sh
+          test -x scripts/bump_localversion_st.sh
           ! grep -R -nE '^@@$' patches --include='*.patch'
           test -f patches/devices/lavender/4.19/series.conf
           test -f patches/root-manager/resukisu/4.19/series.conf

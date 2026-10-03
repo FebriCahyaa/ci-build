@@ -109,7 +109,7 @@ on:
         options: [false, true]
         default: false
       kernel_name:
-        description: "Kernel LOCALVERSION suffix"
+        description: "Kernel display name (maps to localversion-cip)"
         required: false
         type: string
         default: ""
