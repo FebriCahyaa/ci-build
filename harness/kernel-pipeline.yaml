@@ -148,6 +148,12 @@ pipeline:
                         "$CI_BUILD_DIR/scripts/detect_defconfig.sh" \
                         "$CI_BUILD_DIR/scripts/toolchain_resolver.sh" \
                         "$CI_BUILD_DIR/scripts/publish_ci_release.sh"
+                      chmod +x "$CI_BUILD_DIR/scripts/github_harness_preflight.sh"
+
+                      echo "==> GitHub credential preflight"
+                      GH_TOKEN="$GH_TOKEN" \
+                      GH_REPOSITORY="$GH_REPOSITORY" \
+                        "$CI_BUILD_DIR/scripts/github_harness_preflight.sh"
 
                       RELEASE_DIR="$PWD/work/ci-release-assets"
                       RELEASE_TAG="harness-$HARNESS_EXECUTION_ID"
