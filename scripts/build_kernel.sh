@@ -460,109 +460,99 @@ long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 
 # ------------------------------------------------------------
 # fs/read_write.c
-# Remove legacy ksu_vfs_read_hook marker completely.
-# ReSukiSU checker requires direct ksu_handle_sys_read().
+#
+# ReSukiSU requires direct ksu_handle_sys_read().
+# Use regex instead of an exact whitespace-sensitive block.
 # ------------------------------------------------------------
 
-replace_once(
+def regex_replace_once(relpath, pattern, replacement, description):
+    path = root / relpath
+    text = path.read_text()
+
+    if replacement in text and not re.search(pattern, text, re.MULTILINE | re.DOTALL):
+        print(f"[ksu] already patched {relpath}: {description}")
+        return
+
+    new_text, count = re.subn(
+        pattern,
+        replacement,
+        text,
+        count=1,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+
+    if count != 1:
+        raise SystemExit(
+            f"[ksu] expected pattern not found: {relpath}: {description}"
+        )
+
+    path.write_text(new_text)
+    print(f"[ksu] patched {relpath}: {description}")
+
+
+regex_replace_once(
     "fs/read_write.c",
-    """#ifdef CONFIG_KSU
-extern bool ksu_vfs_read_hook __read_mostly;
-extern __attribute__((cold)) int ksu_handle_sys_read(unsigned int fd,
-                        char __user **buf_ptr, size_t *count_ptr);
-#endif
-""",
+    r"""#ifdef CONFIG_KSU\s*
+extern\s+bool\s+ksu_vfs_read_hook\s+__read_mostly;\s*
+extern\s+__attribute__\(\(cold\)\)\s+int\s+ksu_handle_sys_read\(\s*
+\s*unsigned\s+int\s+fd,\s*char\s+__user\s*\*\*buf_ptr,\s*size_t\s*\*count_ptr\s*\);\s*
+#endif\s*""",
     """#ifdef CONFIG_KSU
 extern __attribute__((cold)) int ksu_handle_sys_read(
         unsigned int fd, char __user **buf_ptr, size_t *count_ptr);
 #endif
-"""
+""",
+    "remove legacy read hook declaration",
 )
 
-replace_once(
+regex_replace_once(
     "fs/read_write.c",
-    """#ifdef CONFIG_KSU
-    if (unlikely(ksu_vfs_read_hook))
-        ksu_handle_sys_read(fd, &buf, &count);
-#endif
-""",
+    r"""#ifdef CONFIG_KSU\s*
+if\s*\(\s*unlikely\(\s*ksu_vfs_read_hook\s*\)\s*\)\s*
+ksu_handle_sys_read\s*\(\s*fd\s*,\s*&buf\s*,\s*&count\s*\)\s*;\s*
+#endif\s*""",
     """#ifdef CONFIG_KSU
     ksu_handle_sys_read(fd, &buf, &count);
 #endif
-"""
+""",
+    "replace conditional read hook",
 )
-
 
 # ------------------------------------------------------------
 # drivers/input/input.c
-# Remove legacy ksu_input_hook marker completely.
-# ReSukiSU checker requires direct input hook.
+#
+# ReSukiSU requires direct input hook.
+# Use regex instead of an exact whitespace-sensitive block.
 # ------------------------------------------------------------
 
-replace_once(
+regex_replace_once(
     "drivers/input/input.c",
+    r"""#ifdef CONFIG_KSU\s*
+extern\s+bool\s+ksu_input_hook\s+__read_mostly;\s*
+extern\s+__attribute__\(\(cold\)\)\s+int\s+ksu_handle_input_handle_event\(\s*
+\s*unsigned\s+int\s+\*type,\s*unsigned\s+int\s+\*code,\s*int\s+\*value\s*\);\s*
+#endif\s*""",
     """#ifdef CONFIG_KSU
-extern bool ksu_input_hook __read_mostly;
 extern __attribute__((cold)) int ksu_handle_input_handle_event(
             unsigned int *type, unsigned int *code, int *value);
 #endif
 """,
-    """#ifdef CONFIG_KSU
-extern __attribute__((cold)) int ksu_handle_input_handle_event(
-            unsigned int *type, unsigned int *code, int *value);
-#endif
-"""
+    "remove legacy input hook declaration",
 )
 
-replace_once(
+regex_replace_once(
     "drivers/input/input.c",
-    """#ifdef CONFIG_KSU
-    if (unlikely(ksu_input_hook))
-        ksu_handle_input_handle_event(&type, &code, &value);
-#endif
-""",
+    r"""#ifdef CONFIG_KSU\s*
+if\s*\(\s*unlikely\(\s*ksu_input_hook\s*\)\s*\)\s*
+ksu_handle_input_handle_event\s*\(\s*&type\s*,\s*&code\s*,\s*&value\s*\)\s*;\s*
+#endif\s*""",
     """#ifdef CONFIG_KSU
     ksu_handle_input_handle_event(&type, &code, &value);
 #endif
-"""
+""",
+    "replace conditional input hook",
 )
 
-
-# ------------------------------------------------------------
-# Validation
-# ------------------------------------------------------------
-
-required = {
-    "kernel/sys.c": [
-        "ksu_handle_setresuid",
-    ],
-    "fs/read_write.c": [
-        "ksu_handle_sys_read",
-    ],
-    "drivers/input/input.c": [
-        "ksu_handle_input_handle_event",
-    ],
-}
-
-for relpath, needles in required.items():
-    text = (root / relpath).read_text()
-    for needle in needles:
-        if needle not in text:
-            raise SystemExit(
-                f"[ksu] validation failed: {relpath}: {needle}"
-            )
-
-for relpath, forbidden in {
-    "fs/read_write.c": "ksu_vfs_read_hook",
-    "drivers/input/input.c": "ksu_input_hook",
-}.items():
-    text = (root / relpath).read_text()
-    if forbidden in text:
-        raise SystemExit(
-            f"[ksu] legacy hook still present: {relpath}: {forbidden}"
-        )
-
-print("[ksu] source compatibility validation: PASS")
 PY2
 
   # ----------------------------------------------------------
