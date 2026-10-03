@@ -100,11 +100,6 @@ on:
         options: [false, true]
         default: false
 
-      susfs_ref:
-        description: "SUSFS ref (4.19: v1.5.5-compatible pinned commit)"
-        required: false
-        type: string
-        default: "001e69919c6271f690fd00b17e4c721c9e599152"
       patch_profile:
         description: "Modular source patch profile"
         required: true
@@ -143,11 +138,6 @@ on:
         required: true
         type: string
         default: "auto"
-      anykernel3_ref:
-        description: "AnyKernel3 branch, tag, or commit"
-        required: true
-        type: string
-        default: "master"
 permissions:
   contents: read
 
@@ -207,15 +197,15 @@ jobs:
           ENABLE_KSU: ${{ inputs.enable_ksu }}
           KSU_REF: ${{ inputs.ksu_ref }}
           ENABLE_SUSFS: ${{ inputs.enable_susfs }}
-          SUSFS_REF: ${{ inputs.susfs_ref }}
+          SUSFS_REF: 001e69919c6271f690fd00b17e4c721c9e599152
           KSU_REPO: ""
           KSU_LAYOUT: auto
           KSU_HOOK_MODE: auto
           PACKAGE_ANYKERNEL: ${{ inputs.package_anykernel }}
           ROM_FAMILY: ${{ inputs.rom_family }}
           ANYKERNEL_PROFILE: ${{ inputs.anykernel_profile }}
-          ANYKERNEL3_REPO: https://github.com/osm0sis/AnyKernel3
-          ANYKERNEL3_REF: ${{ inputs.anykernel3_ref }}
+          ANYKERNEL3_REPO: local
+          ANYKERNEL3_REF: vendored
         run: |
           set -euo pipefail
           python3 - <<'PY'
