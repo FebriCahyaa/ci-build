@@ -112,6 +112,22 @@ on:
         required: true
         type: boolean
         default: false
+      rom_family:
+        description: "ROM family for AnyKernel profile selection"
+        required: true
+        type: choice
+        options: [auto, oss, hyperos, miui, custom-android, legacy]
+        default: auto
+      anykernel_profile:
+        description: "AnyKernel profile"
+        required: true
+        type: string
+        default: "auto"
+      anykernel3_ref:
+        description: "AnyKernel3 branch, tag, or commit"
+        required: true
+        type: string
+        default: "master"
       anykernel_repo:
         description: "AnyKernel3 repository"
         required: false
@@ -155,6 +171,10 @@ jobs:
           ENABLE_KSU: ${{ inputs.enable_ksu }}
           KSU_REF: ${{ inputs.ksu_ref }}
           PACKAGE_ANYKERNEL: ${{ inputs.package_anykernel }}
+          ROM_FAMILY: ${{ inputs.rom_family }}
+          ANYKERNEL_PROFILE: ${{ inputs.anykernel_profile }}
+          ANYKERNEL3_REPO: ${{ inputs.anykernel_repo }}
+          ANYKERNEL3_REF: ${{ inputs.anykernel3_ref }}
           ANYKERNEL_REPO: ${{ inputs.anykernel_repo }}
           ANYKERNEL_BRANCH: ${{ inputs.anykernel_branch }}
         run: |
@@ -165,7 +185,7 @@ jobs:
             "KERNEL_REPO","KERNEL_BRANCH","KERNEL_REF_TYPE","DEVICE","ARCH","DEFCONFIG","CONFIG_FRAGMENT","JOBS",
             "TOOLCHAIN","TOOLCHAIN_VERSION","LLVM_IAS","CROSS_COMPILE","CROSS_COMPILE_ARM32",
             "CLANG_URL","GCC_URL","APT_PACKAGES","EXTRA_MAKE_ARGS","SCHEDULER_PROFILE",
-            "ENABLE_KSU","KSU_REF","PACKAGE_ANYKERNEL","ANYKERNEL_REPO","ANYKERNEL_BRANCH"
+            "ENABLE_KSU","KSU_REF","PACKAGE_ANYKERNEL","ROM_FAMILY","ANYKERNEL_PROFILE","ANYKERNEL3_REPO","ANYKERNEL3_REF","ANYKERNEL_REPO","ANYKERNEL_BRANCH"
           ]
           payload = {"pipeline": {"identifier": os.environ["PIPELINE_ID"], "variables": [
             {"name": n, "type": "String", "value": os.environ.get(n, "")} for n in names

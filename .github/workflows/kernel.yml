@@ -113,6 +113,22 @@ on:
         required: true
         type: boolean
         default: false
+      rom_family:
+        description: "ROM family for AnyKernel profile selection"
+        required: true
+        type: choice
+        options: [auto, oss, hyperos, miui, custom-android, legacy]
+        default: auto
+      anykernel_profile:
+        description: "AnyKernel profile (auto = device/kernel/ROM detection)"
+        required: true
+        type: string
+        default: "auto"
+      anykernel3_ref:
+        description: "AnyKernel3 branch, tag, or commit"
+        required: true
+        type: string
+        default: "master"
       anykernel_repo:
         description: "AnyKernel3 repository"
         required: false
@@ -171,6 +187,10 @@ jobs:
           ENABLE_KSU: ${{ inputs.enable_ksu }}
           KSU_REF: ${{ inputs.ksu_ref }}
           PACKAGE_ANYKERNEL: ${{ inputs.package_anykernel }}
+          ROM_FAMILY: ${{ inputs.rom_family }}
+          ANYKERNEL_PROFILE: ${{ inputs.anykernel_profile }}
+          ANYKERNEL3_REPO: ${{ inputs.anykernel_repo }}
+          ANYKERNEL3_REF: ${{ inputs.anykernel3_ref }}
           ANYKERNEL_REPO: ${{ inputs.anykernel_repo }}
           ANYKERNEL_BRANCH: ${{ inputs.anykernel_branch }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -184,5 +204,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: kernel-${{ inputs.device }}
-          path: work/Kernel-${{ inputs.device }}-*.tar.gz
-          if-no-files-found: error
+          path: |
+            work/Kernel-${{ inputs.device }}-*.tar.gz
+            work/artifacts/Kernel-${{ inputs.device }}-*-AnyKernel3.zip
+          if-no-files-found: warn

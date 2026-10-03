@@ -68,6 +68,18 @@ pipeline:
     - name: PACKAGE_ANYKERNEL
       type: String
       value: "false"
+    - name: ROM_FAMILY
+      type: String
+      value: auto
+    - name: ANYKERNEL_PROFILE
+      type: String
+      value: auto
+    - name: ANYKERNEL3_REPO
+      type: String
+      value: https://github.com/osm0sis/AnyKernel3
+    - name: ANYKERNEL3_REF
+      type: String
+      value: master
     - name: ANYKERNEL_REPO
       type: String
       value: https://github.com/osm0sis/AnyKernel3
@@ -121,6 +133,10 @@ pipeline:
                       ENABLE_KSU: <+pipeline.variables.ENABLE_KSU>
                       KSU_REF: <+pipeline.variables.KSU_REF>
                       PACKAGE_ANYKERNEL: <+pipeline.variables.PACKAGE_ANYKERNEL>
+                      ROM_FAMILY: <+pipeline.variables.ROM_FAMILY>
+                      ANYKERNEL_PROFILE: <+pipeline.variables.ANYKERNEL_PROFILE>
+                      ANYKERNEL3_REPO: <+pipeline.variables.ANYKERNEL3_REPO>
+                      ANYKERNEL3_REF: <+pipeline.variables.ANYKERNEL3_REF>
                       ANYKERNEL_REPO: <+pipeline.variables.ANYKERNEL_REPO>
                       ANYKERNEL_BRANCH: <+pipeline.variables.ANYKERNEL_BRANCH>
                       RUN_URL: <+pipeline.executionUrl>

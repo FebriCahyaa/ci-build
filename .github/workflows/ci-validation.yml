@@ -32,6 +32,14 @@ jobs:
           set -euo pipefail
           find scripts -maxdepth 1 -type f -name '*.sh' -print0 | xargs -0 -r shellcheck -S error
 
+      - name: AnyKernel profile selection
+        run: |
+          set -euo pipefail
+          test "$(DEVICE=lavender KERNEL_VERSION=4.4.325 ROM_FAMILY=legacy ANYKERNEL_PROFILE=auto ./scripts/select_anykernel_profile.sh | xargs basename)" = "lavender-4.4.conf"
+          test "$(DEVICE=lavender KERNEL_VERSION=4.19.325 ROM_FAMILY=custom-android ANYKERNEL_PROFILE=auto ./scripts/select_anykernel_profile.sh | xargs basename)" = "lavender-4.19.conf"
+          test "$(DEVICE=garnet KERNEL_VERSION=5.10.0 ROM_FAMILY=oss ANYKERNEL_PROFILE=auto ./scripts/select_anykernel_profile.sh | xargs basename)" = "garnet-oss.conf"
+          test "$(DEVICE=garnet KERNEL_VERSION=5.10.0 ROM_FAMILY=hyperos ANYKERNEL_PROFILE=auto ./scripts/select_anykernel_profile.sh | xargs basename)" = "garnet-hyperos.conf"
+
       - name: YAML parse
         run: |
           set -euo pipefail

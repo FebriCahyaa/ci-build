@@ -123,3 +123,17 @@ Kernel refs support `auto`, `branch`, `tag`, and `commit`. In `auto` mode, a 40-
 The toolchain resolver now returns the selected compiler directory to the caller, so downloaded AOSP, Proton, Neutron, and custom toolchains are actually placed first on `PATH` during compilation. The selected LLVM and LLVM IAS mode is also propagated from the resolver.
 
 The validation workflow checks Bash syntax, ShellCheck errors, and YAML parseability before a kernel build is attempted.
+
+
+## Custom AnyKernel3
+
+Kernel packaging uses reusable profiles under `anykernel/profiles/`:
+
+- `lavender-4.4`
+- `lavender-4.19`
+- `garnet-oss`
+- `garnet-hyperos`
+
+Set `ANYKERNEL_PROFILE=auto` to select a profile from the device, kernel version, and ROM family. Set `ANYKERNEL3_REF` to a branch, tag, or commit to pin the AnyKernel3 backend revision. The backend is fetched at packaging time; it is not vendored into this repository.
+
+Profile selection is packaging metadata only and does not guarantee boot or flashing compatibility. Validate the exact boot format, AVB/vbmeta state, slot behavior, rollback requirements, kernel, DTBO, and target ROM before flashing.

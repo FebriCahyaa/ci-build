@@ -27,8 +27,12 @@ SCHEDULER_PROFILE="${SCHEDULER_PROFILE:-auto}"
 ENABLE_KSU="${ENABLE_KSU:-false}"
 KSU_REF="${KSU_REF:-}"
 PACKAGE_ANYKERNEL="${PACKAGE_ANYKERNEL:-false}"
+ROM_FAMILY="${ROM_FAMILY:-oss}"
+ANYKERNEL_PROFILE="${ANYKERNEL_PROFILE:-auto}"
 ANYKERNEL_REPO="${ANYKERNEL_REPO:-https://github.com/osm0sis/AnyKernel3}"
 ANYKERNEL_BRANCH="${ANYKERNEL_BRANCH:-master}"
+ANYKERNEL3_REPO="${ANYKERNEL3_REPO:-$ANYKERNEL_REPO}"
+ANYKERNEL3_REF="${ANYKERNEL3_REF:-$ANYKERNEL_BRANCH}"
 BUILD_ENV="${BUILD_ENV:-}"
 RUN_URL="${RUN_URL:-}"
 
@@ -241,17 +245,20 @@ for item in "$ARTIFACTS/Image" "$ARTIFACTS/Image.gz" "$ARTIFACTS/Image.lz4" "$AR
 done
 [[ -n "$IMAGE" ]] || fail "kernel image not found"
 
-# ---- Optional AnyKernel3 ----
+# ---- Optional Custom AnyKernel3 ----
 if [[ "$PACKAGE_ANYKERNEL" == "true" ]]; then
-  rm -rf "$WORK/AnyKernel3"
-  git clone --depth=1 --branch "$ANYKERNEL_BRANCH" "$ANYKERNEL_REPO" "$WORK/AnyKernel3" || fail "AnyKernel clone"
-  cp -f "$IMAGE" "$WORK/AnyKernel3/$(basename "$IMAGE")"
-  [[ -f "$ARTIFACTS/dtbo.img" ]] && cp -f "$ARTIFACTS/dtbo.img" "$WORK/AnyKernel3/"
-  (
-    cd "$WORK/AnyKernel3"
-    rm -rf .git
-    zip -r9 "$ARTIFACTS/Kernel-${DEVICE}-$(date +%Y%m%d-%H%M).zip" . -x '*.git*' >/dev/null
-  ) || fail "AnyKernel package"
+  [[ -x "$SCRIPT_DIR/build_anykernel.sh" ]] || fail "Custom AnyKernel packer missing"
+  ARTIFACT_DIR="$ARTIFACTS" \
+  OUTPUT_DIR="$ARTIFACTS" \
+  WORK_DIR="$WORK" \
+  DEVICE="$DEVICE" \
+  KERNEL_VERSION="$DETECTED_KERNEL_VERSION" \
+  ROM_FAMILY="$ROM_FAMILY" \
+  ANYKERNEL_PROFILE="$ANYKERNEL_PROFILE" \
+  ANYKERNEL3_REPO="$ANYKERNEL3_REPO" \
+  ANYKERNEL3_REF="$ANYKERNEL3_REF" \
+  KERNEL_IMAGE="$IMAGE" \
+  "$SCRIPT_DIR/build_anykernel.sh" >> "$BUILD_LOG" 2>&1 || fail "AnyKernel package"
 fi
 
 ARCHIVE="$WORK/Kernel-${DEVICE}-$(date +%Y%m%d-%H%M).tar.gz"
