@@ -102,6 +102,10 @@ mkdir -p "$WORK" "$ARTIFACTS"
 
 export CI_HEARTBEAT_SECONDS="${CI_HEARTBEAT_SECONDS:-15}"
 
+# Harness workspaces can lose Git executable bits when CI source bundles are
+# transferred between systems. Restore the required helper permissions locally.
+chmod +x   "$SCRIPT_DIR/run_with_heartbeat.sh"   "$SCRIPT_DIR/sync_localversion_files.sh"   "$SCRIPT_DIR/apply_patch_series.sh"   "$SCRIPT_DIR/toolchain_resolver.sh"   "$SCRIPT_DIR/detect_defconfig.sh"   "$SCRIPT_DIR/set_kernel_name.sh"   2>/dev/null || true
+
 ci_phase() {
   local label="$1"
   echo "[CI-PHASE] ${label}" | tee -a "$BUILD_LOG"
@@ -717,7 +721,14 @@ fi
 
 # Mirror the source repository's localversion-cip/localversion-st mechanism.
 # Kbuild reads localversion* from the kernel source tree, not from the CI repo.
-if ! "$SCRIPT_DIR/sync_localversion_files.sh" "$SRC_DIR" 2>&1 | tee -a "$BUILD_LOG"; then
+if [[ ! -f "$SCRIPT_DIR/sync_localversion_files.sh" ]]; then
+  fail "localversion sync helper missing"
+fi
+
+# Harness may materialize this helper without its executable bit. Run it
+# explicitly through bash so the localversion stage is independent of archive
+# permission preservation.
+if ! bash "$SCRIPT_DIR/sync_localversion_files.sh" "$SRC_DIR" 2>&1 | tee -a "$BUILD_LOG"; then
   fail "localversion sync"
 fi
 

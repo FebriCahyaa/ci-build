@@ -621,6 +621,16 @@ def current_node(
     if active_nodes:
         active_nodes.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
         _depth, stage, name, _state, _kind = active_nodes[0]
+
+        # Harness may return the real step as a top-level node without its
+        # parent stage. The workflow declares the canonical stage/step names,
+        # so restore that relationship instead of showing a blank stage.
+        if not stage and name.casefold() == EXPECTED_STEP_NAME.casefold():
+            return EXPECTED_STAGE_NAME, name
+
+        if not stage and name.casefold() == "build universal kernel":
+            return EXPECTED_STAGE_NAME, EXPECTED_STEP_NAME
+
         return stage, name
 
     if norm(pipeline_status) in RUNNING_STATES:
@@ -750,6 +760,10 @@ def _telegram_request(
                 pass
             last_error = f"HTTP {exc.code}: {body_text or exc.reason}"
             TG_LAST_ERROR = last_error
+
+            if exc.code == 400 and "message is not modified" in body_text.lower():
+                TG_LAST_ERROR = ""
+                return {"ok": True, "result": {}}
 
             if exc.code == 429:
                 retry_after = 1
@@ -918,7 +932,7 @@ def progress_bar(
     total: int,
     frame: int,
 ) -> tuple[str, str]:
-    """Render real execution progress only; never animate fake completion."""
+    """Show real completion plus a visible live activity indicator."""
     state = norm(status)
 
     if total > 0:
@@ -926,12 +940,66 @@ def progress_bar(
         if state not in TERMINAL:
             pct = min(pct, 99)
         pct = max(0, min(100, pct))
+
+        # A single active Harness step has no trustworthy sub-step percentage.
+        # Keep the numeric completion honest while animating a moving cursor so
+        # Telegram visibly changes during a long compile.
+        if state in RUNNING_STATES and done < total:
+            span = max(1, BAR_WIDTH * 2 - 2)
+            pos = frame % span
+            if pos >= BAR_WIDTH:
+                pos = span - pos
+            cells = ["░"] * BAR_WIDTH
+            cells[pos] = "█"
+            return "".join(cells), f"{pct:3d}% LIVE"
+
         filled = int(round(BAR_WIDTH * pct / 100))
         return ("█" * filled + "░" * (BAR_WIDTH - filled), f"{pct:3d}%")
 
-    # No executable-step telemetry yet. Keep this explicit instead of
-    # presenting an animated bar that looks like numerical progress.
+    if state in RUNNING_STATES:
+        span = max(1, BAR_WIDTH * 2 - 2)
+        pos = frame % span
+        if pos >= BAR_WIDTH:
+            pos = span - pos
+        cells = ["░"] * BAR_WIDTH
+        cells[pos] = "█"
+        return "".join(cells), "LIVE"
+
     return ("░" * BAR_WIDTH, "LIVE")
+
+
+def canonical_monitor_tree(
+    raw_nodes: list[tuple[int, str, str, str, str]],
+    pipeline_status: str,
+    stage: str,
+    step: str,
+) -> list[tuple[str, str, list[tuple[str, str]]]]:
+    """Render the workflow's real execution path, excluding Harness plumbing."""
+    state = norm(pipeline_status) or "UNKNOWN"
+    stage_name = stage.strip() or EXPECTED_STAGE_NAME
+    step_name = step.strip() or EXPECTED_STEP_NAME
+
+    stage_state = state
+    step_state = state
+
+    for _depth, raw_stage, name, raw_state, kind in raw_nodes:
+        rs = norm(raw_state)
+        if not rs:
+            continue
+        if name.casefold() == EXPECTED_STAGE_NAME.casefold():
+            stage_state = raw_state
+        if name.casefold() == EXPECTED_STEP_NAME.casefold():
+            step_state = raw_state
+        if kind == "stage" and raw_stage.casefold() == EXPECTED_STAGE_NAME.casefold():
+            stage_state = raw_state
+
+    # For this workflow there is one real executable step. A terminal pipeline
+    # state is authoritative even when Harness omits the child node.
+    if state in TERMINAL:
+        stage_state = pipeline_status
+        step_state = pipeline_status
+
+    return [(stage_name, stage_state, [(step_name, step_state)])]
 
 
 def render_tree(
@@ -1172,10 +1240,13 @@ def main() -> int:
 
                 status = active_nodes[0][3]
 
-        # Normalize state before the secondary GitHub Release check.
-        # This prevents the first polling cycle from raising UnboundLocalError.
+        # Normalize the state before all completion/progress decisions.
         state = norm(status) or "UNKNOWN"
 
+        # Keep the user-facing tree focused on the actual workflow path.
+        tree = canonical_monitor_tree(raw_nodes, state, stage, step)
+
+        # The normalized live state is now available for the release check.
         err = error_of(details) or error_of(graph)
         elapsed = int(time.time() - started)
 
