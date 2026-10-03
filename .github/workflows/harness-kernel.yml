@@ -38,7 +38,7 @@ jobs:
           HARNESS_ACCOUNT: ${{ secrets.HARNESS_ACCOUNT_ID }}
           HARNESS_ORG: default
           HARNESS_PROJECT: ci_build
-          PIPELINE_ID: AndroidKernelBuild
+          PIPELINE_ID: Universal_Kernel_Build
           KERNEL_REPO: ${{ inputs.kernel_repo }}
           KERNEL_BRANCH: ${{ inputs.kernel_branch }}
           DEVICE: ${{ inputs.device }}
