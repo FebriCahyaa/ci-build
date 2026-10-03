@@ -11,6 +11,20 @@ ARCH="${ARCH:-auto}"
 DEFCONFIG="${DEFCONFIG:-auto}"
 CONFIG_FRAGMENT="${CONFIG_FRAGMENT:-auto}"
 KERNEL_REF_TYPE="${KERNEL_REF_TYPE:-auto}"
+
+# Normalize full Git ref names so --branch/--tag receives the short ref.
+case "$KERNEL_REF_TYPE" in
+  branch)
+    KERNEL_BRANCH="${KERNEL_BRANCH#refs/heads/}"
+    ;;
+  tag)
+    KERNEL_BRANCH="${KERNEL_BRANCH#refs/tags/}"
+    ;;
+  auto)
+    KERNEL_BRANCH="${KERNEL_BRANCH#refs/heads/}"
+    KERNEL_BRANCH="${KERNEL_BRANCH#refs/tags/}"
+    ;;
+esac
 JOBS="${JOBS:-0}"
 KERNEL_TARGET="${KERNEL_TARGET:-}"
 TOOLCHAIN="${TOOLCHAIN:-auto}"
