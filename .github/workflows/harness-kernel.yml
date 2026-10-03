@@ -211,8 +211,13 @@ jobs:
             exit 1
           fi
 
-          PLAN_ID="$(python3 -c 'import json; d=json.load(open("harness-response.json",encoding="utf-8")); keys=("planExecutionId","plan_execution_id","executionId","execution_id"); walk=lambda x: next((v for k in keys if isinstance(x,dict) and isinstance((v:=x.get(k)),str) and v), next((r for v in x.values() if isinstance(x,dict) for r in [walk(v)] if r), "") if isinstance(x,dict) else next((r for v in x for r in [walk(v)] if r), "") if isinstance(x,list) else ""); print(walk(d))')"
-          [[ -n "$PLAN_ID" ]] || { cat harness-response.json; exit 1; }
+          PLAN_ID="$(python3 -c 'import json; d=json.load(open("harness-response.json", encoding="utf-8")); print(((d.get("data") or {}).get("planExecution") or {}).get("uuid") or ((d.get("data") or {}).get("planExecution") or {}).get("planExecutionId") or d.get("planExecutionId") or d.get("executionId") or "")')"
+          if [[ -z "$PLAN_ID" ]]; then
+            echo "ERROR: Harness trigger response did not contain a plan execution ID." >&2
+            cat harness-response.json
+            exit 1
+          fi
+          echo "Harness plan execution ID: $PLAN_ID"
           echo "plan_execution_id=$PLAN_ID" >> "$GITHUB_OUTPUT"
           echo "release_tag=harness-$PLAN_ID" >> "$GITHUB_OUTPUT"
 
