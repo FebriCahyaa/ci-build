@@ -88,10 +88,23 @@ on:
         options: [false, true, kernelsu-next, resukisu]
         default: false
       ksu_ref:
-        description: "KernelSU provider ref"
+        description: "KernelSU provider ref (auto = 4.19-compatible default)"
         required: false
         type: string
-        default: "main"
+        default: "auto"
+
+      enable_susfs:
+        description: "SUSFS (4.19-compatible pinned revision)"
+        required: true
+        type: choice
+        options: [false, true]
+        default: false
+
+      susfs_ref:
+        description: "SUSFS ref (4.19: v1.5.5-compatible pinned commit)"
+        required: false
+        type: string
+        default: "001e69919c6271f690fd00b17e4c721c9e599152"
       patch_profile:
         description: "Modular source patch profile"
         required: true
@@ -193,6 +206,8 @@ jobs:
           KERNEL_NAME: ${{ inputs.kernel_name }}
           ENABLE_KSU: ${{ inputs.enable_ksu }}
           KSU_REF: ${{ inputs.ksu_ref }}
+          ENABLE_SUSFS: ${{ inputs.enable_susfs }}
+          SUSFS_REF: ${{ inputs.susfs_ref }}
           KSU_REPO: ""
           KSU_LAYOUT: auto
           KSU_HOOK_MODE: auto

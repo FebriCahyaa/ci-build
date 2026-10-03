@@ -79,7 +79,9 @@ ENABLE_KSU="${ENABLE_KSU:-auto}"
 KSU_PROVIDER="${KSU_PROVIDER:-auto}"
 KSU_PROVIDER_ORIGINAL="$KSU_PROVIDER"
 KSU_REPO="${KSU_REPO:-}"
-KSU_REF="${KSU_REF:-}"
+KSU_REF="${KSU_REF:-auto}"
+ENABLE_SUSFS="${ENABLE_SUSFS:-false}"
+SUSFS_REF="${SUSFS_REF:-001e69919c6271f690fd00b17e4c721c9e599152}"
 KSU_LAYOUT="${KSU_LAYOUT:-auto}"
 KSU_HOOK_MODE="${KSU_HOOK_MODE:-auto}"
 
@@ -266,17 +268,21 @@ fi
 
 # ------------------------------------------------------------
 # KernelSU provider detection / integration
-# ------------------------------------------------------------
+#
+# Root integration is explicit: a plain source tree does not suddenly become
+# rooted just because its defconfig lacks CONFIG_KSU. When a root manager is
+# requested, the CI installs the requested provider before defconfig so its
+# Kconfig is visible to Kbuild.
+# ---------------------------------------------------------------------------
 
 KSU_REQUIRED=false
+KSU_SUSFS_REQUIRED=false
 
-# Source-level KSU integration marker.
 if grep -qE 'source "[^"]*kernelsu[^"]*/Kconfig"|obj-\$\(CONFIG_KSU\).*kernelsu' \
     "$SRC_DIR/drivers/Kconfig" "$SRC_DIR/drivers/Makefile" 2>/dev/null; then
   KSU_REQUIRED=true
 fi
 
-# Defconfig/fragment-level KSU requirement.
 if grep -qE '^CONFIG_KSU(=y|=m)' \
     "$SRC_DIR/arch/$DETECTED_ARCH/configs/$DETECTED_DEFCONFIG" 2>/dev/null; then
   KSU_REQUIRED=true
@@ -287,185 +293,102 @@ if [[ -n "$SELECTED_FRAGMENT" ]] && grep -qE '^CONFIG_KSU(=y|=m)' \
   KSU_REQUIRED=true
 fi
 
-KSU_SUSFS_REQUIRED=false
-
-if grep -qE '^CONFIG_KSU_SUSFS(=y|=m)' \
-    "$SRC_DIR/arch/$DETECTED_ARCH/configs/$DETECTED_DEFCONFIG" 2>/dev/null; then
-  KSU_SUSFS_REQUIRED=true
-fi
-
-if [[ -n "$SELECTED_FRAGMENT" ]] && grep -qE '^CONFIG_KSU_SUSFS(=y|=m)' \
-    "$SELECTED_FRAGMENT" 2>/dev/null; then
-  KSU_SUSFS_REQUIRED=true
-fi
-
-# Detect the layout already expected by the kernel source.
-KSU_NESTED_EXPECTED=false
-
-if grep -q 'source "drivers/kernelsu/kernel/Kconfig"' \
-    "$SRC_DIR/drivers/Kconfig" 2>/dev/null ||
-   grep -qE 'obj-\$\(CONFIG_KSU\).*kernelsu/kernel/' \
-    "$SRC_DIR/drivers/Makefile" 2>/dev/null; then
-  KSU_NESTED_EXPECTED=true
-fi
-
-case "$KSU_LAYOUT" in
-  nested)
-    KSU_NESTED_EXPECTED=true
-    ;;
-  symlink)
-    KSU_NESTED_EXPECTED=false
-    ;;
-  auto)
-    ;;
-  *)
-    fail "invalid KSU_LAYOUT=$KSU_LAYOUT"
-    ;;
-esac
-
-KSU_KCONFIG=""
-KSU_PROVIDER_VERSION="none"
-KSU_PROVIDER_COMMIT="none"
-
-if [[ "$KSU_NESTED_EXPECTED" == true && -f "$SRC_DIR/drivers/kernelsu/kernel/Kconfig" ]]; then
-  KSU_KCONFIG="$SRC_DIR/drivers/kernelsu/kernel/Kconfig"
-elif [[ -f "$SRC_DIR/drivers/kernelsu/Kconfig" ]]; then
-  KSU_KCONFIG="$SRC_DIR/drivers/kernelsu/Kconfig"
-fi
-
-resolve_ksu_provider() {
+if [[ "$ENABLE_KSU" == "true" ]]; then
+  [[ "$KSU_PROVIDER" == "auto" || -n "$KSU_PROVIDER" ]] || KSU_PROVIDER="auto"
   case "$KSU_PROVIDER" in
-    official|kernelsu)
-      KSU_PROVIDER="official"
-      KSU_REPO="https://github.com/tiann/KernelSU"
-      # Official KernelSU documents v0.9.5 as the final non-GKI release.
-      KSU_REF="${KSU_REF:-v0.9.5}"
-      ;;
-    kernelsu-next|ksu-next|next)
-      KSU_PROVIDER="kernelsu-next"
-      KSU_REPO="https://github.com/KernelSU-Next/KernelSU-Next"
-      # The upstream setup entrypoint is on the "next" branch; legacy is
-      # the explicit non-GKI/legacy mode used by current examples.
-      KSU_REF="${KSU_REF:-legacy}"
-      ;;
-    resukisu|re-sukisu)
-      KSU_PROVIDER="resukisu"
-      KSU_REPO="https://github.com/ReSukiSU/ReSukiSU"
-      KSU_REF="${KSU_REF:-main}"
-      ;;
-    custom)
-      [[ -n "$KSU_REPO" ]] || fail "KSU_PROVIDER=custom requires KSU_REPO"
-      ;;
     auto)
-      # When the kernel explicitly asks for SUSFS, select ReSukiSU by default
-      # because its current documentation advertises SUSFS + non-GKI support.
-      # Otherwise use KernelSU-Next for the generic KSU provider path.
-      if [[ "$KSU_SUSFS_REQUIRED" == true ]]; then
+      if [[ "$ENABLE_SUSFS" == "true" ]]; then
         KSU_PROVIDER="resukisu"
-        KSU_REPO="${KSU_REPO:-https://github.com/ReSukiSU/ReSukiSU}"
-        KSU_REF="${KSU_REF:-main}"
       else
         KSU_PROVIDER="kernelsu-next"
-        KSU_REPO="${KSU_REPO:-https://github.com/KernelSU-Next/KernelSU-Next}"
-        KSU_REF="${KSU_REF:-legacy}"
       fi
+      ;;
+    official|kernelsu|kernelsu-next|ksu-next|next|resukisu|re-sukisu|custom)
+      ;;
+    none|false)
+      fail "ENABLE_KSU=true but KSU_PROVIDER=$KSU_PROVIDER"
       ;;
     *)
       fail "invalid KSU_PROVIDER=$KSU_PROVIDER"
       ;;
   esac
-}
-
-if [[ "$KSU_REQUIRED" == true ]]; then
-  resolve_ksu_provider
-
-  echo "[ksu] required=true" >&2
-  echo "[ksu] provider=$KSU_PROVIDER" >&2
-  echo "[ksu] repo=$KSU_REPO" >&2
-  echo "[ksu] ref=$KSU_REF" >&2
-  echo "[ksu] hook_mode=$KSU_HOOK_MODE" >&2
-  echo "[ksu] layout=$([[ "$KSU_NESTED_EXPECTED" == true ]] && echo nested || echo symlink)" >&2
-
-  # We need a provider checkout when KSU is missing, or when the user
-  # explicitly selected a provider. Existing in-tree KSU is otherwise kept.
-  if [[ -z "$KSU_KCONFIG" || "$KSU_PROVIDER_ORIGINAL" != auto ]]; then
-    if [[ "$ENABLE_KSU" == false ]]; then
-      echo "ERROR: kernel source/defconfig requires KernelSU, but ENABLE_KSU=false." >&2
-      fail "KernelSU disabled"
-    fi
-
-    KSU_DIR="$WORK/KernelSU"
-    rm -rf "$KSU_DIR"
-
-    echo "[ksu] cloning provider..." >&2
-    git clone --depth=1 "$KSU_REPO" "$KSU_DIR" || fail "KernelSU provider clone"
-
-    if [[ -n "$KSU_REF" ]]; then
-      git -C "$KSU_DIR" fetch --depth=1 origin "$KSU_REF" || fail "KernelSU provider ref fetch"
-      git -C "$KSU_DIR" checkout --detach FETCH_HEAD || fail "KernelSU provider ref checkout"
-    fi
-
-    KSU_SOURCE_KERNEL="$KSU_DIR/kernel"
-    [[ -d "$KSU_SOURCE_KERNEL" ]] || fail "KernelSU provider has no kernel/ directory"
-
-    KSU_PROVIDER_COMMIT="$(git -C "$KSU_DIR" rev-parse HEAD)"
-    KSU_PROVIDER_VERSION="$(git -C "$KSU_DIR" describe --tags --always --dirty 2>/dev/null || \
-      git -C "$KSU_DIR" rev-parse --short HEAD)"
-
-    # Both KernelSU-Next and ReSukiSU use kernel/setup.sh to wire their
-    # driver into a GKI/non-GKI kernel. For this universal builder we
-    # reproduce the same wiring while also supporting legacy nested trees
-    # such as drivers/kernelsu/kernel/.
-    if [[ "$KSU_NESTED_EXPECTED" == true ]]; then
-      echo "[ksu] installing provider repository at drivers/kernelsu -> $KSU_DIR" >&2
-      rm -rf "$SRC_DIR/drivers/kernelsu"
-      ln -s "$KSU_DIR" "$SRC_DIR/drivers/kernelsu"
-    else
-      echo "[ksu] installing symlink layout drivers/kernelsu -> provider/kernel" >&2
-      rm -rf "$SRC_DIR/drivers/kernelsu"
-      ln -s "$KSU_SOURCE_KERNEL" "$SRC_DIR/drivers/kernelsu"
-    fi
-
-    if [[ "$KSU_NESTED_EXPECTED" == true ]]; then
-      KSU_KCONFIG="$SRC_DIR/drivers/kernelsu/kernel/Kconfig"
-    else
-      KSU_KCONFIG="$SRC_DIR/drivers/kernelsu/Kconfig"
-    fi
-  else
-    KSU_PROVIDER_COMMIT="pre-integrated"
-    KSU_PROVIDER_VERSION="source-tree"
+  KSU_REQUIRED=true
+elif [[ "$ENABLE_KSU" == "false" ]]; then
+  if [[ "$KSU_REQUIRED" == "true" ]]; then
+    fail "kernel source/defconfig requires KernelSU but ENABLE_KSU=false"
   fi
-
-  [[ -f "$KSU_KCONFIG" ]] || fail "KernelSU Kconfig missing after integration"
-
-  # ReSukiSU/KernelSU-Next provide different hook modes across kernel
-  # generations. We do not silently apply core-kernel patches here.
-  # "auto" preserves the provider's normal setup behavior.
-  case "$KSU_HOOK_MODE" in
-    auto|kprobe|manual|susfs)
-      ;;
-    *)
-      fail "invalid KSU_HOOK_MODE=$KSU_HOOK_MODE"
-      ;;
-  esac
-
-  if [[ "$KSU_SUSFS_REQUIRED" == true ]]; then
-    if ! grep -RqsE 'config[[:space:]]+KSU_SUSFS([[:space:]]|$)' \
-        "$SRC_DIR/drivers/kernelsu" 2>/dev/null; then
-      echo "ERROR: CONFIG_KSU_SUSFS is required, but provider '$KSU_PROVIDER' does not define it." >&2
-      echo "Use a SUSFS-capable provider/ref or a kernel tree with matching SUSFS patches." >&2
-      fail "KernelSU/SUSFS provider mismatch"
-    fi
-  fi
+  KSU_PROVIDER="none"
 else
+  # auto preserves an already-integrated source tree, but does not inject a
+  # root provider into a plain kernel unless the source explicitly requires it.
+  if [[ "$KSU_REQUIRED" != "true" ]]; then
+    KSU_PROVIDER="none"
+  else
+    KSU_PROVIDER="auto"
+    if [[ "$ENABLE_SUSFS" == "true" ]]; then
+      KSU_PROVIDER="resukisu"
+    else
+      KSU_PROVIDER="kernelsu-next"
+    fi
+  fi
+fi
+
+if [[ "$KSU_REQUIRED" == "true" ]]; then
+  ROOT_MANAGER="$KSU_PROVIDER"
+  if ! SOURCE_DIR="$SRC_DIR" \
+       WORK_DIR="$WORK" \
+       KERNEL_VERSION="$DETECTED_KERNEL_VERSION" \
+       ROOT_MANAGER="$ROOT_MANAGER" \
+       KSU_REPO="$KSU_REPO" \
+       KSU_REF="$KSU_REF" \
+       ENABLE_SUSFS="$ENABLE_SUSFS" \
+       KSU_HOOK_MODE="$KSU_HOOK_MODE" \
+       "$SCRIPT_DIR/root_manager_apply.sh"; then
+    fail "KernelSU provider integration"
+  fi
+
+  source "$WORK/root-manager.env"
+  KSU_PROVIDER="$KSU_PROVIDER"
+  KSU_REPO="$KSU_REPO"
+  KSU_REF="$KSU_REF"
+  KSU_PROVIDER_COMMIT="$KSU_PROVIDER_COMMIT"
+  KSU_PROVIDER_VERSION="$KSU_PROVIDER_VERSION"
+  KSU_LAYOUT_RESOLVED="$KSU_LAYOUT_RESOLVED"
+  KSU_HOOK_MODE="$KSU_HOOK_MODE_RESOLVED"
+else
+  ROOT_MANAGER="none"
   KSU_PROVIDER="none"
   KSU_REPO=""
   KSU_REF=""
   KSU_PROVIDER_COMMIT="none"
   KSU_PROVIDER_VERSION="none"
+  KSU_LAYOUT_RESOLVED="none"
 fi
 
-KSU_LAYOUT_RESOLVED="$([[ "$KSU_NESTED_EXPECTED" == true ]] && echo nested || echo symlink)"
+if [[ "$ENABLE_SUSFS" == "true" ]]; then
+  KSU_SUSFS_REQUIRED=true
+
+  if [[ "$KSU_REQUIRED" != "true" || "$KSU_PROVIDER" == "none" ]]; then
+    fail "ENABLE_SUSFS=true requires a root provider"
+  fi
+
+  if ! SOURCE_DIR="$SRC_DIR" \
+       WORK_DIR="$WORK" \
+       KERNEL_VERSION="$DETECTED_KERNEL_VERSION" \
+       ROOT_MANAGER="$KSU_PROVIDER" \
+       ENABLE_SUSFS="$ENABLE_SUSFS" \
+       SUSFS_REF="$SUSFS_REF" \
+       "$SCRIPT_DIR/apply_susfs.sh"; then
+    fail "SUSFS integration"
+  fi
+
+  source "$WORK/susfs.env"
+else
+  SUSFS_COMMIT="none"
+  SUSFS_VERSION="none"
+  SUSFS_SOURCE="none"
+fi
+
 
 # ------------------------------------------------------------
 # Modular patch registry
@@ -674,6 +597,11 @@ printf 'ksu_version=%s\n' "${KSU_PROVIDER_VERSION:-none}" >> "$ARTIFACTS/build-i
 printf 'ksu_commit=%s\n' "${KSU_PROVIDER_COMMIT:-none}" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_layout=%s\n' "$KSU_LAYOUT_RESOLVED" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_hook_mode=%s\n' "$KSU_HOOK_MODE" >> "$ARTIFACTS/build-info.txt"
+printf 'susfs_enabled=%s\n' "$ENABLE_SUSFS" >> "$ARTIFACTS/build-info.txt"
+printf 'susfs_source=%s\n' "$SUSFS_SOURCE" >> "$ARTIFACTS/build-info.txt"
+printf 'susfs_ref=%s\n' "$SUSFS_REF" >> "$ARTIFACTS/build-info.txt"
+printf 'susfs_commit=%s\n' "$SUSFS_COMMIT" >> "$ARTIFACTS/build-info.txt"
+printf 'susfs_version=%s\n' "$SUSFS_VERSION" >> "$ARTIFACTS/build-info.txt"
 
 echo "Kernel commit: $COMMIT" | tee -a "$BUILD_LOG"
 echo "Make command: ${MAKE_CMD[*]}" | tee -a "$BUILD_LOG"
@@ -732,6 +660,18 @@ if ! SOURCE_DIR="$SRC_DIR" \
      LTO_PLUS="$LTO_PLUS" \
      "$SCRIPT_DIR/apply_patch_series.sh" 2>&1 | tee -a "$BUILD_LOG"; then
   fail "config patch profile"
+fi
+
+# Verify the selected provider/SUSFS symbols survived olddefconfig and the
+# source patch phase before entering the expensive compilation stage.
+if [[ "$KSU_REQUIRED" == "true" ]]; then
+  grep -qE '^CONFIG_KSU=(y|m)' "$OUT/.config" ||
+    fail "CONFIG_KSU is not enabled after config resolution"
+fi
+
+if [[ "$ENABLE_SUSFS" == "true" ]]; then
+  grep -qE '^CONFIG_KSU_SUSFS=y' "$OUT/.config" ||
+    fail "CONFIG_KSU_SUSFS is not enabled after config resolution"
 fi
 
 ci_phase "kernel-name"

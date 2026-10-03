@@ -1,0 +1,5 @@
+# KernelSU-Next 4.19: built-in KSU driver + kprobe-capable legacy path.
+CONFIG_KSU=y
+CONFIG_KPROBES=y
+CONFIG_HAVE_KPROBES=y
+CONFIG_KPROBE_EVENTS=y

@@ -87,7 +87,15 @@ pipeline:
 
     - name: KSU_REF
       type: String
-      value: main
+      value: auto
+
+    - name: ENABLE_SUSFS
+      type: String
+      value: false
+
+    - name: SUSFS_REF
+      type: String
+      value: 001e69919c6271f690fd00b17e4c721c9e599152
 
     - name: KSU_PROVIDER
       type: String
@@ -203,6 +211,8 @@ pipeline:
 
                       ENABLE_KSU: <+pipeline.variables.ENABLE_KSU>
                       KSU_REF: <+pipeline.variables.KSU_REF>
+                      ENABLE_SUSFS: <+pipeline.variables.ENABLE_SUSFS>
+                      SUSFS_REF: <+pipeline.variables.SUSFS_REF>
                       KSU_PROVIDER: <+pipeline.variables.KSU_PROVIDER>
                       KSU_REPO: <+pipeline.variables.KSU_REPO>
                       KSU_LAYOUT: <+pipeline.variables.KSU_LAYOUT>

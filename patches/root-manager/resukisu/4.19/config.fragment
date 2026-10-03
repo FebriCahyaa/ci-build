@@ -1,0 +1,2 @@
+# ReSukiSU built-in kernel driver.
+CONFIG_KSU=y

@@ -287,3 +287,14 @@ variant; no runtime font renderer is required in recovery.
 
 All four variants share the same logo and metadata layout. Only the root
 section changes according to the resolved provider.
+
+
+## Root manager and SUSFS integration
+
+The universal builder now has explicit provider integration for official
+KernelSU, KernelSU-Next, and ReSukiSU. Linux 4.19 official KernelSU is
+pinned to v0.9.5.
+
+SUSFS uses the dedicated Linux 4.19 upstream revision
+`001e69919c6271f690fd00b17e4c721c9e599152`. ReSukiSU builds use its integrated SUSFS hook path; the
+official-KernelSU SUSFS patch set is not mixed into KSU-Next.

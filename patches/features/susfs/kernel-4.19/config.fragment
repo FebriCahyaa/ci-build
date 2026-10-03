@@ -1,0 +1,2 @@
+# SUSFS kernel configuration surface.
+CONFIG_KSU_SUSFS=y

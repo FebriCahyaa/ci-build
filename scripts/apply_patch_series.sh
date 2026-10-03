@@ -166,6 +166,19 @@ elif [[ "$PHASE" == "config" ]]; then
       config_apply "$PATCH_ROOT/features/lto-plus/lavender-4.19/thinlto.config"
     fi
   fi
+
+  if [[ "$ROOT_MANAGER" != "none" && -n "$ROOT_MANAGER" ]]; then
+    root_config="$PATCH_ROOT/root-manager/$ROOT_MANAGER/$KERNEL_MM/config.fragment"
+    if [[ -f "$root_config" ]]; then
+      config_apply "$root_config"
+    fi
+  fi
+
+  if [[ "${ENABLE_SUSFS:-false}" == "true" || "${ENABLE_SUSFS:-false}" == "1" ]]; then
+    susfs_config="$PATCH_ROOT/features/susfs/kernel-$KERNEL_MM/config.fragment"
+    [[ -f "$susfs_config" ]] || fail "SUSFS config fragment missing: $susfs_config"
+    config_apply "$susfs_config"
+  fi
 else
   fail "invalid PHASE=$PHASE"
 fi

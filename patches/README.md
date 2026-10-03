@@ -58,3 +58,23 @@ LTO_PLUS=true
 The current Lavender 4.19 tree already has `CONFIG_LTO_CLANG=y` and
 declares `ARCH_SUPPORTS_THINLTO`; the optional profile only adds
 `CONFIG_THINLTO=y`. This is deliberately not forced by default.
+
+
+## Root manager + SUSFS policy
+
+Root providers are integrated through `scripts/root_manager_apply.sh` using
+the upstream `drivers/kernelsu` integration layout.
+
+Linux 4.19 pins official KernelSU to `v0.9.5`, the last official non-GKI
+release. KernelSU-Next defaults to `v3.4.0`. ReSukiSU defaults to `main`.
+
+SUSFS for Linux 4.19 uses upstream `simonpunk/susfs4ksu` revision
+`001e69919c6271f690fd00b17e4c721c9e599152` (the dedicated `kernel-4.19` branch's latest compatible
+revision). The CI applies it with strict `git apply --check` gates.
+
+SUSFS + ReSukiSU uses ReSukiSU's integrated SUSFS hook instead of mixing
+the official-KernelSU SUSFS patch set into another provider.
+
+SUSFS + KernelSU-Next is intentionally blocked by the CI because the
+available upstream 4.19 SUSFS patch set is based on official KernelSU and
+is not a verified KernelSU-Next patch set.
