@@ -85,7 +85,7 @@ on:
         description: "KernelSU provider"
         required: true
         type: choice
-        options: [false, true, kernelsu-next, resukisu]
+        options: [false, kernelsu, kernelsu-next, resukisu]
         default: false
       ksu_ref:
         description: "KernelSU provider ref (auto = 4.19-compatible default)"
@@ -215,7 +215,7 @@ jobs:
             "TOOLCHAIN","TOOLCHAIN_VERSION","LLVM_IAS","CROSS_COMPILE","CROSS_COMPILE_ARM32",
             "CLANG_URL","GCC_URL","APT_PACKAGES","EXTRA_MAKE_ARGS","SCHEDULER_PROFILE",
             "PATCH_PROFILE","UPSTREAM_PROFILE","LTO_PLUS","KERNEL_NAME",
-            "ENABLE_KSU","KSU_REF","KSU_PROVIDER","KSU_REPO","KSU_LAYOUT","KSU_HOOK_MODE","PACKAGE_ANYKERNEL","ROM_FAMILY","ANYKERNEL_PROFILE","ANYKERNEL3_REPO","ANYKERNEL3_REF"
+            "ENABLE_KSU","KSU_REF","ENABLE_SUSFS","SUSFS_REF","KSU_PROVIDER","KSU_REPO","KSU_LAYOUT","KSU_HOOK_MODE","PACKAGE_ANYKERNEL","ROM_FAMILY","ANYKERNEL_PROFILE","ANYKERNEL3_REPO","ANYKERNEL3_REF"
           ]
           values = {n: os.environ.get(n, "") for n in names}
           values["CI_BUILD_SHA"] = os.environ.get("CI_BUILD_SHA", "")
@@ -225,6 +225,7 @@ jobs:
 
           # GitHub input "enable_ksu" doubles as the provider selector:
           # false         -> disabled
+          # kernelsu      -> explicit official KernelSU
           # true          -> enabled with automatic provider selection
           # kernelsu-next -> explicit KernelSU-Next
           # resukisu      -> explicit ReSukiSU
@@ -233,6 +234,9 @@ jobs:
           if raw_ksu in {"false", "0", "no", "off", ""}:
               values["ENABLE_KSU"] = "false"
               values["KSU_PROVIDER"] = "auto"
+          elif raw_ksu in {"kernelsu", "official"}:
+              values["ENABLE_KSU"] = "true"
+              values["KSU_PROVIDER"] = "official"
           elif raw_ksu in {"true", "1", "yes", "on"}:
               values["ENABLE_KSU"] = "true"
               values["KSU_PROVIDER"] = "auto"
@@ -269,23 +273,40 @@ jobs:
           TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
         run: |
           set -euo pipefail
-          if ! curl --fail-with-body --retry 2 --retry-delay 2 -X POST \
+
+          tg_args=(
+            --data-urlencode "chat_id=${TG_CHAT_ID}"
+            --data-urlencode "text=❌ <b>GitHub → Harness trigger gagal</b>"
+            -d "parse_mode=HTML"
+          )
+          if [[ -n "${TG_TOPIC_ID:-}" ]]; then
+            tg_args+=( -d "message_thread_id=${TG_TOPIC_ID}" )
+          fi
+
+          http_code="$(curl -sS --retry 2 --retry-delay 2 -X POST \
             "https://app.harness.io/pipeline/api/pipeline/execute/${PIPELINE_ID}?accountIdentifier=${HARNESS_ACCOUNT}&orgIdentifier=${HARNESS_ORG}&projectIdentifier=${HARNESS_PROJECT}" \
             -H "x-api-key: ${HARNESS_API_KEY}" \
             -H "Content-Type: application/json" \
-            --data-binary @harness-payload.json > harness-response.json; then
-            curl -fsS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
-              --data-urlencode "chat_id=${TG_CHAT_ID}" \
-              --data-urlencode "text=❌ <b>GitHub → Harness trigger gagal</b>" \
-              -d "parse_mode=HTML" \
-              ${TG_TOPIC_ID:+-d "message_thread_id=${TG_TOPIC_ID}"} || true
+            --data-binary @harness-payload.json \
+            -o harness-response.json \
+            -w "%{http_code}")"
+
+          if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+            echo "ERROR: Harness execute API returned HTTP ${http_code}" >&2
+            echo "----- Harness response body -----" >&2
+            cat harness-response.json >&2 || true
+            echo "--------------------------------" >&2
+            if [[ -n "${TG_BOT_TOKEN:-}" && -n "${TG_CHAT_ID:-}" ]]; then
+              curl -fsS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+                "${tg_args[@]}" || true
+            fi
             exit 1
           fi
 
           PLAN_ID="$(python3 -c 'import json; d=json.load(open("harness-response.json", encoding="utf-8")); print(((d.get("data") or {}).get("planExecution") or {}).get("uuid") or ((d.get("data") or {}).get("planExecution") or {}).get("planExecutionId") or d.get("planExecutionId") or d.get("executionId") or "")')"
           if [[ -z "$PLAN_ID" ]]; then
             echo "ERROR: Harness trigger response did not contain a plan execution ID." >&2
-            cat harness-response.json
+            cat harness-response.json >&2
             exit 1
           fi
           echo "Harness plan execution ID: $PLAN_ID"

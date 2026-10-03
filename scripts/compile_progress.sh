@@ -24,11 +24,6 @@ while [[ ! -f "$WORK_DIR/.stop-compile-telemetry" ]]; do
   if [[ "$TOTAL" =~ ^[0-9]+$ ]] && ((TOTAL>0)); then
     ((count>TOTAL)) && count="$TOTAL"
     pct=$((OFFSET + count*SPAN/TOTAL))
-  else
-    # Keep an active visual state even before enough Kbuild actions exist to
-    # establish a useful count. The percentage remains capped below the
-    # completion milestone and the detail string stays factual.
-    pct=$OFFSET
   fi
   ((pct>89)) && pct=89
   if ((pct!=last)); then emit "$pct" "objects ${count}/${TOTAL}"; last="$pct"; fi
