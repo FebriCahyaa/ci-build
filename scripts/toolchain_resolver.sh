@@ -131,7 +131,11 @@ case "$family" in
     rev="${VERSION_REQUEST}"
     [[ "$rev" == auto ]] && rev="$BUILD_CONFIG_CLANG_REV"
     if [[ -z "$rev" && -n "$BUILD_CONFIG_CLANG_BIN" ]]; then
-      rev="$(basename "$BUILD_CONFIG_CLANG_BIN")"
+      if [[ "$BUILD_CONFIG_CLANG_BIN" == */bin ]]; then
+        rev="$(basename "$(dirname "$BUILD_CONFIG_CLANG_BIN")")"
+      else
+        rev="$(basename "$BUILD_CONFIG_CLANG_BIN")"
+      fi
     fi
     [[ -n "$rev" ]] || { echo "ERROR: cannot detect AOSP Clang revision; set TOOLCHAIN_VERSION" >&2; exit 1; }
     ref="${AOSP_CLANG_REF:-auto}"
@@ -149,19 +153,34 @@ case "$family" in
           ;;
       esac
     fi
-    archive_dir="$rev"
-    url="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/${ref}/${archive_dir}.tar.gz"
     archive="$WORK_DIR/aosp-${rev}.tar.gz"
     echo "[toolchain] downloading AOSP $rev from $ref" >&2
-    if ! curl -fL --retry 3 --retry-delay 2 "$url" -o "$archive"; then
-      if [[ "$rev" == clang-r416183b ]]; then
-        rev=clang-r416183b1
-        url="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/${ref}/${rev}.tar.gz"
-        curl -fL --retry 3 --retry-delay 2 "$url" -o "$archive"
-      else
-        exit 1
+
+    declare -a AOSP_URLS=()
+    case "$rev" in
+      clang-r416183b)
+        AOSP_URLS+=("https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz")
+        AOSP_URLS+=("https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r416183b.tar.gz")
+        AOSP_URLS+=("https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-gsi/clang-r416183b.tar.gz")
+        ;;
+      *)
+        AOSP_URLS+=("https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/${ref}/${rev}.tar.gz")
+        ;;
+    esac
+
+    downloaded=false
+    for url in "${AOSP_URLS[@]}"; do
+      echo "[toolchain] trying $url" >&2
+      if curl -fL --retry 3 --retry-delay 2 "$url" -o "$archive"; then
+        downloaded=true
+        break
       fi
+    done
+    if [[ "$downloaded" != true ]]; then
+      echo "ERROR: unable to download AOSP Clang $rev from configured sources" >&2
+      exit 1
     fi
+    [[ -s "$archive" ]] || { echo "ERROR: downloaded AOSP archive is empty" >&2; exit 1; }
     rm -rf "$TC_ROOT/aosp"
     mkdir -p "$TC_ROOT/aosp"
     tar -xzf "$archive" -C "$TC_ROOT/aosp"

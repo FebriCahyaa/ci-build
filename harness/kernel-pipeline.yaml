@@ -103,8 +103,9 @@ pipeline:
                   spec:
                     shell: Bash
                     envVariables:
-                      TG_BOT_TOKEN: <+secrets.getValue("tg_bot_token")>
-                      TG_CHAT_ID: <+secrets.getValue("tg_chat_id")>
+                      GH_TOKEN: <+secrets.getValue("github_token")>
+                      GH_REPOSITORY: FebriCahyaa/ci-build
+                      HARNESS_EXECUTION_ID: <+pipeline.executionId>
                       KERNEL_REPO: <+pipeline.variables.KERNEL_REPO>
                       KERNEL_BRANCH: <+pipeline.variables.KERNEL_BRANCH>
                       KERNEL_REF_TYPE: <+pipeline.variables.KERNEL_REF_TYPE>
@@ -149,4 +150,23 @@ pipeline:
                       chmod +x "$CI_BUILD_DIR/scripts/build_kernel.sh" \
                                  "$CI_BUILD_DIR/scripts/detect_defconfig.sh" \
                                  "$CI_BUILD_DIR/scripts/toolchain_resolver.sh"
+                      set +e
+                      trap 'rc=$?; set +e; mkdir -p "$PWD/work/ci-release-assets"; if [ "$rc" -eq 0 ]; then cp -f "$PWD"/work/Kernel-${DEVICE}-*.tar.gz "$PWD/work/ci-release-assets/" 2>/dev/null || true; cp -f "$PWD"/work/artifacts/*-AnyKernel3.zip "$PWD/work/ci-release-assets/" 2>/dev/null || true; cp -f "$PWD"/work/build.log "$PWD/work/ci-release-assets/" 2>/dev/null || true; cp -f "$PWD"/work/artifacts/build-info.txt "$PWD/work/ci-release-assets/" 2>/dev/null || true; printf "status=success\nexecution_id=%s\n" "$HARNESS_EXECUTION_ID" > "$PWD/work/ci-release-assets/build-result.txt"; else cp -f "$PWD"/work/build.log "$PWD/work/ci-release-assets/" 2>/dev/null || true; cp -f "$PWD"/work/error_tail.log "$PWD/work/ci-release-assets/" 2>/dev/null || true; cp -f "$PWD"/work/artifacts/build-info.txt "$PWD/work/ci-release-assets/" 2>/dev/null || true; { printf "status=failure\nexecution_id=%s\nexit_code=%s\nkernel_repo=%s\nkernel_branch=%s\n" "$HARNESS_EXECUTION_ID" "$rc" "$KERNEL_REPO" "$KERNEL_BRANCH"; } > "$PWD/work/ci-release-assets/failure-summary.txt"; fi; GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" RELEASE_TAG="harness-$HARNESS_EXECUTION_ID" RELEASE_NAME="Harness Kernel Build $HARNESS_EXECUTION_ID" ASSET_DIR="$PWD/work/ci-release-assets" "$CI_BUILD_DIR/scripts/publish_ci_release.sh" || true; exit "$rc"' EXIT
+                      apt-get update
+                      apt-get install -y --no-install-recommends \
+                        bc bison flex libssl-dev libelf-dev clang lld llvm \
+                        gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+                        build-essential cpio git curl python3 zip xz-utils zstd \
+                        ca-certificates tar gzip \
+                        ${APT_PACKAGES:-}
+
+                      CI_BUILD_DIR="$PWD/ci-build"
+                      rm -rf "$CI_BUILD_DIR"
+                      git clone --depth=1 --branch main \
+                        https://github.com/FebriCahyaa/ci-build.git "$CI_BUILD_DIR"
+                      chmod +x "$CI_BUILD_DIR/scripts/build_kernel.sh" \
+                                 "$CI_BUILD_DIR/scripts/detect_defconfig.sh" \
+                                 "$CI_BUILD_DIR/scripts/toolchain_resolver.sh" \
+                                 "$CI_BUILD_DIR/scripts/publish_ci_release.sh"
+                      set -e
                       WORK_DIR="$PWD/work" "$CI_BUILD_DIR/scripts/build_kernel.sh"

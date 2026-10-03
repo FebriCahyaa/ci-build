@@ -128,6 +128,9 @@ on:
         required: true
         type: string
         default: "master"
+permissions:
+  contents: read
+
 jobs:
   trigger-harness:
     runs-on: ubuntu-latest
@@ -162,7 +165,7 @@ jobs:
           PACKAGE_ANYKERNEL: ${{ inputs.package_anykernel }}
           ROM_FAMILY: ${{ inputs.rom_family }}
           ANYKERNEL_PROFILE: ${{ inputs.anykernel_profile }}
-          ANYKERNEL3_REPO: ${{ inputs.anykernel_repo }}
+          ANYKERNEL3_REPO: https://github.com/osm0sis/AnyKernel3
           ANYKERNEL3_REF: ${{ inputs.anykernel3_ref }}
         run: |
           set -euo pipefail
@@ -172,7 +175,7 @@ jobs:
             "KERNEL_REPO","KERNEL_BRANCH","KERNEL_REF_TYPE","DEVICE","ARCH","DEFCONFIG","CONFIG_FRAGMENT","JOBS",
             "TOOLCHAIN","TOOLCHAIN_VERSION","LLVM_IAS","CROSS_COMPILE","CROSS_COMPILE_ARM32",
             "CLANG_URL","GCC_URL","APT_PACKAGES","EXTRA_MAKE_ARGS","SCHEDULER_PROFILE",
-            "ENABLE_KSU","KSU_REF","PACKAGE_ANYKERNEL","ROM_FAMILY","ANYKERNEL_PROFILE","ANYKERNEL3_REPO","ANYKERNEL3_REF","ANYKERNEL_REPO","ANYKERNEL_BRANCH"
+            "ENABLE_KSU","KSU_REF","PACKAGE_ANYKERNEL","ROM_FAMILY","ANYKERNEL_PROFILE","ANYKERNEL3_REPO","ANYKERNEL3_REF"
           ]
           payload = {"pipeline": {"identifier": os.environ["PIPELINE_ID"], "variables": [
             {"name": n, "type": "String", "value": os.environ.get(n, "")} for n in names
@@ -183,16 +186,76 @@ jobs:
           PY
 
       - name: Trigger Harness pipeline
+        id: trigger
         env:
           HARNESS_API_KEY: ${{ secrets.HARNESS_API_KEY }}
           HARNESS_ACCOUNT: ${{ secrets.HARNESS_ACCOUNT_ID }}
           HARNESS_ORG: default
           HARNESS_PROJECT: ci_build
           PIPELINE_ID: Universal_Kernel_Build
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
         run: |
           set -euo pipefail
-          curl --fail-with-body --retry 2 --retry-delay 2 -X POST \
+          if ! curl --fail-with-body --retry 2 --retry-delay 2 -X POST \
             "https://app.harness.io/pipeline/api/pipeline/execute/${PIPELINE_ID}?accountIdentifier=${HARNESS_ACCOUNT}&orgIdentifier=${HARNESS_ORG}&projectIdentifier=${HARNESS_PROJECT}" \
             -H "x-api-key: ${HARNESS_API_KEY}" \
             -H "Content-Type: application/json" \
-            --data-binary @harness-payload.json
+            --data-binary @harness-payload.json > harness-response.json; then
+            curl -fsS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${TG_CHAT_ID}" \
+              --data-urlencode "text=❌ <b>GitHub → Harness trigger gagal</b>" \
+              -d "parse_mode=HTML" \
+              ${TG_TOPIC_ID:+-d "message_thread_id=${TG_TOPIC_ID}"} || true
+            exit 1
+          fi
+
+          PLAN_ID="$(python3 -c 'import json; d=json.load(open("harness-response.json",encoding="utf-8")); keys=("planExecutionId","plan_execution_id","executionId","execution_id"); walk=lambda x: next((v for k in keys if isinstance(x,dict) and isinstance((v:=x.get(k)),str) and v), next((r for v in x.values() if isinstance(x,dict) for r in [walk(v)] if r), "") if isinstance(x,dict) else next((r for v in x for r in [walk(v)] if r), "") if isinstance(x,list) else ""); print(walk(d))')"
+          [[ -n "$PLAN_ID" ]] || { cat harness-response.json; exit 1; }
+          echo "plan_execution_id=$PLAN_ID" >> "$GITHUB_OUTPUT"
+          echo "release_tag=harness-$PLAN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Live monitor Harness execution
+        if: steps.trigger.outputs.plan_execution_id != ''
+        env:
+          HARNESS_API_KEY: ${{ secrets.HARNESS_API_KEY }}
+          HARNESS_ACCOUNT: ${{ secrets.HARNESS_ACCOUNT_ID }}
+          HARNESS_ORG: default
+          HARNESS_PROJECT: ci_build
+          HARNESS_PIPELINE: Universal_Kernel_Build
+          HARNESS_PLAN_EXECUTION_ID: ${{ steps.trigger.outputs.plan_execution_id }}
+          HARNESS_EXECUTION_URL: https://app.harness.io/ng/account/${{ secrets.HARNESS_ACCOUNT_ID }}/module/ci/orgs/default/projects/ci_build/pipelines/Universal_Kernel_Build/executions/${{ steps.trigger.outputs.plan_execution_id }}/pipeline
+          DEVICE: ${{ inputs.device }}
+          KERNEL_BRANCH: ${{ inputs.kernel_branch }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
+          HARNESS_POLL_SECONDS: "10"
+        run: python3 scripts/harness_monitor.py
+
+      - name: Relay Harness logs and artifacts to Telegram
+        if: always() && steps.trigger.outputs.plan_execution_id != ''
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.trigger.outputs.release_tag }}
+          HARNESS_MONITOR_FILE: harness-monitor.json
+        run: python3 -c 'import os; os.system("bash scripts/send_release_to_telegram.sh")'
+
+      - name: Propagate Harness result
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ -f harness-monitor.json ]]; then
+            status="$(python3 -c 'import json; print(json.load(open("harness-monitor.json",encoding="utf-8")).get("status","UNKNOWN"))')"
+            case "$status" in
+              SUCCESS|SUCCEEDED) exit 0 ;;
+              *) echo "Harness result: $status"; exit 1 ;;
+            esac
+          fi
+          echo "Harness execution did not produce a monitor result."
+          exit 1

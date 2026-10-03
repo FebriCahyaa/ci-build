@@ -178,7 +178,7 @@ jobs:
           PACKAGE_ANYKERNEL: ${{ inputs.package_anykernel }}
           ROM_FAMILY: ${{ inputs.rom_family }}
           ANYKERNEL_PROFILE: ${{ inputs.anykernel_profile }}
-          ANYKERNEL3_REPO: ${{ inputs.anykernel_repo }}
+          ANYKERNEL3_REPO: https://github.com/osm0sis/AnyKernel3
           ANYKERNEL3_REF: ${{ inputs.anykernel3_ref }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |

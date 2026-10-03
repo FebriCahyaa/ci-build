@@ -77,7 +77,9 @@ esac
 # Discover device fragments first. They provide strong evidence for the base config.
 FRAGMENT=""
 if [[ "$FRAGMENT_REQ" != "none" ]]; then
-  if [[ "$FRAGMENT_REQ" != "auto" ]]; then
+  if [[ "$FRAGMENT_REQ" == "auto" && "$D" == "lavender" && -f "$CONFIG_ROOT/vendor/xiaomi/lavender.config" ]]; then
+    FRAGMENT="$CONFIG_ROOT/vendor/xiaomi/lavender.config"
+  elif [[ "$FRAGMENT_REQ" != "auto" ]]; then
     if [[ -f "$CONFIG_ROOT/$FRAGMENT_REQ" ]]; then
       FRAGMENT="$CONFIG_ROOT/$FRAGMENT_REQ"
     elif [[ -f "$FRAGMENT_REQ" ]]; then
@@ -111,6 +113,18 @@ if [[ "$DEFCONFIG_REQ" != "auto" ]]; then
     exit 1
   fi
 else
+  # Source-backed explicit base-config mappings for trees where the device
+  # fragment is intentionally separate from the SoC/base defconfig.
+  PREFERRED_DEFCONFIG=""
+  case "$D" in
+    lavender)
+      [[ -f "$CONFIG_ROOT/vendor/xiaomi/sdm660_defconfig" ]] && \
+        PREFERRED_DEFCONFIG="vendor/xiaomi/sdm660_defconfig"
+      ;;
+  esac
+  if [[ -n "$PREFERRED_DEFCONFIG" ]]; then
+    DEFCONFIG="$PREFERRED_DEFCONFIG"
+  else
   declare -a candidates=()
   while IFS= read -r f; do candidates+=("$f"); done < <(find "$CONFIG_ROOT" -type f -name '*defconfig' | sort)
   ((${#candidates[@]})) || { echo "ERROR: no *defconfig files found under $CONFIG_ROOT" >&2; exit 1; }
@@ -174,6 +188,7 @@ else
   fi
 
   DEFCONFIG="$best_rel"
+  fi
 fi
 
 # Emit only shell-safe assignments on stdout; diagnostics go to stderr.
