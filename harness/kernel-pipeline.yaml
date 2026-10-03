@@ -140,7 +140,7 @@ pipeline:
                         gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
                         build-essential cpio git curl python3 zip xz-utils zstd \
                         ca-certificates tar gzip \
-                        ${APT_PACKAGES}
+                        ${APT_PACKAGES:-}
 
                       CI_BUILD_DIR="$PWD/ci-build"
                       rm -rf "$CI_BUILD_DIR"
