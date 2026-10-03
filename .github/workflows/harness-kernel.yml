@@ -8,96 +8,120 @@ on:
         required: true
         type: string
       kernel_branch:
-        description: "Kernel branch/tag/commit ref"
+        description: "Kernel branch, tag, or ref"
         required: true
-        default: "main"
         type: string
+        default: "main"
       device:
         description: "Device codename"
         required: true
+        type: string
         default: "garnet"
-        type: string
       arch:
-        description: "Kernel architecture"
+        description: "Architecture"
         required: true
-        default: "arm64"
-        type: string
+        type: choice
+        options: [auto, arm64, arm, x86, riscv]
+        default: auto
       defconfig:
-        description: "Kernel defconfig target"
+        description: "Defconfig (auto = detect)"
         required: true
         type: string
+        default: "auto"
+      config_fragment:
+        description: "Fragment (auto = detect, none = disable)"
+        required: true
+        type: string
+        default: "auto"
       jobs:
-        description: "Parallel build jobs; 0 = auto"
+        description: "Parallel jobs"
         required: true
+        type: string
         default: "0"
-        type: string
       toolchain:
-        description: "auto, clang, or gcc"
+        description: "Toolchain family"
         required: true
-        default: "auto"
         type: choice
-        options:
-          - auto
-          - clang
-          - gcc
+        options: [auto, aosp, proton, neutron, llvm, gcc, system]
+        default: auto
+      toolchain_version:
+        description: "Toolchain version/tag"
+        required: true
+        type: string
+        default: "auto"
       llvm_ias:
-        description: "LLVM IAS: auto, 1, or 0"
+        description: "LLVM IAS"
         required: true
-        default: "auto"
         type: choice
-        options:
-          - auto
-          - "1"
-          - "0"
+        options: [auto, "0", "1"]
+        default: auto
       cross_compile:
-        description: "Optional CROSS_COMPILE prefix"
+        description: "CROSS_COMPILE prefix"
         required: false
-        default: ""
         type: string
-      clang_url:
-        description: "Optional Clang toolchain tarball URL"
-        required: false
-        default: ""
-        type: string
-      gcc_url:
-        description: "Optional GCC toolchain tarball URL"
-        required: false
-        default: ""
-        type: string
-      scheduler_profile:
-        description: "auto, eas, hmp, or none (reporting only)"
-        required: true
         default: "auto"
-        type: choice
-        options:
-          - auto
-          - eas
-          - hmp
-          - none
+      cross_compile_arm32:
+        description: "Optional 32-bit cross compiler"
+        required: false
+        type: string
+        default: ""
+      clang_url:
+        description: "Optional custom Clang archive"
+        required: false
+        type: string
+        default: ""
+      gcc_url:
+        description: "Optional custom GCC archive"
+        required: false
+        type: string
+        default: ""
+      apt_packages:
+        description: "Optional extra apt packages"
+        required: false
+        type: string
+        default: ""
       extra_make_args:
         description: "Optional extra make arguments"
         required: false
-        default: ""
         type: string
+        default: ""
+      scheduler_profile:
+        description: "Scheduler metadata check"
+        required: true
+        type: choice
+        options: [auto, eas, hmp, walt, none]
+        default: auto
       enable_ksu:
         description: "Enable KernelSU"
         required: true
-        default: false
         type: boolean
+        default: false
+      ksu_ref:
+        description: "KernelSU ref"
+        required: false
+        type: string
+        default: ""
       package_anykernel:
-        description: "Create AnyKernel3 ZIP"
+        description: "Package AnyKernel3"
         required: true
-        default: false
         type: boolean
+        default: false
+      anykernel_repo:
+        description: "AnyKernel3 repository"
+        required: false
+        type: string
+        default: "https://github.com/osm0sis/AnyKernel3"
+      anykernel_branch:
+        description: "AnyKernel3 branch"
+        required: false
+        type: string
+        default: "master"
 
 jobs:
   trigger-harness:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
     steps:
-      - name: Validate and trigger Harness
+      - name: Build Harness API payload
         env:
           HARNESS_API_KEY: ${{ secrets.HARNESS_API_KEY }}
           HARNESS_ACCOUNT: ${{ secrets.HARNESS_ACCOUNT_ID }}
@@ -109,84 +133,52 @@ jobs:
           DEVICE: ${{ inputs.device }}
           ARCH: ${{ inputs.arch }}
           DEFCONFIG: ${{ inputs.defconfig }}
+          CONFIG_FRAGMENT: ${{ inputs.config_fragment }}
           JOBS: ${{ inputs.jobs }}
           TOOLCHAIN: ${{ inputs.toolchain }}
+          TOOLCHAIN_VERSION: ${{ inputs.toolchain_version }}
           LLVM_IAS: ${{ inputs.llvm_ias }}
           CROSS_COMPILE: ${{ inputs.cross_compile }}
+          CROSS_COMPILE_ARM32: ${{ inputs.cross_compile_arm32 }}
           CLANG_URL: ${{ inputs.clang_url }}
           GCC_URL: ${{ inputs.gcc_url }}
-          SCHEDULER_PROFILE: ${{ inputs.scheduler_profile }}
+          APT_PACKAGES: ${{ inputs.apt_packages }}
           EXTRA_MAKE_ARGS: ${{ inputs.extra_make_args }}
+          SCHEDULER_PROFILE: ${{ inputs.scheduler_profile }}
           ENABLE_KSU: ${{ inputs.enable_ksu }}
+          KSU_REF: ${{ inputs.ksu_ref }}
           PACKAGE_ANYKERNEL: ${{ inputs.package_anykernel }}
+          ANYKERNEL_REPO: ${{ inputs.anykernel_repo }}
+          ANYKERNEL_BRANCH: ${{ inputs.anykernel_branch }}
         run: |
           set -euo pipefail
-          : "${HARNESS_API_KEY:?HARNESS_API_KEY secret is required}"
-          : "${HARNESS_ACCOUNT:?HARNESS_ACCOUNT_ID secret is required}"
+          python3 - <<'PY'
+          import json, os
+          names = [
+            "KERNEL_REPO","KERNEL_BRANCH","DEVICE","ARCH","DEFCONFIG","CONFIG_FRAGMENT","JOBS",
+            "TOOLCHAIN","TOOLCHAIN_VERSION","LLVM_IAS","CROSS_COMPILE","CROSS_COMPILE_ARM32",
+            "CLANG_URL","GCC_URL","APT_PACKAGES","EXTRA_MAKE_ARGS","SCHEDULER_PROFILE",
+            "ENABLE_KSU","KSU_REF","PACKAGE_ANYKERNEL","ANYKERNEL_REPO","ANYKERNEL_BRANCH"
+          ]
+          payload = {"pipeline": {"identifier": os.environ["PIPELINE_ID"], "variables": [
+            {"name": n, "type": "String", "value": os.environ.get(n, "")} for n in names
+          ]}}
+          # Boolean values are intentionally passed as strings because the Harness pipeline variables are strings.
+          with open("harness-payload.json", "w", encoding="utf-8") as f:
+            json.dump(payload, f, separators=(",", ":"))
+          PY
 
-          yaml_quote() {
-            local value="$1"
-            value="${value//\'/\'\'}"
-            printf "'%s'" "$value"
-          }
-
-          inputs_yaml="$(cat <<EOF
-          pipeline:
-            identifier: $(yaml_quote "$PIPELINE_ID")
-            variables:
-              - name: KERNEL_REPO
-                type: String
-                value: $(yaml_quote "$KERNEL_REPO")
-              - name: KERNEL_BRANCH
-                type: String
-                value: $(yaml_quote "$KERNEL_BRANCH")
-              - name: DEVICE
-                type: String
-                value: $(yaml_quote "$DEVICE")
-              - name: ARCH
-                type: String
-                value: $(yaml_quote "$ARCH")
-              - name: DEFCONFIG
-                type: String
-                value: $(yaml_quote "$DEFCONFIG")
-              - name: JOBS
-                type: String
-                value: $(yaml_quote "$JOBS")
-              - name: TOOLCHAIN
-                type: String
-                value: $(yaml_quote "$TOOLCHAIN")
-              - name: LLVM_IAS
-                type: String
-                value: $(yaml_quote "$LLVM_IAS")
-              - name: CROSS_COMPILE
-                type: String
-                value: $(yaml_quote "$CROSS_COMPILE")
-              - name: CLANG_URL
-                type: String
-                value: $(yaml_quote "$CLANG_URL")
-              - name: GCC_URL
-                type: String
-                value: $(yaml_quote "$GCC_URL")
-              - name: SCHEDULER_PROFILE
-                type: String
-                value: $(yaml_quote "$SCHEDULER_PROFILE")
-              - name: EXTRA_MAKE_ARGS
-                type: String
-                value: $(yaml_quote "$EXTRA_MAKE_ARGS")
-              - name: ENABLE_KSU
-                type: String
-                value: $(yaml_quote "$( [[ "${ENABLE_KSU}" == true ]] && echo true || echo false )")
-              - name: PACKAGE_ANYKERNEL
-                type: String
-                value: $(yaml_quote "$( [[ "${PACKAGE_ANYKERNEL}" == true ]] && echo true || echo false )")
-          EOF
-          )"
-
-          payload="$(jq -n --arg inputs_yaml "$inputs_yaml" '{inputs_yaml:$inputs_yaml}')"
-
-          curl --fail-with-body -sS -X POST \
-            "https://app.harness.io/v1/orgs/${HARNESS_ORG}/projects/${HARNESS_PROJECT}/pipelines/${PIPELINE_ID}/execute?module=CI" \
-            -H "Harness-Account: ${HARNESS_ACCOUNT}" \
+      - name: Trigger Harness pipeline
+        env:
+          HARNESS_API_KEY: ${{ secrets.HARNESS_API_KEY }}
+          HARNESS_ACCOUNT: ${{ secrets.HARNESS_ACCOUNT_ID }}
+          HARNESS_ORG: default
+          HARNESS_PROJECT: ci_build
+          PIPELINE_ID: Universal_Kernel_Build
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --retry 2 --retry-delay 2 -X POST \
+            "https://app.harness.io/pipeline/api/pipeline/execute/${PIPELINE_ID}?accountIdentifier=${HARNESS_ACCOUNT}&orgIdentifier=${HARNESS_ORG}&projectIdentifier=${HARNESS_PROJECT}" \
             -H "x-api-key: ${HARNESS_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d "$payload"
+            --data-binary @harness-payload.json

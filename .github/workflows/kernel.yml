@@ -6,70 +6,116 @@ on:
       kernel_repo:
         description: "Kernel repository URL"
         required: true
-        default: "https://github.com/USER/kernel.git"
+        type: string
+        default: "https://github.com/gianogli/android_kernel_xiaomi_lavender_4.19"
       kernel_branch:
         description: "Kernel branch, tag, or ref"
         required: true
-        default: "main"
-      defconfig:
-        description: "Kernel defconfig target"
-        required: true
-        default: "defconfig"
+        type: string
+        default: "cr11_lavender-dynamic-root"
       device:
         description: "Device/codename label"
         required: true
-        default: "generic"
+        type: string
+        default: "lavender"
       arch:
-        description: "Kernel architecture (arm64, arm, x86, ...)"
+        description: "Architecture (auto, arm64, arm, x86, ...)"
         required: true
-        default: "arm64"
+        type: choice
+        options: [auto, arm64, arm, x86, riscv]
+        default: auto
+      defconfig:
+        description: "Kernel defconfig target (auto = detect)"
+        required: true
+        type: string
+        default: "auto"
+      config_fragment:
+        description: "Config fragment (auto = detect device fragment, none = disable)"
+        required: true
+        type: string
+        default: "auto"
       jobs:
         description: "Parallel jobs; 0 = auto"
         required: true
+        type: string
         default: "0"
-      kernel_target:
-        description: "Optional kernel target; empty = default all"
-        required: false
-        default: ""
-      clang_url:
-        description: "Optional clang tarball URL"
-        required: false
-        default: ""
+      toolchain:
+        description: "Toolchain family"
+        required: true
+        type: choice
+        options: [auto, aosp, proton, neutron, llvm, gcc, system]
+        default: auto
+      toolchain_version:
+        description: "Toolchain revision/tag (auto = source-compatible resolver)"
+        required: true
+        type: string
+        default: "auto"
+      llvm_ias:
+        description: "LLVM IAS mode"
+        required: true
+        type: choice
+        options: [auto, "0", "1"]
+        default: auto
       cross_compile:
-        description: "Optional CROSS_COMPILE prefix"
+        description: "CROSS_COMPILE prefix (auto = detected)"
         required: false
-        default: ""
+        type: string
+        default: "auto"
       cross_compile_arm32:
         description: "Optional 32-bit cross compiler prefix"
         required: false
+        type: string
+        default: ""
+      clang_url:
+        description: "Optional custom Clang archive URL"
+        required: false
+        type: string
+        default: ""
+      gcc_url:
+        description: "Optional custom GCC archive URL"
+        required: false
+        type: string
         default: ""
       apt_packages:
         description: "Optional extra apt packages"
         required: false
+        type: string
         default: ""
       extra_make_args:
         description: "Optional extra make arguments"
         required: false
+        type: string
         default: ""
+      scheduler_profile:
+        description: "Scheduler metadata check (does not alter source config)"
+        required: true
+        type: choice
+        options: [auto, eas, hmp, walt, none]
+        default: auto
       enable_ksu:
         description: "Enable KernelSU"
+        required: true
         type: boolean
         default: false
       ksu_ref:
         description: "Optional KernelSU branch/tag/commit"
         required: false
+        type: string
         default: ""
       package_anykernel:
         description: "Package an AnyKernel3 ZIP"
+        required: true
         type: boolean
         default: false
       anykernel_repo:
         description: "AnyKernel3 repository"
         required: false
+        type: string
         default: "https://github.com/osm0sis/AnyKernel3"
       anykernel_branch:
         description: "AnyKernel3 branch"
         required: false
+        type: string
         default: "master"
 
 permissions:
@@ -79,28 +125,42 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 120
-
     steps:
-      - name: Checkout
+      - name: Checkout CI repository
         uses: actions/checkout@v4
 
-      - name: Dependencies and Build
+      - name: Dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libssl-dev libelf-dev clang lld llvm \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            build-essential cpio git curl python3 zip xz-utils zstd \
+            ca-certificates tar gzip ${{ inputs.apt_packages }}
+
+      - name: Build kernel
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
           KERNEL_REPO: ${{ inputs.kernel_repo }}
           KERNEL_BRANCH: ${{ inputs.kernel_branch }}
-          DEFCONFIG: ${{ inputs.defconfig }}
           DEVICE: ${{ inputs.device }}
           ARCH: ${{ inputs.arch }}
+          DEFCONFIG: ${{ inputs.defconfig }}
+          CONFIG_FRAGMENT: ${{ inputs.config_fragment }}
           JOBS: ${{ inputs.jobs }}
-          KERNEL_TARGET: ${{ inputs.kernel_target }}
-          CLANG_URL: ${{ inputs.clang_url }}
+          TOOLCHAIN: ${{ inputs.toolchain }}
+          TOOLCHAIN_VERSION: ${{ inputs.toolchain_version }}
+          LLVM_IAS: ${{ inputs.llvm_ias }}
           CROSS_COMPILE: ${{ inputs.cross_compile }}
           CROSS_COMPILE_ARM32: ${{ inputs.cross_compile_arm32 }}
+          CLANG_URL: ${{ inputs.clang_url }}
+          GCC_URL: ${{ inputs.gcc_url }}
           APT_PACKAGES: ${{ inputs.apt_packages }}
           EXTRA_MAKE_ARGS: ${{ inputs.extra_make_args }}
+          SCHEDULER_PROFILE: ${{ inputs.scheduler_profile }}
           ENABLE_KSU: ${{ inputs.enable_ksu }}
           KSU_REF: ${{ inputs.ksu_ref }}
           PACKAGE_ANYKERNEL: ${{ inputs.package_anykernel }}
@@ -109,15 +169,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            bc bison flex libssl-dev libelf-dev clang lld llvm \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-            build-essential cpio git curl python3 zip xz-utils \
-            ca-certificates tar gzip ${{ inputs.apt_packages }}
-
-          chmod +x ./scripts/build_kernel.sh
+          chmod +x scripts/build_kernel.sh scripts/detect_defconfig.sh scripts/toolchain_resolver.sh
           ./scripts/build_kernel.sh
 
       - name: Upload kernel artifacts

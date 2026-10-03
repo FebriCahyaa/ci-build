@@ -16,38 +16,38 @@ pipeline:
       value: generic
     - name: ARCH
       type: String
-      value: arm64
+      value: auto
     - name: DEFCONFIG
       type: String
-      value: <+input>
+      value: auto
+    - name: CONFIG_FRAGMENT
+      type: String
+      value: auto
     - name: JOBS
       type: String
       value: "0"
-    - name: KERNEL_TARGET
-      type: String
-      value: ""
     - name: TOOLCHAIN
       type: String
       value: auto
-    - name: LLVM
+    - name: TOOLCHAIN_VERSION
       type: String
-      value: "1"
+      value: auto
     - name: LLVM_IAS
       type: String
       value: auto
     - name: CROSS_COMPILE
       type: String
-      value: ""
+      value: auto
     - name: CROSS_COMPILE_ARM32
-      type: String
-      value: ""
-    - name: APT_PACKAGES
       type: String
       value: ""
     - name: CLANG_URL
       type: String
       value: ""
     - name: GCC_URL
+      type: String
+      value: ""
+    - name: APT_PACKAGES
       type: String
       value: ""
     - name: EXTRA_MAKE_ARGS
@@ -102,16 +102,16 @@ pipeline:
                       DEVICE: <+pipeline.variables.DEVICE>
                       ARCH: <+pipeline.variables.ARCH>
                       DEFCONFIG: <+pipeline.variables.DEFCONFIG>
+                      CONFIG_FRAGMENT: <+pipeline.variables.CONFIG_FRAGMENT>
                       JOBS: <+pipeline.variables.JOBS>
-                      KERNEL_TARGET: <+pipeline.variables.KERNEL_TARGET>
                       TOOLCHAIN: <+pipeline.variables.TOOLCHAIN>
-                      LLVM: <+pipeline.variables.LLVM>
+                      TOOLCHAIN_VERSION: <+pipeline.variables.TOOLCHAIN_VERSION>
                       LLVM_IAS: <+pipeline.variables.LLVM_IAS>
                       CROSS_COMPILE: <+pipeline.variables.CROSS_COMPILE>
                       CROSS_COMPILE_ARM32: <+pipeline.variables.CROSS_COMPILE_ARM32>
-                      APT_PACKAGES: <+pipeline.variables.APT_PACKAGES>
                       CLANG_URL: <+pipeline.variables.CLANG_URL>
                       GCC_URL: <+pipeline.variables.GCC_URL>
+                      APT_PACKAGES: <+pipeline.variables.APT_PACKAGES>
                       EXTRA_MAKE_ARGS: <+pipeline.variables.EXTRA_MAKE_ARGS>
                       SCHEDULER_PROFILE: <+pipeline.variables.SCHEDULER_PROFILE>
                       ENABLE_KSU: <+pipeline.variables.ENABLE_KSU>
@@ -123,12 +123,11 @@ pipeline:
                     command: |
                       set -euo pipefail
                       export DEBIAN_FRONTEND=noninteractive
-
                       apt-get update
                       apt-get install -y --no-install-recommends \
                         bc bison flex libssl-dev libelf-dev clang lld llvm \
                         gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-                        build-essential cpio git curl python3 zip xz-utils \
+                        build-essential cpio git curl python3 zip xz-utils zstd \
                         ca-certificates tar gzip \
                         ${APT_PACKAGES}
 
@@ -136,7 +135,7 @@ pipeline:
                       rm -rf "$CI_BUILD_DIR"
                       git clone --depth=1 --branch main \
                         https://github.com/FebriCahyaa/ci-build.git "$CI_BUILD_DIR"
-
-                      chmod +x "$CI_BUILD_DIR/scripts/build_kernel.sh"
-                      WORK_DIR="$PWD/work" \
-                        "$CI_BUILD_DIR/scripts/build_kernel.sh"
+                      chmod +x "$CI_BUILD_DIR/scripts/build_kernel.sh" \
+                                 "$CI_BUILD_DIR/scripts/detect_defconfig.sh" \
+                                 "$CI_BUILD_DIR/scripts/toolchain_resolver.sh"
+                      WORK_DIR="$PWD/work" "$CI_BUILD_DIR/scripts/build_kernel.sh"
