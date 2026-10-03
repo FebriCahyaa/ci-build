@@ -43,20 +43,49 @@ def api_get(path: str) -> object:
 
 def status_of(obj: object) -> str:
     if isinstance(obj, dict):
-        for key in ("status", "pipelineStatus", "executionStatus", "state"):
+        # Harness API envelope has its own "status" field.
+        # The actual pipeline state is inside data.planExecution.
+        data = obj.get("data")
+
+        if isinstance(data, dict):
+            plan_execution = data.get("planExecution")
+
+            if isinstance(plan_execution, dict):
+                for key in (
+                    "status",
+                    "pipelineStatus",
+                    "executionStatus",
+                    "state",
+                ):
+                    val = plan_execution.get(key)
+                    if isinstance(val, str) and val.strip():
+                        return val
+
+            for key in ("pipelineExecutionSummary", "executionData"):
+                nested = data.get(key)
+                if isinstance(nested, (dict, list)):
+                    found = status_of(nested)
+                    if found:
+                        return found
+
+        # Only use these as fallback.
+        for key in (
+            "pipelineStatus",
+            "executionStatus",
+            "state",
+        ):
             val = obj.get(key)
             if isinstance(val, str) and val.strip():
                 return val
-        for key in ("data", "pipelineExecutionSummary", "executionData"):
-            if key in obj:
-                found = status_of(obj[key])
-                if found:
-                    return found
-    elif isinstance(obj, list):
+
+        return ""
+
+    if isinstance(obj, list):
         for item in obj:
             found = status_of(item)
             if found:
                 return found
+
     return ""
 
 
