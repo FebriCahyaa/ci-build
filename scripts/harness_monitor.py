@@ -34,6 +34,7 @@ RELEASE_TAG = f"harness-{PLAN}"
 
 TERMINAL = {"SUCCEEDED","SUCCESS","FAILED","FAILURE","ERROR","ERRORED","ABORTED","EXPIRED","REJECTED","STOPPED","CANCELED"}
 ACTIVE = {"RUNNING","IN_PROGRESS","QUEUED","NOT_STARTED","PAUSED","WAITING"}
+RUNNING_STATES = {"RUNNING", "IN_PROGRESS"}
 
 DONE_STATES = TERMINAL | {"SKIPPED", "IGNORED", "NOT_RUN"}
 
@@ -349,6 +350,64 @@ def dedupe_nodes(
     return list(selected.values())
 
 
+def infer_active_children(
+    raw_nodes: list[tuple[int, str, str, str, str]],
+) -> list[tuple[int, str, str, str, str]]:
+    """Repair sparse Harness graph data for the current active step.
+
+    Harness can briefly return the stage as RUNNING while its child step is
+    either reported without a parent stage or has NOT_STARTED/blank state.
+    For this pipeline shape there is one active stage and one non-terminal
+    child, so associating that child with the active stage is deterministic
+    enough to avoid the misleading "Active: 0" display.
+    """
+    active_stages = [
+        name
+        for _depth, name, _node, state, kind in raw_nodes
+        if kind == "stage" and norm(state) in RUNNING_STATES and name
+    ]
+
+    if not active_stages:
+        return raw_nodes
+
+    updated = list(raw_nodes)
+
+    # When Harness returns the child as a top-level/Pipeline node, attach it
+    # to the sole active stage. Only do this when there is exactly one active
+    # stage and exactly one non-terminal non-stage node to avoid guessing in
+    # multi-stage pipelines.
+    if len(active_stages) == 1:
+        target_stage = active_stages[0]
+        candidates = [
+            index
+            for index, (_depth, stage, _name, state, kind) in enumerate(updated)
+            if kind != "stage"
+            and (not stage or stage.casefold() == "pipeline")
+            and norm(state) not in DONE_STATES
+        ]
+        if len(candidates) == 1:
+            index = candidates[0]
+            depth, _old_stage, name, state, kind = updated[index]
+            updated[index] = (depth, target_stage, name, state, kind)
+
+    by_stage: dict[str, list[int]] = {}
+    for index, (_depth, stage, _name, state, kind) in enumerate(updated):
+        if kind == "stage" or stage not in active_stages:
+            continue
+        if norm(state) in DONE_STATES or norm(state) in RUNNING_STATES:
+            continue
+        by_stage.setdefault(stage, []).append(index)
+
+    for stage, indexes in by_stage.items():
+        if len(indexes) != 1:
+            continue
+        index = indexes[0]
+        depth, stage_name, name, _state, kind = updated[index]
+        updated[index] = (depth, stage_name, name, "RUNNING", kind)
+
+    return updated
+
+
 def aggregate_status(states: list[str]) -> str:
     normalized = [
         norm(state)
@@ -395,14 +454,9 @@ def aggregate_status(states: list[str]) -> str:
     return normalized[0] if normalized else "UNKNOWN"
 
 
-def pipeline_tree(
-    graph: object,
-) -> tuple[
-    list[tuple[str, str, list[tuple[str, str]]]],
-    list[tuple[int, str, str, str, str]],
-]:
-    raw = dedupe_nodes(nodes_of(graph))
-
+def tree_from_raw(
+    raw: list[tuple[int, str, str, str, str]],
+) -> list[tuple[str, str, list[tuple[str, str]]]]:
     groups = {}
     stage_order = []
 
@@ -413,9 +467,7 @@ def pipeline_tree(
             groups[stage_name] = []
             stage_order.append(stage_name)
 
-        groups[stage_name].append(
-            (name, state, kind, depth)
-        )
+        groups[stage_name].append((name, state, kind, depth))
 
     tree = []
 
@@ -431,10 +483,7 @@ def pipeline_tree(
         children_entries = [
             (name, state, kind, depth)
             for name, state, kind, depth in entries
-            if not (
-                kind == "stage"
-                and name == stage_name
-            )
+            if not (kind == "stage" and name == stage_name)
         ]
 
         stage_state = (
@@ -443,8 +492,7 @@ def pipeline_tree(
             else aggregate_status(
                 [
                     state
-                    for _name, state, _kind, _depth
-                    in children_entries
+                    for _name, state, _kind, _depth in children_entries
                 ]
             )
         )
@@ -457,28 +505,28 @@ def pipeline_tree(
             key=lambda item: (item[3], item[0]),
         ):
             key = name.casefold()
-
             if key in seen:
                 continue
-
             seen.add(key)
             children.append((name, state))
-
             if len(children) >= TREE_MAX_STEPS:
                 break
 
-        tree.append(
-            (
-                stage_name,
-                stage_state,
-                children,
-            )
-        )
-
+        tree.append((stage_name, stage_state, children))
         if len(tree) >= TREE_MAX_STAGES:
             break
 
-    return tree, raw
+    return tree
+
+
+def pipeline_tree(
+    graph: object,
+) -> tuple[
+    list[tuple[str, str, list[tuple[str, str]]]],
+    list[tuple[int, str, str, str, str]],
+]:
+    raw = dedupe_nodes(nodes_of(graph))
+    return tree_from_raw(raw), raw
 
 
 def current_node(
@@ -488,7 +536,7 @@ def current_node(
         item
         for item in raw_nodes
         if item[4] == "step"
-        and norm(item[3]) in ACTIVE
+        and norm(item[3]) in RUNNING_STATES
     ]
 
     if active_steps:
@@ -508,7 +556,7 @@ def current_node(
     active_nodes = [
         item
         for item in raw_nodes
-        if norm(item[3]) in ACTIVE
+        if norm(item[3]) in RUNNING_STATES
     ]
 
     if active_nodes:
@@ -566,7 +614,7 @@ def progress_of(
     active = sum(
         1
         for state in unique.values()
-        if state in ACTIVE
+        if state in RUNNING_STATES
     )
 
     return done, total, active
@@ -937,11 +985,13 @@ def render(
         f"{html.escape(status or 'UNKNOWN')}"
         f"</code>\n\n"
         f"{tree_text or '📦 <b>PIPELINE</b>'}\n\n"
-        f"🎯 Current: <code>{current}</code>\n"
-        f"📊 <code>{bar}</code> "
+        f"🎯 Stage: <code>{html.escape(stage or '-')}</code>\n"
+        f"🔨 Step: <code>{html.escape(step or '-')}</code>\n"
+        f"📊 Pipeline: <code>{bar}</code> "
         f"<b>{pct}</b> <code>{spinner}</code>\n"
         f"✅ Completed: <code>{done}/{total}</code>\n"
         f"⚡ Active: <code>{active}</code>\n"
+        f"💓 Monitor poll: <code>#{frame}</code>\n"
         f"⏱ <code>{duration(elapsed)}</code>\n"
         f"🆔 <code>{html.escape(PLAN)}</code>"
     )
@@ -996,11 +1046,12 @@ def main() -> int:
                 f"&orgIdentifier={urllib.parse.quote(ORG)}"
                 f"&projectIdentifier={urllib.parse.quote(PROJECT)}"
             )
+            detail_query = query + "&renderFullBottomGraph=true"
 
             details = api_get(
                 "/pipeline/api/pipelines/execution/v2/"
                 f"{urllib.parse.quote(PLAN, safe='')}"
-                f"{query}"
+                f"{detail_query}"
             )
 
             graph = api_get(
@@ -1027,13 +1078,16 @@ def main() -> int:
         if not raw_nodes:
             tree, raw_nodes = pipeline_tree(details)
 
+        raw_nodes = infer_active_children(raw_nodes)
+        tree = tree_from_raw(raw_nodes)
+
         stage, step = current_node(raw_nodes)
 
         if not status:
             active_nodes = [
                 node
                 for node in raw_nodes
-                if norm(node[3]) in ACTIVE
+                if norm(node[3]) in RUNNING_STATES
             ]
 
             if active_nodes:
@@ -1161,7 +1215,7 @@ def main() -> int:
         print(
             f"[monitor] poll={frame} status={state} "
             f"progress={done_nodes}/{total_nodes} active={active_nodes_count} "
-            f"current={step or stage or '-'} elapsed={elapsed}s",
+            f"stage={stage or '-'} step={step or '-'} elapsed={elapsed}s",
             flush=True,
         )
 

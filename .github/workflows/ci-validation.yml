@@ -62,6 +62,7 @@ jobs:
           set -euo pipefail
           chmod +x scripts/*.sh
           test -x scripts/apply_patch_series.sh
+          test -x scripts/run_with_heartbeat.sh
           test -x scripts/set_kernel_name.sh
           test -f kernel-name
           test "$(awk 'NF && $0 !~ /^[[:space:]]*#/ {count++} END {print count+0}' kernel-name)" -eq 1
@@ -70,6 +71,11 @@ jobs:
           test -f patches/root-manager/resukisu/4.19/series.conf
           test -f patches/upstream/codelinaro/sdm660-4.19/series.conf
           test -f patches/features/lto-plus/lavender-4.19/thinlto.config
+
+      - name: Python monitor validation
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/harness_monitor.py scripts/patch_content_check.py
 
       - name: Patch format and series validation
         run: |

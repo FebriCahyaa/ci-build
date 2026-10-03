@@ -100,6 +100,19 @@ BUILD_LOG="$WORK/build.log"
 
 mkdir -p "$WORK" "$ARTIFACTS"
 
+export CI_HEARTBEAT_SECONDS="${CI_HEARTBEAT_SECONDS:-15}"
+
+ci_phase() {
+  local label="$1"
+  echo "[CI-PHASE] ${label}" | tee -a "$BUILD_LOG"
+}
+
+run_live() {
+  local label="$1"
+  shift
+  "$SCRIPT_DIR/run_with_heartbeat.sh" "$label" "$BUILD_LOG" "$@"
+}
+
 FAIL_HANDLED=false
 
 fail() {
@@ -183,6 +196,7 @@ else
 fi
 
 cd "$SRC_DIR"
+ci_phase "source-checkout"
 
 COMMIT="$(git log -1 --pretty='%h %s')"
 COMMIT_SHA="$(git rev-parse HEAD)"
@@ -200,7 +214,8 @@ ARCH="$ARCH" DEVICE="$DEVICE" DEFCONFIG="$DEFCONFIG" CONFIG_FRAGMENT="$CONFIG_FR
   --device "$DEVICE" \
   --defconfig "$DEFCONFIG" \
   --fragment "$CONFIG_FRAGMENT" \
-  > "$DETECT_ENV" || fail "auto-detect"
+  > "$DETECT_ENV" \
+  2> >(tee -a "$BUILD_LOG" >&2) || fail "auto-detect"
 
 source "$DETECT_ENV"
 
@@ -437,6 +452,7 @@ else
   ROOT_MANAGER="none"
 fi
 
+ci_phase "config-patches"
 if ! SOURCE_DIR="$SRC_DIR" \
      DEVICE="$DEVICE" \
      KERNEL_VERSION="$DETECTED_KERNEL_VERSION" \
@@ -463,7 +479,8 @@ CLANG_URL="$CLANG_URL" \
 GCC_URL="$GCC_URL" \
 "$SCRIPT_DIR/toolchain_resolver.sh" \
   "$SRC_DIR" "$WORK" \
-  > "$TOOLCHAIN_ENV" || fail "toolchain resolution"
+  > "$TOOLCHAIN_ENV" \
+  2> >(tee -a "$BUILD_LOG" >&2) || fail "toolchain resolution"
 
 source "$TOOLCHAIN_ENV"
 
@@ -621,18 +638,19 @@ printf 'ksu_hook_mode=%s\n' "$KSU_HOOK_MODE" >> "$ARTIFACTS/build-info.txt"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
-"${MAKE_CMD[@]}" "$DETECTED_DEFCONFIG" > "$BUILD_LOG" 2>&1 || fail "defconfig"
+ci_phase "defconfig"
+run_live "defconfig" "${MAKE_CMD[@]}" "$DETECTED_DEFCONFIG" || fail "defconfig"
 
 if [[ -n "$SELECTED_FRAGMENT" ]]; then
   if [[ -x "$SRC_DIR/scripts/kconfig/merge_config.sh" ]]; then
-    "$SRC_DIR/scripts/kconfig/merge_config.sh" \
+    run_live "config-fragment" \
+      "$SRC_DIR/scripts/kconfig/merge_config.sh" \
       -O "$OUT" \
       "$OUT/.config" \
-      "$SELECTED_FRAGMENT" \
-      >> "$BUILD_LOG" 2>&1 || fail "config fragment"
+      "$SELECTED_FRAGMENT" || fail "config fragment"
   else
     cat "$SELECTED_FRAGMENT" >> "$OUT/.config"
-    "${MAKE_CMD[@]}" olddefconfig >> "$BUILD_LOG" 2>&1 || fail "fragment olddefconfig"
+    run_live "fragment-olddefconfig" "${MAKE_CMD[@]}" olddefconfig || fail "fragment olddefconfig"
   fi
 elif [[ "$CONFIG_FRAGMENT" != none && "$CONFIG_FRAGMENT" != auto && -z "$SELECTED_FRAGMENT" ]]; then
   fail "config fragment not resolved"
@@ -657,6 +675,7 @@ if ! SOURCE_DIR="$SRC_DIR" \
   fail "config patch profile"
 fi
 
+ci_phase "kernel-name"
 # Kernel name is intentionally independent from source patches.
 if ! CONFIG_FILE="$OUT/.config" \
      KERNEL_NAME="$KERNEL_NAME" \
@@ -706,6 +725,7 @@ fi
 
 echo "Detected scheduler evidence: $SCHEDULER_DETECTED" >> "$ARTIFACTS/build-info.txt"
 
+ci_phase "compile"
 tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
 📱 $DEVICE | 🏗 $DETECTED_ARCH
 ⚙️ <code>$DETECTED_DEFCONFIG</code>
@@ -720,12 +740,13 @@ tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
 # ------------------------------------------------------------
 
 if [[ -n "$KERNEL_TARGET" ]]; then
-  "${MAKE_CMD[@]}" "$KERNEL_TARGET" >> "$BUILD_LOG" 2>&1 || fail "compile"
+  run_live "compile" "${MAKE_CMD[@]}" "$KERNEL_TARGET" || fail "compile"
 else
-  "${MAKE_CMD[@]}" >> "$BUILD_LOG" 2>&1 || fail "compile"
+  run_live "compile" "${MAKE_CMD[@]}" || fail "compile"
 fi
 
 # ------------------------------------------------------------
+ci_phase "collect-artifacts"
 # Collect artifacts
 # ------------------------------------------------------------
 
@@ -786,21 +807,22 @@ done
 if [[ "$PACKAGE_ANYKERNEL" == "true" ]]; then
   [[ -x "$SCRIPT_DIR/build_anykernel.sh" ]] || fail "Custom AnyKernel packer missing"
 
-  ARTIFACT_DIR="$ARTIFACTS" \
-  OUTPUT_DIR="$ARTIFACTS" \
-  WORK_DIR="$WORK" \
-  DEVICE="$DEVICE" \
-  KERNEL_VERSION="$DETECTED_KERNEL_VERSION" \
-  ROM_FAMILY="$ROM_FAMILY" \
-  ANYKERNEL_PROFILE="$ANYKERNEL_PROFILE" \
-  ANYKERNEL3_REPO="$ANYKERNEL3_REPO" \
-  ANYKERNEL3_REF="$ANYKERNEL3_REF" \
-  KERNEL_IMAGE="$IMAGE" \
-  "$SCRIPT_DIR/build_anykernel.sh" \
-  >> "$BUILD_LOG" 2>&1 || fail "AnyKernel package"
+  run_live "anykernel-package" env \
+    ARTIFACT_DIR="$ARTIFACTS" \
+    OUTPUT_DIR="$ARTIFACTS" \
+    WORK_DIR="$WORK" \
+    DEVICE="$DEVICE" \
+    KERNEL_VERSION="$DETECTED_KERNEL_VERSION" \
+    ROM_FAMILY="$ROM_FAMILY" \
+    ANYKERNEL_PROFILE="$ANYKERNEL_PROFILE" \
+    ANYKERNEL3_REPO="$ANYKERNEL3_REPO" \
+    ANYKERNEL3_REF="$ANYKERNEL3_REF" \
+    KERNEL_IMAGE="$IMAGE" \
+    "$SCRIPT_DIR/build_anykernel.sh" || fail "AnyKernel package"
 fi
 
 # ------------------------------------------------------------
+ci_phase "package"
 # Final archive
 # ------------------------------------------------------------
 
