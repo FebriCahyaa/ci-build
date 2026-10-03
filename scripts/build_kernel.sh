@@ -405,6 +405,11 @@ KSU_LAYOUT_RESOLVED="$([[ "$KSU_NESTED_EXPECTED" == true ]] && echo nested || ec
 #
 # Applied only for the ReSukiSU + SUSFS path in the ephemeral
 # CI checkout. The upstream kernel repository is not modified.
+#
+# ReSukiSU also performs a static-symbol export check when
+# CONFIG_KALLSYMS_ALL is disabled. For legacy/non-GKI trees, export
+# the required SELinux objects in the ephemeral checkout instead of
+# forcing CONFIG_KALLSYMS_ALL on the kernel configuration.
 # ------------------------------------------------------------
 
 apply_resukisu_susfs_inline_compat() {
@@ -431,6 +436,44 @@ def read(relpath):
     if not path.is_file():
         fail(f"missing kernel source file: {relpath}")
     return path, path.read_text()
+
+
+# ------------------------------------------------------------
+# security/selinux/selinuxfs.c
+#
+# ReSukiSU static_export_check.mk requires these SELinux objects
+# to be non-static when CONFIG_KALLSYMS_ALL is disabled.
+# ------------------------------------------------------------
+
+path, text = read("security/selinux/selinuxfs.c")
+before = text
+
+# write_op: tolerate both declaration forms used by vendor trees.
+text = text.replace(
+    "static ssize_t (*const write_op[])(struct file *, char *, size_t) = {",
+    "ssize_t (*const write_op[])(struct file *, char *, size_t) = {",
+    1,
+)
+text = text.replace(
+    "static ssize_t (*write_op[])(struct file *, char *, size_t) = {",
+    "ssize_t (*write_op[])(struct file *, char *, size_t) = {",
+    1,
+)
+
+# This exact declaration is the current lavender build failure.
+text = text.replace(
+    "static const struct file_operations sel_handle_status_ops = {",
+    "const struct file_operations sel_handle_status_ops = {",
+    1,
+)
+
+if text == before:
+    if "const struct file_operations sel_handle_status_ops = {" not in text:
+        fail("unable to find ReSukiSU SELinux status_ops declaration")
+    print("[ksu] SELinux static exports already compatible")
+else:
+    path.write_text(text)
+    print("[ksu] patched security/selinux/selinuxfs.c static exports")
 
 
 # ------------------------------------------------------------
@@ -557,6 +600,14 @@ PY2
   echo "[ksu] validating patched kernel source: $SRC_DIR"
 
   grep -q 'ksu_handle_setresuid'     "$SRC_DIR/kernel/sys.c"     || fail "missing ksu_handle_setresuid in kernel/sys.c"
+
+  grep -q 'const struct file_operations sel_handle_status_ops' \
+    "$SRC_DIR/security/selinux/selinuxfs.c" \
+    || fail "missing exported sel_handle_status_ops in security/selinux/selinuxfs.c"
+
+  ! grep -qE '^static const struct file_operations sel_handle_status_ops' \
+    "$SRC_DIR/security/selinux/selinuxfs.c" \
+    || fail "static sel_handle_status_ops remains in security/selinux/selinuxfs.c"
 
   grep -q 'ksu_handle_execveat'     "$SRC_DIR/fs/exec.c"     || fail "missing ksu_handle_execveat in fs/exec.c"
 
