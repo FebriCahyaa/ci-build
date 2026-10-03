@@ -10,7 +10,7 @@ pipeline:
       value: <+input>
     - name: KERNEL_BRANCH
       type: String
-      value: main
+      value: <+input>
     - name: KERNEL_REF_TYPE
       type: String
       value: auto
