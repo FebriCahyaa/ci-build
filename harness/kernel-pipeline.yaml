@@ -121,6 +121,22 @@ pipeline:
       type: String
       value: <+input>
 
+    - name: PATCH_PROFILE
+      type: String
+      value: auto
+
+    - name: UPSTREAM_PROFILE
+      type: String
+      value: auto
+
+    - name: LTO_PLUS
+      type: String
+      value: false
+
+    - name: KERNEL_NAME
+      type: String
+      value: ""
+
   stages:
     - stage:
         name: Kernel Build
@@ -194,6 +210,11 @@ pipeline:
                       ANYKERNEL_PROFILE: <+pipeline.variables.ANYKERNEL_PROFILE>
                       ANYKERNEL3_REPO: <+pipeline.variables.ANYKERNEL3_REPO>
                       ANYKERNEL3_REF: <+pipeline.variables.ANYKERNEL3_REF>
+
+                      PATCH_PROFILE: <+pipeline.variables.PATCH_PROFILE>
+                      UPSTREAM_PROFILE: <+pipeline.variables.UPSTREAM_PROFILE>
+                      LTO_PLUS: <+pipeline.variables.LTO_PLUS>
+                      KERNEL_NAME: <+pipeline.variables.KERNEL_NAME>
 
                       RUN_URL: <+pipeline.executionUrl>
 

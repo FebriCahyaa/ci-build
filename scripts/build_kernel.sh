@@ -44,6 +44,10 @@ APT_PACKAGES="${APT_PACKAGES:-}"
 EXTRA_MAKE_ARGS="${EXTRA_MAKE_ARGS:-}"
 
 SCHEDULER_PROFILE="${SCHEDULER_PROFILE:-auto}"
+PATCH_PROFILE="${PATCH_PROFILE:-auto}"
+UPSTREAM_PROFILE="${UPSTREAM_PROFILE:-auto}"
+LTO_PLUS="${LTO_PLUS:-false}"
+KERNEL_NAME="${KERNEL_NAME:-}"
 
 # KernelSU:
 #   false = never install missing KernelSU
@@ -401,240 +405,31 @@ fi
 KSU_LAYOUT_RESOLVED="$([[ "$KSU_NESTED_EXPECTED" == true ]] && echo nested || echo symlink)"
 
 # ------------------------------------------------------------
-# ReSukiSU SUSFS inline-hook compatibility layer
+# Modular patch registry
 #
-# Applied only for the ReSukiSU + SUSFS path in the ephemeral
-# CI checkout. The upstream kernel repository is not modified.
-#
-# ReSukiSU also performs a static-symbol export check when
-# CONFIG_KALLSYMS_ALL is disabled. For legacy/non-GKI trees, export
-# the required SELinux objects in the ephemeral checkout instead of
-# forcing CONFIG_KALLSYMS_ALL on the kernel configuration.
+# Source fixes live under patches/ and are selected by device,
+# kernel version, root manager, and upstream profile.
 # ------------------------------------------------------------
 
-apply_resukisu_susfs_inline_compat() {
-  [[ "${KSU_PROVIDER:-}" == "resukisu" ]] || return 0
-  [[ "${KSU_SUSFS_REQUIRED:-false}" == "true" ]] || return 0
-  [[ -n "${SRC_DIR:-}" && -d "$SRC_DIR" ]] || fail "ReSukiSU compatibility: kernel source directory is unavailable: ${SRC_DIR:-<empty>}"
 
-  echo "[ksu] Applying ReSukiSU SUSFS inline-hook compatibility layer"
+if [[ "$ENABLE_KSU" == "true" ]]; then
+  ROOT_MANAGER="${KSU_PROVIDER:-none}"
+else
+  ROOT_MANAGER="none"
+fi
 
-  python3 - "$SRC_DIR" <<'PY2'
-from pathlib import Path
-import re
-import sys
-
-root = Path(sys.argv[1])
-
-
-def fail(msg):
-    raise SystemExit(f"[ksu] {msg}")
-
-
-def read(relpath):
-    path = root / relpath
-    if not path.is_file():
-        fail(f"missing kernel source file: {relpath}")
-    return path, path.read_text()
-
-
-# ------------------------------------------------------------
-# security/selinux/selinuxfs.c
-#
-# ReSukiSU static_export_check.mk requires these SELinux objects
-# to be non-static when CONFIG_KALLSYMS_ALL is disabled.
-# ------------------------------------------------------------
-
-path, text = read("security/selinux/selinuxfs.c")
-before = text
-
-# write_op: tolerate both declaration forms used by vendor trees.
-text = text.replace(
-    "static ssize_t (*const write_op[])(struct file *, char *, size_t) = {",
-    "ssize_t (*const write_op[])(struct file *, char *, size_t) = {",
-    1,
-)
-text = text.replace(
-    "static ssize_t (*write_op[])(struct file *, char *, size_t) = {",
-    "ssize_t (*write_op[])(struct file *, char *, size_t) = {",
-    1,
-)
-
-# This exact declaration is the current lavender build failure.
-text = text.replace(
-    "static const struct file_operations sel_handle_status_ops = {",
-    "const struct file_operations sel_handle_status_ops = {",
-    1,
-)
-
-if text == before:
-    if "const struct file_operations sel_handle_status_ops = {" not in text:
-        fail("unable to find ReSukiSU SELinux status_ops declaration")
-    print("[ksu] SELinux static exports already compatible")
-else:
-    path.write_text(text)
-    print("[ksu] patched security/selinux/selinuxfs.c static exports")
-
-
-# ------------------------------------------------------------
-# kernel/sys.c
-# ------------------------------------------------------------
-
-path, text = read("kernel/sys.c")
-
-if "ksu_handle_setresuid" not in text:
-    pattern = (
-        r"(long\s+__sys_setresuid\s*"
-        r"\(\s*uid_t\s+ruid\s*,\s*uid_t\s+euid\s*,\s*uid_t\s+suid\s*\)"
-        r"\s*\{)"
-    )
-
-    replacement = (
-        "#ifdef CONFIG_KSU_SUSFS\n"
-        "extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);\n"
-        "#endif\n\n"
-        r"\1"
-        "\n#ifdef CONFIG_KSU_SUSFS\n"
-        "    (void)ksu_handle_setresuid(ruid, euid, suid);\n"
-        "#endif"
-    )
-
-    text, count = re.subn(
-        pattern,
-        replacement,
-        text,
-        count=1,
-        flags=re.MULTILINE,
-    )
-
-    if count != 1:
-        fail("unable to patch kernel/sys.c for ksu_handle_setresuid")
-
-    path.write_text(text)
-    print("[ksu] patched kernel/sys.c")
-else:
-    print("[ksu] kernel/sys.c already contains ksu_handle_setresuid")
-
-
-# ------------------------------------------------------------
-# fs/read_write.c
-#
-# Remove only the legacy marker/guard.
-# Keep the existing direct ksu_handle_sys_read() call.
-# ------------------------------------------------------------
-
-path, text = read("fs/read_write.c")
-
-before = text
-
-text = re.sub(
-    r"^[ \t]*extern\s+bool\s+ksu_vfs_read_hook\s+__read_mostly;\s*\n",
-    "",
-    text,
-    count=1,
-    flags=re.MULTILINE,
-)
-
-text = re.sub(
-    r"^[ \t]*if\s*\(\s*unlikely\(\s*ksu_vfs_read_hook\s*\)\s*\)\s*\n",
-    "",
-    text,
-    count=1,
-    flags=re.MULTILINE,
-)
-
-if text != before:
-    path.write_text(text)
-    print("[ksu] patched fs/read_write.c")
-else:
-    print("[ksu] fs/read_write.c already clean")
-
-
-# ------------------------------------------------------------
-# drivers/input/input.c
-#
-# Remove only the legacy marker/guard.
-# Keep the existing direct input handler call.
-# ------------------------------------------------------------
-
-path, text = read("drivers/input/input.c")
-
-before = text
-
-text = re.sub(
-    r"^[ \t]*extern\s+bool\s+ksu_input_hook\s+__read_mostly;\s*\n",
-    "",
-    text,
-    count=1,
-    flags=re.MULTILINE,
-)
-
-text = re.sub(
-    r"^[ \t]*if\s*\(\s*unlikely\(\s*ksu_input_hook\s*\)\s*\)\s*\n",
-    "",
-    text,
-    count=1,
-    flags=re.MULTILINE,
-)
-
-if text != before:
-    path.write_text(text)
-    print("[ksu] patched drivers/input/input.c")
-else:
-    print("[ksu] drivers/input/input.c already clean")
-
-
-print("[ksu] source patching completed")
-PY2
-
-
-  # ----------------------------------------------------------
-  # Runtime validation against the actual kernel checkout.
-  # This runs only after SRC_DIR has been created and patched.
-  # ----------------------------------------------------------
-
-  [[ -n "${SRC_DIR:-}" ]] || fail     "ReSukiSU compatibility: SRC_DIR is empty"
-
-  [[ -d "$SRC_DIR" ]] || fail     "ReSukiSU compatibility: SRC_DIR does not exist: $SRC_DIR"
-
-  echo "[ksu] validating patched kernel source: $SRC_DIR"
-
-  grep -q 'ksu_handle_setresuid'     "$SRC_DIR/kernel/sys.c"     || fail "missing ksu_handle_setresuid in kernel/sys.c"
-
-  grep -q 'const struct file_operations sel_handle_status_ops' \
-    "$SRC_DIR/security/selinux/selinuxfs.c" \
-    || fail "missing exported sel_handle_status_ops in security/selinux/selinuxfs.c"
-
-  ! grep -qE '^static const struct file_operations sel_handle_status_ops' \
-    "$SRC_DIR/security/selinux/selinuxfs.c" \
-    || fail "static sel_handle_status_ops remains in security/selinux/selinuxfs.c"
-
-  grep -q 'ksu_handle_execveat'     "$SRC_DIR/fs/exec.c"     || fail "missing ksu_handle_execveat in fs/exec.c"
-
-  grep -q 'ksu_handle_faccessat'     "$SRC_DIR/fs/open.c"     || fail "missing ksu_handle_faccessat in fs/open.c"
-
-  grep -q 'ksu_handle_sys_read'     "$SRC_DIR/fs/read_write.c"     || fail "missing ksu_handle_sys_read in fs/read_write.c"
-
-  grep -q 'ksu_handle_stat'     "$SRC_DIR/fs/stat.c"     || fail "missing ksu_handle_stat in fs/stat.c"
-
-  grep -q 'ksu_handle_sys_reboot'     "$SRC_DIR/kernel/reboot.c"     || fail "missing ksu_handle_sys_reboot in kernel/reboot.c"
-
-  grep -q 'ksu_handle_input_handle_event'     "$SRC_DIR/drivers/input/input.c"     || fail "missing ksu_handle_input_handle_event in drivers/input/input.c"
-
-  ! grep -qw 'ksu_vfs_read_hook'     "$SRC_DIR/fs/read_write.c"     || fail "legacy ksu_vfs_read_hook remains"
-
-  ! grep -qw 'ksu_input_hook'     "$SRC_DIR/drivers/input/input.c"     || fail "legacy ksu_input_hook remains"
-
-  ! grep -qw 'ksu_execveat_hook'     "$SRC_DIR/fs/exec.c"     || fail "legacy ksu_execveat_hook remains"
-
-  ! grep -qw 'ksu_init_rc_hook'     "$SRC_DIR/fs/read_write.c"     || fail "legacy ksu_init_rc_hook remains in fs/read_write.c"
-
-  ! grep -qw 'ksu_init_rc_hook'     "$SRC_DIR/fs/stat.c"     || fail "legacy ksu_init_rc_hook remains in fs/stat.c"
-
-  echo "[ksu] ReSukiSU SUSFS inline-hook compatibility: PASS"
-}
-
-apply_resukisu_susfs_inline_compat
+if ! SOURCE_DIR="$SRC_DIR" \
+     DEVICE="$DEVICE" \
+     KERNEL_VERSION="$DETECTED_KERNEL_VERSION" \
+     PATCH_PROFILE="$PATCH_PROFILE" \
+     UPSTREAM_PROFILE="$UPSTREAM_PROFILE" \
+     ROOT_MANAGER="$ROOT_MANAGER" \
+     KSU_REQUIRED="$KSU_REQUIRED" \
+     KSU_SUSFS_REQUIRED="$KSU_SUSFS_REQUIRED" \
+     PHASE="source" \
+     "$SCRIPT_DIR/apply_patch_series.sh" 2>&1 | tee -a "$BUILD_LOG"; then
+  fail "source patch series"
+fi
 
 # ------------------------------------------------------------
 # Toolchain resolution
@@ -777,6 +572,10 @@ printf 'clang_triple=%s\n' "$CLANG_TRIPLE" >> "$ARTIFACTS/build-info.txt"
 printf 'cross_compile=%s\n' "$CROSS_DEFAULT" >> "$ARTIFACTS/build-info.txt"
 printf 'cross_compile_arm32=%s\n' "$CROSS_COMPILE_ARM32" >> "$ARTIFACTS/build-info.txt"
 printf 'scheduler_profile=%s\n' "$SCHEDULER_PROFILE" >> "$ARTIFACTS/build-info.txt"
+printf 'patch_profile=%s\n' "$PATCH_PROFILE" >> "$ARTIFACTS/build-info.txt"
+printf 'upstream_profile=%s\n' "$UPSTREAM_PROFILE" >> "$ARTIFACTS/build-info.txt"
+printf 'lto_plus=%s\n' "$LTO_PLUS" >> "$ARTIFACTS/build-info.txt"
+printf 'kernel_name=%s\n' "$KERNEL_NAME" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_required=%s\n' "$KSU_REQUIRED" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_susfs_required=%s\n' "$KSU_SUSFS_REQUIRED" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_repo=%s\n' "$KSU_REPO" >> "$ARTIFACTS/build-info.txt"
@@ -818,6 +617,32 @@ if [[ -n "$SELECTED_FRAGMENT" ]]; then
   fi
 elif [[ "$CONFIG_FRAGMENT" != none && "$CONFIG_FRAGMENT" != auto && -z "$SELECTED_FRAGMENT" ]]; then
   fail "config fragment not resolved"
+fi
+
+# ------------------------------------------------------------
+# Optional config-side feature patches.
+# ------------------------------------------------------------
+
+if ! SOURCE_DIR="$SRC_DIR" \
+     DEVICE="$DEVICE" \
+     KERNEL_VERSION="$DETECTED_KERNEL_VERSION" \
+     PATCH_PROFILE="$PATCH_PROFILE" \
+     UPSTREAM_PROFILE="$UPSTREAM_PROFILE" \
+     ROOT_MANAGER="$ROOT_MANAGER" \
+     KSU_REQUIRED="$KSU_REQUIRED" \
+     KSU_SUSFS_REQUIRED="$KSU_SUSFS_REQUIRED" \
+     PHASE="config" \
+     KERNEL_OUT="$OUT" \
+     LTO_PLUS="$LTO_PLUS" \
+     "$SCRIPT_DIR/apply_patch_series.sh" 2>&1 | tee -a "$BUILD_LOG"; then
+  fail "config patch profile"
+fi
+
+# Kernel name is intentionally independent from source patches.
+if ! CONFIG_FILE="$OUT/.config" \
+     KERNEL_NAME="$KERNEL_NAME" \
+     "$SCRIPT_DIR/set_kernel_name.sh" 2>&1 | tee -a "$BUILD_LOG"; then
+  fail "kernel name"
 fi
 
 # ------------------------------------------------------------

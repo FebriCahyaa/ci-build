@@ -137,3 +137,51 @@ Kernel packaging uses reusable profiles under `anykernel/profiles/`:
 Set `ANYKERNEL_PROFILE=auto` to select a profile from the device, kernel version, and ROM family. Set `ANYKERNEL3_REF` to a branch, tag, or commit to pin the AnyKernel3 backend revision. The backend is fetched at packaging time; it is not vendored into this repository.
 
 Profile selection is packaging metadata only and does not guarantee boot or flashing compatibility. Validate the exact boot format, AVB/vbmeta state, slot behavior, rollback requirements, kernel, DTBO, and target ROM before flashing.
+
+
+## Modular kernel patch registry
+
+Kernel source fixes are maintained under `patches/` instead of being embedded
+in `scripts/build_kernel.sh`.
+
+```text
+patches/
+├── devices/lavender/4.19/
+├── root-manager/{kernelsu,kernelsu-next,resukisu}/4.19/
+├── upstream/codelinaro/sdm660-4.19/
+├── upstream/linux-stable/4.19/
+└── features/lto-plus/lavender-4.19/
+```
+
+The build selects device, root-manager, and upstream patch series automatically.
+Patches are idempotent and report `ALREADY APPLIED` when the source already
+contains the change.
+
+Optional environment variables:
+
+```text
+PATCH_PROFILE=auto
+UPSTREAM_PROFILE=auto
+LTO_PLUS=false
+KERNEL_NAME=""
+```
+
+`KERNEL_NAME` changes `CONFIG_LOCALVERSION` in the generated build config.
+For example:
+
+```bash
+KERNEL_NAME="-Febri-Lavender" ./scripts/build_kernel.sh
+```
+
+Harness also exposes `PATCH_PROFILE`, `UPSTREAM_PROFILE`, `LTO_PLUS`, and
+`KERNEL_NAME` as pipeline variables.
+
+### Install the modular patch registry
+
+From a checkout containing this bundle:
+
+```bash
+./scripts/install_modular_patch_registry.sh /path/to/ci-build
+```
+
+The installer backs up modified files under `.ci-build-backup-YYYYMMDD-HHMMSS/`.

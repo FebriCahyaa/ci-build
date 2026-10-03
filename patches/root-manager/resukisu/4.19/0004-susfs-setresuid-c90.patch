@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Subject: [PATCH] ReSukiSU: make setresuid hook C90-safe on 4.19
+
+The CI compatibility hook must not introduce a declaration after an
+executable statement. Declare the handler at file scope and invoke it
+after all local declarations inside __sys_setresuid().
+
+diff --git a/kernel/sys.c b/kernel/sys.c
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -72,5 +72,9 @@
+ #include <linux/uaccess.h>
+ #include <asm/io.h>
+ #include <asm/unistd.h>
+ 
++#ifdef CONFIG_KSU_SUSFS
++extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);
++#endif
++
+ #include "uid16.h"
+@@ -626,11 +630,15 @@ long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
+ 	struct user_namespace *ns = current_user_ns();
+ 	const struct cred *old;
+ 	struct cred *new;
+ 	int retval;
+ 	kuid_t kruid, keuid, ksuid;
+ 
++#ifdef CONFIG_KSU_SUSFS
++	(void)ksu_handle_setresuid(ruid, euid, suid);
++#endif
++
+ 	kruid = make_kuid(ns, ruid);
+ 	keuid = make_kuid(ns, euid);
+ 	ksuid = make_kuid(ns, suid);
+ 
+ 	if ((ruid != (uid_t) -1) && !uid_valid(kruid))

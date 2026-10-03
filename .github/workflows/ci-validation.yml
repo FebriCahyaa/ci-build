@@ -50,12 +50,34 @@ jobs:
       - name: Bash syntax
         run: |
           set -euo pipefail
-          find scripts -maxdepth 1 -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+          find scripts -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
 
       - name: ShellCheck errors
         run: |
           set -euo pipefail
-          find scripts -maxdepth 1 -type f -name '*.sh' -print0 | xargs -0 -r shellcheck -S error
+          find scripts -type f -name '*.sh' -print0 | xargs -0 -r shellcheck -S error
+
+      - name: Patch registry structure
+        run: |
+          set -euo pipefail
+          test -x scripts/apply_patch_series.sh
+          test -x scripts/set_kernel_name.sh
+          test -f patches/devices/lavender/4.19/series.conf
+          test -f patches/root-manager/resukisu/4.19/series.conf
+          test -f patches/upstream/codelinaro/sdm660-4.19/series.conf
+          test -f patches/features/lto-plus/lavender-4.19/thinlto.config
+
+      - name: Modular patch registry
+        run: |
+          set -euo pipefail
+          test -x scripts/apply_patch_series.sh
+          test -x scripts/set_kernel_name.sh
+          test -f patches/devices/lavender/4.19/series.conf
+          test -f patches/root-manager/kernelsu/4.19/series.conf
+          test -f patches/root-manager/kernelsu-next/4.19/series.conf
+          test -f patches/root-manager/resukisu/4.19/series.conf
+          test -f patches/upstream/codelinaro/sdm660-4.19/series.conf
+          test -f patches/features/lto-plus/lavender-4.19/thinlto.config
 
       - name: AnyKernel profile selection
         run: |

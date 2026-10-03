@@ -1,0 +1,19 @@
+From 7d789e8d52e3949b1a60b8bc6a72ed7794a4e054 Mon Sep 17 00:00:00 2001
+Subject: [PATCH] msm-4.19: qseecom: Fix possible race condition
+
+diff --git a/drivers/misc/qseecom.c b/drivers/misc/qseecom.c
+--- a/drivers/misc/qseecom.c
++++ b/drivers/misc/qseecom.c
+@@
+ 			ret = -EINVAL;
+ 			break;
+ 		}
++		mutex_unlock(&listener_access_lock);
+ 		atomic_inc(&data->ioctl_count);
+ 		ret = qseecom_receive_req(data);
+ 		atomic_dec(&data->ioctl_count);
+ 		wake_up_all(&data->abort_wq);
+-		mutex_unlock(&listener_access_lock);
+ 		if (ret && (ret != -ERESTARTSYS))
+ 			pr_err("failed qseecom_receive_req: %d\n", ret);
+ 		break;

@@ -7,22 +7,17 @@ on:
         description: "Kernel repository URL"
         required: true
         type: string
+        default: "https://github.com/gianogli/android_kernel_xiaomi_lavender_4.19"
       kernel_branch:
         description: "Kernel branch, tag, or ref"
         required: true
         type: string
         default: "main"
-      kernel_ref_type:
-        description: "Kernel ref type"
-        required: true
-        type: choice
-        options: [auto, branch, tag, commit]
-        default: auto
       device:
         description: "Device codename"
         required: true
         type: string
-        default: "garnet"
+        default: "lavender"
       arch:
         description: "Architecture"
         required: true
@@ -66,11 +61,6 @@ on:
         required: false
         type: string
         default: "auto"
-      cross_compile_arm32:
-        description: "Optional 32-bit cross compiler"
-        required: false
-        type: string
-        default: ""
       clang_url:
         description: "Optional custom Clang archive"
         required: false
@@ -91,23 +81,38 @@ on:
         required: false
         type: string
         default: ""
-      scheduler_profile:
-        description: "Scheduler metadata check"
-        required: true
-        type: choice
-        options: [auto, eas, hmp, walt, none]
-        default: auto
       enable_ksu:
-        description: "KernelSU mode"
+        description: "KernelSU provider"
         required: true
         type: choice
         options: [false, true, kernelsu-next, resukisu]
-        default: false
+        default: resukisu
       ksu_ref:
-        description: "KernelSU ref"
+        description: "KernelSU provider ref"
         required: false
         type: string
-        default: ""
+        default: "main"
+      patch_profile:
+        description: "Modular source patch profile"
+        required: true
+        type: string
+        default: "auto"
+      upstream_profile:
+        description: "Upstream patch profile"
+        required: true
+        type: string
+        default: "auto"
+      lto_plus:
+        description: "Optional LTO+ feature profile"
+        required: true
+        type: choice
+        options: [false, true]
+        default: false
+      kernel_name:
+        description: "Kernel LOCALVERSION suffix"
+        required: false
+        type: string
+        default: "-Febri-Lavender"
 
       package_anykernel:
         description: "Package AnyKernel3"
@@ -161,7 +166,7 @@ jobs:
           PIPELINE_ID: Universal_Kernel_Build
           KERNEL_REPO: ${{ inputs.kernel_repo }}
           KERNEL_BRANCH: ${{ inputs.kernel_branch }}
-          KERNEL_REF_TYPE: ${{ inputs.kernel_ref_type }}
+          KERNEL_REF_TYPE: auto
           DEVICE: ${{ inputs.device }}
           ARCH: ${{ inputs.arch }}
           DEFCONFIG: ${{ inputs.defconfig }}
@@ -171,12 +176,16 @@ jobs:
           TOOLCHAIN_VERSION: ${{ inputs.toolchain_version }}
           LLVM_IAS: ${{ inputs.llvm_ias }}
           CROSS_COMPILE: ${{ inputs.cross_compile }}
-          CROSS_COMPILE_ARM32: ${{ inputs.cross_compile_arm32 }}
+          CROSS_COMPILE_ARM32: ""
           CLANG_URL: ${{ inputs.clang_url }}
           GCC_URL: ${{ inputs.gcc_url }}
           APT_PACKAGES: ${{ inputs.apt_packages }}
           EXTRA_MAKE_ARGS: ${{ inputs.extra_make_args }}
-          SCHEDULER_PROFILE: ${{ inputs.scheduler_profile }}
+          SCHEDULER_PROFILE: auto
+          PATCH_PROFILE: ${{ inputs.patch_profile }}
+          UPSTREAM_PROFILE: ${{ inputs.upstream_profile }}
+          LTO_PLUS: ${{ inputs.lto_plus }}
+          KERNEL_NAME: ${{ inputs.kernel_name }}
           ENABLE_KSU: ${{ inputs.enable_ksu }}
           KSU_REF: ${{ inputs.ksu_ref }}
           KSU_REPO: ""
@@ -195,9 +204,13 @@ jobs:
             "KERNEL_REPO","KERNEL_BRANCH","KERNEL_REF_TYPE","DEVICE","ARCH","DEFCONFIG","CONFIG_FRAGMENT","JOBS",
             "TOOLCHAIN","TOOLCHAIN_VERSION","LLVM_IAS","CROSS_COMPILE","CROSS_COMPILE_ARM32",
             "CLANG_URL","GCC_URL","APT_PACKAGES","EXTRA_MAKE_ARGS","SCHEDULER_PROFILE",
+            "PATCH_PROFILE","UPSTREAM_PROFILE","LTO_PLUS","KERNEL_NAME",
             "ENABLE_KSU","KSU_REF","KSU_PROVIDER","KSU_REPO","KSU_LAYOUT","KSU_HOOK_MODE","PACKAGE_ANYKERNEL","ROM_FAMILY","ANYKERNEL_PROFILE","ANYKERNEL3_REPO","ANYKERNEL3_REF"
           ]
           values = {n: os.environ.get(n, "") for n in names}
+          values["KERNEL_REF_TYPE"] = "auto"
+          values["CROSS_COMPILE_ARM32"] = ""
+          values["SCHEDULER_PROFILE"] = "auto"
 
           # GitHub input "enable_ksu" doubles as the provider selector:
           # false         -> disabled

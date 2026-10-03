@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Subject: [PATCH] ReSukiSU SUSFS: remove legacy input hook guard
+
+Keep the direct modern handler call while removing the obsolete boolean
+guard that ReSukiSU marks as incompatible.
+
+diff --git a/drivers/input/input.c b/drivers/input/input.c
+--- a/drivers/input/input.c
++++ b/drivers/input/input.c
+@@ -448,17 +448,15 @@
+ #ifdef CONFIG_KSU
+-extern bool ksu_input_hook __read_mostly;
+ extern __attribute__((cold)) int ksu_handle_input_handle_event(
+ 			unsigned int *type, unsigned int *code, int *value);
+ #endif
+ 
+ void input_event(struct input_dev *dev,
+ 		 unsigned int type, unsigned int code, int value)
+ {
+ 	unsigned long flags;
+ 
+ #ifdef CONFIG_KSU
+-	if (unlikely(ksu_input_hook))
+-		ksu_handle_input_handle_event(&type, &code, &value);
++	ksu_handle_input_handle_event(&type, &code, &value);
+ #endif
+ 
+ 	if (is_event_supported(type, dev->evbit, EV_MAX)) {

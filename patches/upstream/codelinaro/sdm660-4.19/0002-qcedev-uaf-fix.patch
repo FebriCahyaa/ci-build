@@ -1,0 +1,20 @@
+From 468a3b3df8591092985b063b3a8fc0d34199bec5 Mon Sep 17 00:00:00 2001
+Subject: [PATCH] qcedev: fix UAF in qcedev_smmu
+
+diff --git a/drivers/crypto/msm/qcedev_smmu.c b/drivers/crypto/msm/qcedev_smmu.c
+--- a/drivers/crypto/msm/qcedev_smmu.c
++++ b/drivers/crypto/msm/qcedev_smmu.c
+@@
+ 	return 0;
+
+ unmap:
+-	if (!found)
++	if (!found) {
+ 		qcedev_unmap_buffer(handle, mem_client, binfo);
++		mutex_lock(&qce_hndl->registeredbufs.lock);
++		list_del(&binfo->list);
++		mutex_unlock(&qce_hndl->registeredbufs.lock);
++	}
+
+ error:
+ 	kfree(binfo);

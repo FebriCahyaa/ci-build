@@ -1,0 +1,26 @@
+From dc6db28b9395a90ef80ba7c7997d80214ee17a5c Mon Sep 17 00:00:00 2001
+Subject: [PATCH] susfs: fix fsnotify compatibility for kernel 4.19
+
+Backported from the exact Lavender branch commit.
+
+---
+ fs/susfs.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/fs/susfs.c b/fs/susfs.c
+--- a/fs/susfs.c
++++ b/fs/susfs.c
+@@
+ static int susfs_handle_sdcard_inode_event(struct fsnotify_group *group,
+ 									struct inode *to_tell,
+-									struct fsnotify_mark *inode_mark,
+-									struct fsnotify_mark *vfsmount_mark,
+ 									u32 mask, const void *data, int data_type,
+ 									const unsigned char *file_name, u32 cookie,
+ 									struct fsnotify_iter_info *iter_info)
+@@
+-	if (fsnotify_add_mark(m, inode, NULL, 0)) {
++	if (fsnotify_add_mark(m, &inode->i_fsnotify_marks, FSNOTIFY_OBJ_TYPE_INODE, 0)) {
+ 		fsnotify_put_mark(m);
+ 		return -EINVAL;
+ 	}
