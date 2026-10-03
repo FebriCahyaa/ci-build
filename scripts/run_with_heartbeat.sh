@@ -22,9 +22,9 @@ echo "[CI-COMMAND] ${LABEL}: $(printf '%q ' "$@")" | tee -a "$LOG_FILE"
 run_child() {
   set +e
   if command -v stdbuf >/dev/null 2>&1; then
-    stdbuf -oL -eL "$@" 2>&1 | tee -a "$LOG_FILE"
+    stdbuf -oL -eL "$@" </dev/null 2>&1 | tee -a "$LOG_FILE"
   else
-    "$@" 2>&1 | tee -a "$LOG_FILE"
+    "$@" </dev/null 2>&1 | tee -a "$LOG_FILE"
   fi
   return "${PIPESTATUS[0]}"
 }

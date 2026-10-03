@@ -614,15 +614,6 @@ printf 'lto_plus=%s\n' "$LTO_PLUS" >> "$ARTIFACTS/build-info.txt"
 printf 'kernel_name=%s\n' "$KERNEL_NAME" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_required=%s\n' "$KSU_REQUIRED" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_susfs_required=%s\n' "$KSU_SUSFS_REQUIRED" >> "$ARTIFACTS/build-info.txt"
-printf 'ksu_repo=%s\n' "$KSU_REPO" >> "$ARTIFACTS/build-info.txt"
-printf 'ksu_ref=%s\n' "${KSU_REF:-}" >> "$ARTIFACTS/build-info.txt"
-printf 'ksu_layout=%s\n' "$KSU_LAYOUT" >> "$ARTIFACTS/build-info.txt"
-
-echo "Kernel commit: $COMMIT" | tee -a "$BUILD_LOG"
-echo "Make command: ${MAKE_CMD[*]}" | tee -a "$BUILD_LOG"
-
-printf 'ksu_required=%s\n' "$KSU_REQUIRED" >> "$ARTIFACTS/build-info.txt"
-printf 'ksu_susfs_required=%s\n' "$KSU_SUSFS_REQUIRED" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_provider=%s\n' "$KSU_PROVIDER" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_repo=%s\n' "${KSU_REPO:-}" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_ref=%s\n' "${KSU_REF:-}" >> "$ARTIFACTS/build-info.txt"
@@ -630,6 +621,9 @@ printf 'ksu_version=%s\n' "${KSU_PROVIDER_VERSION:-none}" >> "$ARTIFACTS/build-i
 printf 'ksu_commit=%s\n' "${KSU_PROVIDER_COMMIT:-none}" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_layout=%s\n' "$KSU_LAYOUT_RESOLVED" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_hook_mode=%s\n' "$KSU_HOOK_MODE" >> "$ARTIFACTS/build-info.txt"
+
+echo "Kernel commit: $COMMIT" | tee -a "$BUILD_LOG"
+echo "Make command: ${MAKE_CMD[*]}" | tee -a "$BUILD_LOG"
 
 # ------------------------------------------------------------
 # Configure
@@ -643,11 +637,21 @@ run_live "defconfig" "${MAKE_CMD[@]}" "$DETECTED_DEFCONFIG" || fail "defconfig"
 
 if [[ -n "$SELECTED_FRAGMENT" ]]; then
   if [[ -x "$SRC_DIR/scripts/kconfig/merge_config.sh" ]]; then
-    run_live "config-fragment" \
+    # IMPORTANT: use merge_config.sh only as a merge operation. The tree
+    # carries a vendor Kconfig that re-detects compiler capabilities, so the
+    # helper's internal bare `make alldefconfig` can accidentally resolve the
+    # config against host GCC even though the real build uses LLVM/Clang.
+    run_live "config-fragment-merge" \
       "$SRC_DIR/scripts/kconfig/merge_config.sh" \
+      -m \
       -O "$OUT" \
       "$OUT/.config" \
-      "$SELECTED_FRAGMENT" || fail "config fragment"
+      "$SELECTED_FRAGMENT" || fail "config fragment merge"
+
+    # Resolve dependencies/defaults with the exact same make/toolchain
+    # command that will be used for the kernel build. This also prevents
+    # interactive Kconfig prompts from leaking into CI.
+    run_live "config-fragment-olddefconfig" "${MAKE_CMD[@]}" olddefconfig || fail "config fragment olddefconfig"
   else
     cat "$SELECTED_FRAGMENT" >> "$OUT/.config"
     run_live "fragment-olddefconfig" "${MAKE_CMD[@]}" olddefconfig || fail "fragment olddefconfig"

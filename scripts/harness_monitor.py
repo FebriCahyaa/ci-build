@@ -16,7 +16,7 @@ ORG = os.environ.get("HARNESS_ORG", "default")
 PROJECT = os.environ.get("HARNESS_PROJECT", "ci_build")
 PIPELINE = os.environ.get("HARNESS_PIPELINE", "Universal_Kernel_Build")
 PLAN = os.environ["HARNESS_PLAN_EXECUTION_ID"]
-POLL = max(5, int(os.environ.get("HARNESS_POLL_SECONDS", "5")))
+POLL = max(5, int(os.environ.get("HARNESS_POLL_SECONDS", "6")))
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 TG_CHAT = os.environ.get("TG_CHAT_ID", "")
 TG_TOPIC = os.environ.get("TG_TOPIC_ID", "")
@@ -29,7 +29,13 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GH_REPOSITORY = os.environ.get("GH_REPOSITORY", "")
 MAX_SECONDS = max(60, int(os.environ.get("HARNESS_MAX_SECONDS", "8100")))
 TG_EDIT_MIN_SECONDS = max(3.0, float(os.environ.get("TG_EDIT_MIN_SECONDS", str(POLL))))
+TG_HTTP_TIMEOUT = max(4, int(os.environ.get("TG_HTTP_TIMEOUT", "8")))
 TG_MAX_RETRIES = max(1, int(os.environ.get("TG_MAX_RETRIES", "3")))
+API_TIMEOUT = max(4, int(os.environ.get("HARNESS_API_TIMEOUT", "10")))
+GRAPH_FALLBACK_EVERY = max(2, int(os.environ.get("HARNESS_GRAPH_FALLBACK_EVERY", "3")))
+RELEASE_CHECK_EVERY = max(3, int(os.environ.get("HARNESS_RELEASE_CHECK_EVERY", "6")))
+EXPECTED_STAGE_NAME = os.environ.get("HARNESS_EXPECTED_STAGE_NAME", "Kernel Build")
+EXPECTED_STEP_NAME = os.environ.get("HARNESS_EXPECTED_STEP_NAME", "Build Universal Kernel")
 RELEASE_TAG = f"harness-{PLAN}"
 
 TERMINAL = {"SUCCEEDED","SUCCESS","FAILED","FAILURE","ERROR","ERRORED","ABORTED","EXPIRED","REJECTED","STOPPED","CANCELED"}
@@ -91,7 +97,7 @@ def api_get(path: str) -> object:
         f"{BASE}{path}",
         headers={"x-api-key": os.environ["HARNESS_API_KEY"], "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=API_TIMEOUT) as resp:
         return json.load(resp)
 
 
@@ -529,94 +535,145 @@ def pipeline_tree(
     return tree_from_raw(raw), raw
 
 
+def _is_infra_name(name: str) -> bool:
+    value = clean_name(name).casefold()
+    if not value:
+        return True
+    return value in {
+        "liteenginetask",
+        "liteengine",
+        "service",
+        "service task",
+        "pipelineexecution",
+        "execution",
+    }
+
+
 def current_node(
     raw_nodes: list[tuple[int, str, str, str, str]],
+    pipeline_status: str = "",
 ) -> tuple[str, str]:
     active_steps = [
         item
         for item in raw_nodes
         if item[4] == "step"
         and norm(item[3]) in RUNNING_STATES
+        and not _is_infra_name(item[2])
     ]
 
     if active_steps:
-        active_steps.sort(
-            key=lambda item: (
-                item[0],
-                item[1],
-                item[2],
-            ),
-            reverse=True,
-        )
-
+        active_steps.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
         _depth, stage, name, _state, _kind = active_steps[0]
-
         return stage, name
+
+    active_stages = [
+        item
+        for item in raw_nodes
+        if item[4] == "stage"
+        and norm(item[3]) in RUNNING_STATES
+    ]
+
+    # Some Harness execution responses do not classify the stage object as
+    # type=STAGE. When the canonical stage name is present, treat it as the
+    # execution stage regardless of the API node classification.
+    active_expected_stage_nodes = [
+        item
+        for item in raw_nodes
+        if item[2].casefold() == EXPECTED_STAGE_NAME.casefold()
+        and norm(item[3]) in RUNNING_STATES
+    ]
+    for item in active_expected_stage_nodes:
+        _depth, _stage, name, _state, _kind = item
+        return name, EXPECTED_STEP_NAME
+
+    if active_stages:
+        active_stages.sort(key=lambda item: (item[0], item[2]), reverse=True)
+        _depth, stage, name, _state, _kind = active_stages[0]
+
+        # This pipeline has one executable step in the Kernel Build stage.
+        # Harness can transiently return the stage before the child step is
+        # classified in the graph response. Use the pipeline's declared step
+        # name rather than displaying a misleading '-' or an internal
+        # liteEngineTask.
+        children = [
+            item
+            for item in raw_nodes
+            if item[4] != "stage"
+            and (item[1] == name or not item[1])
+            and not _is_infra_name(item[2])
+        ]
+        for item in children:
+            if item[2].casefold() == EXPECTED_STEP_NAME.casefold():
+                return name, item[2]
+
+        if name.casefold() == EXPECTED_STAGE_NAME.casefold():
+            return name, EXPECTED_STEP_NAME
+
+        return name, ""
 
     active_nodes = [
         item
         for item in raw_nodes
         if norm(item[3]) in RUNNING_STATES
+        and not _is_infra_name(item[2])
     ]
 
     if active_nodes:
-        active_nodes.sort(
-            key=lambda item: (
-                item[0],
-                item[1],
-                item[2],
-            ),
-            reverse=True,
-        )
-
-        _depth, stage, name, _state, kind = active_nodes[0]
-
-        if kind == "stage":
-            return name, ""
-
+        active_nodes.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+        _depth, stage, name, _state, _kind = active_nodes[0]
         return stage, name
+
+    if norm(pipeline_status) in RUNNING_STATES:
+        # This specific CI pipeline declares one real Run step. If Harness
+        # has not materialized any execution node yet, keep the monitor
+        # truthful to the known pipeline topology instead of showing Step: -.
+        return EXPECTED_STAGE_NAME, EXPECTED_STEP_NAME
 
     return "", ""
 
 
 def progress_of(
     raw_nodes: list[tuple[int, str, str, str, str]],
+    pipeline_status: str = "",
 ) -> tuple[int, int, int]:
     steps = [
         item
         for item in raw_nodes
-        if item[4] == "step"
+        if item[4] == "step" and not _is_infra_name(item[2])
     ]
 
+    # Harness may expose the running stage before its Run step is present in
+    # the returned graph. The pipeline definition contains exactly one real
+    # step, so expose that known step as the live unit of work.
     if not steps:
-        steps = [
-            item
-            for item in raw_nodes
-            if item[4] != "stage"
+        known_stages = [
+            item for item in raw_nodes
+            if item[2].casefold() == EXPECTED_STAGE_NAME.casefold()
+            or item[1].casefold() == EXPECTED_STAGE_NAME.casefold()
         ]
+        if len(known_stages) == 1:
+            depth, stage, _name, stage_state, _kind = known_stages[0]
+            state = norm(stage_state) or "NOT_STARTED"
+            if state not in DONE_STATES and state not in RUNNING_STATES:
+                state = "NOT_STARTED"
+            steps = [(depth + 1, stage, EXPECTED_STEP_NAME, state, "step")]
 
-    if not steps:
-        steps = raw_nodes
+    if not steps and norm(pipeline_status) in RUNNING_STATES:
+        steps = [(0, EXPECTED_STAGE_NAME, EXPECTED_STEP_NAME, "RUNNING", "step")]
+    elif not steps and norm(pipeline_status) in DONE_STATES:
+        # With a single-step pipeline, a terminal overall execution means
+        # the declared step reached a terminal state even when Harness omits
+        # the child node from the compact response.
+        terminal_state = norm(pipeline_status)
+        steps = [(0, EXPECTED_STAGE_NAME, EXPECTED_STEP_NAME, terminal_state, "step")]
 
     unique = {}
-
     for _depth, stage, name, state, _kind in steps:
-        unique[(stage, name)] = norm(state)
+        unique[(stage, name)] = norm(state) or "NOT_STARTED"
 
     total = len(unique)
-
-    done = sum(
-        1
-        for state in unique.values()
-        if state in DONE_STATES
-    )
-
-    active = sum(
-        1
-        for state in unique.values()
-        if state in RUNNING_STATES
-    )
-
+    done = sum(1 for state in unique.values() if state in DONE_STATES)
+    active = sum(1 for state in unique.values() if state in RUNNING_STATES)
     return done, total, active
 
 
@@ -672,7 +729,7 @@ def _telegram_request(
 
     for attempt in range(1, TG_MAX_RETRIES + 1):
         try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
+            with urllib.request.urlopen(req, timeout=TG_HTTP_TIMEOUT) as resp:
                 result = json.load(resp)
 
             if isinstance(result, dict) and not result.get("ok", True):
@@ -861,37 +918,20 @@ def progress_bar(
     total: int,
     frame: int,
 ) -> tuple[str, str]:
+    """Render real execution progress only; never animate fake completion."""
     state = norm(status)
 
     if total > 0:
         pct = int(round(done * 100 / total))
-
         if state not in TERMINAL:
             pct = min(pct, 99)
-
         pct = max(0, min(100, pct))
         filled = int(round(BAR_WIDTH * pct / 100))
-        bar = list("█" * filled + "░" * (BAR_WIDTH - filled))
+        return ("█" * filled + "░" * (BAR_WIDTH - filled), f"{pct:3d}%")
 
-        # Even when completed/total does not change, animate a live marker
-        # through the remaining segment so Telegram visibly updates.
-        if state not in TERMINAL:
-            start_pos = min(filled, BAR_WIDTH - 1)
-            span = max(1, BAR_WIDTH - start_pos)
-            pos = start_pos + (frame % span)
-            bar[pos] = "●"
-
-        return "".join(bar), f"{pct:3d}%"
-
-    pos = frame % BAR_WIDTH
-
-    return (
-        "".join(
-            "●" if i == pos else "─"
-            for i in range(BAR_WIDTH)
-        ),
-        "LIVE",
-    )
+    # No executable-step telemetry yet. Keep this explicit instead of
+    # presenting an animated bar that looks like numerical progress.
+    return ("░" * BAR_WIDTH, "LIVE")
 
 
 def render_tree(
@@ -983,12 +1023,12 @@ def render(
         f"🌿 Branch: <code>{html.escape(BRANCH)}</code>\n"
         f"🧩 Status: <code>"
         f"{html.escape(status or 'UNKNOWN')}"
-        f"</code>\n\n"
+        f"</code> {html.escape(spinner)}\n\n"
         f"{tree_text or '📦 <b>PIPELINE</b>'}\n\n"
         f"🎯 Stage: <code>{html.escape(stage or '-')}</code>\n"
         f"🔨 Step: <code>{html.escape(step or '-')}</code>\n"
         f"📊 Pipeline: <code>{bar}</code> "
-        f"<b>{pct}</b> <code>{spinner}</code>\n"
+        f"<b>{pct}</b>\n"
         f"✅ Completed: <code>{done}/{total}</code>\n"
         f"⚡ Active: <code>{active}</code>\n"
         f"💓 Monitor poll: <code>#{frame}</code>\n"
@@ -1040,48 +1080,78 @@ def main() -> int:
     while True:
         frame += 1
 
-        try:
-            query = (
-                f"?accountIdentifier={urllib.parse.quote(ACCOUNT)}"
-                f"&orgIdentifier={urllib.parse.quote(ORG)}"
-                f"&projectIdentifier={urllib.parse.quote(PROJECT)}"
-            )
-            detail_query = query + "&renderFullBottomGraph=true"
+        query = (
+            f"?accountIdentifier={urllib.parse.quote(ACCOUNT)}"
+            f"&orgIdentifier={urllib.parse.quote(ORG)}"
+            f"&projectIdentifier={urllib.parse.quote(PROJECT)}"
+        )
+        detail_query = query + "&renderFullBottomGraph=true"
 
+        details = {}
+        graph = {}
+        detail_error = ""
+        graph_error = ""
+
+        try:
             details = api_get(
                 "/pipeline/api/pipelines/execution/v2/"
                 f"{urllib.parse.quote(PLAN, safe='')}"
                 f"{detail_query}"
             )
-
-            graph = api_get(
-                "/pipeline/api/pipelines/execution/"
-                "getExecutionGraph/"
-                f"{urllib.parse.quote(PLAN, safe='')}"
-                f"{query}"
-            )
-
-            api_failures = 0
-
         except Exception as exc:
+            detail_error = f"{type(exc).__name__}: {exc}"
+
+        # The v2 response is the primary source. The legacy graph endpoint is
+        # expensive and was being queried every five seconds, which could
+        # block the monitor for tens of seconds. Use it only when the primary
+        # response is sparse and at a controlled fallback interval.
+        tree, raw_nodes = pipeline_tree(details)
+        active_stage_present = any(
+            item[4] == "stage" and norm(item[3]) in RUNNING_STATES
+            for item in raw_nodes
+        )
+        has_real_step = any(
+            item[4] == "step" and not _is_infra_name(item[2])
+            for item in raw_nodes
+        )
+        needs_graph_fallback = (
+            not raw_nodes
+            or (active_stage_present and not has_real_step)
+        )
+
+        if needs_graph_fallback and (
+            frame == 1 or frame % GRAPH_FALLBACK_EVERY == 0
+        ):
+            try:
+                graph = api_get(
+                    "/pipeline/api/pipelines/execution/"
+                    "getExecutionGraph/"
+                    f"{urllib.parse.quote(PLAN, safe='')}"
+                    f"{query}"
+                )
+            except Exception as exc:
+                graph_error = f"{type(exc).__name__}: {exc}"
+
+        if graph:
+            graph_tree, graph_nodes = pipeline_tree(graph)
+            if graph_nodes or not raw_nodes:
+                tree, raw_nodes = graph_tree, graph_nodes
+
+        if detail_error and not raw_nodes:
             api_failures += 1
-            details = {}
-            graph = {}
-            final["monitor_error"] = str(exc)
+            final["monitor_error"] = detail_error
+        elif not detail_error:
+            api_failures = 0
+        elif graph_error:
+            api_failures += 1
+            final["monitor_error"] = detail_error + "; graph=" + graph_error
 
         status = status_of(details)
-
-        tree, raw_nodes = pipeline_tree(graph)
-
-        # Some Harness responses expose execution nodes through details
-        # while the graph endpoint is temporarily sparse.
-        if not raw_nodes:
-            tree, raw_nodes = pipeline_tree(details)
 
         raw_nodes = infer_active_children(raw_nodes)
         tree = tree_from_raw(raw_nodes)
 
-        stage, step = current_node(raw_nodes)
+        stage, step = current_node(raw_nodes, status)
 
         if not status:
             active_nodes = [
@@ -1106,14 +1176,18 @@ def main() -> int:
         elapsed = int(time.time() - started)
 
         done_nodes, total_nodes, active_nodes_count = progress_of(
-            raw_nodes
+            raw_nodes, status
         )
 
         tree_text = render_tree(tree)
 
         # Harness creates the GitHub Release only from the EXIT trap after
-        # the build process terminates. Keep it as a secondary terminal signal.
-        release_status, release_error = github_release_state()
+        # the build process terminates. Keep it as a secondary signal, but do
+        # not perform another network request on every poll.
+        if state in TERMINAL or frame == 1 or frame % RELEASE_CHECK_EVERY == 0:
+            release_status, release_error = github_release_state()
+        else:
+            release_status, release_error = "", ""
 
         completion_source = ""
 
@@ -1199,6 +1273,8 @@ def main() -> int:
             "terminal": state in TERMINAL,
             "poll": frame,
             "api_failures": api_failures,
+            "graph_fallback": bool(graph),
+            "monitor_error": str(final.get("monitor_error", "")),
             "telegram": {
                 "configured": bool(TG_TOKEN and TG_CHAT),
                 "message_id": message_id,

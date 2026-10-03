@@ -300,7 +300,13 @@ jobs:
           TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
-          HARNESS_POLL_SECONDS: "5"
+          HARNESS_POLL_SECONDS: "6"
+          HARNESS_API_TIMEOUT: "10"
+          HARNESS_GRAPH_FALLBACK_EVERY: "3"
+          HARNESS_RELEASE_CHECK_EVERY: "6"
+          HARNESS_EXPECTED_STAGE_NAME: "Kernel Build"
+          HARNESS_EXPECTED_STEP_NAME: "Build Universal Kernel"
+          TG_HTTP_TIMEOUT: "8"
           HARNESS_MAX_SECONDS: "8100"
         run: python3 scripts/harness_monitor.py
 

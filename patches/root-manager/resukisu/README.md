@@ -12,5 +12,7 @@ compatibility changes required by the current ReSukiSU SUSFS checks:
 2. `ksu_vfs_read_hook` legacy guard removal
 3. `ksu_input_hook` legacy guard removal
 4. C90-safe `ksu_handle_setresuid` insertion
+5. Restore the missing SUSFS process-state helpers and deferred work item
+   required by the current ReSukiSU provider on this 4.19 tree
 
 These patches are narrow and only alter the ephemeral CI kernel checkout.
