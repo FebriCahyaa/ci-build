@@ -178,7 +178,7 @@ def github_release_state() -> tuple[str, str]:
         return "", ""
 
     url = (
-        f"{GITHUB_API}/repos/{urllib.parse.quote(GH_REPOSITORY, safe='')}"
+        f"{GITHUB_API}/repos/{urllib.parse.quote(GH_REPOSITORY, safe='/')}"
         f"/releases/tags/{urllib.parse.quote(RELEASE_TAG, safe='')}"
     )
 
