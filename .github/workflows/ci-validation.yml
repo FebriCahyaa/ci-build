@@ -82,6 +82,7 @@ jobs:
           test -x scripts/bump_localversion_st.sh
           ! grep -R -nE '^@@$' patches --include='*.patch'
           test -f patches/devices/lavender/4.19/series.conf
+          test -f patches/devices/southwest-ng/4.19/series.conf
           test -f patches/root-manager/resukisu/4.19/series.conf
           test -f patches/upstream/codelinaro/sdm660-4.19/series.conf
           test -f patches/features/lto-plus/lavender-4.19/thinlto.config
@@ -103,6 +104,7 @@ jobs:
           test -x scripts/apply_patch_series.sh
           test -x scripts/set_kernel_name.sh
           test -f patches/devices/lavender/4.19/series.conf
+          test -f patches/devices/southwest-ng/4.19/series.conf
           test -f patches/root-manager/kernelsu/4.19/series.conf
           test -f patches/root-manager/kernelsu-next/4.19/series.conf
           test -f patches/root-manager/resukisu/4.19/series.conf

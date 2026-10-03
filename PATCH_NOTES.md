@@ -1,5 +1,14 @@
 # Root-manager and SUSFS integration
 
+## Southwest-NG 4.19 balanced profile
+
+The explicit `PATCH_PROFILE=southwest-ng` profile carries two source patches:
+
+- repair the unreachable exported `sched_set_boost()` control path;
+- move the SDM660 vendor defconfig to 250 Hz and make `schedutil` the default CPUFreq governor.
+
+The profile intentionally keeps the existing WALT scheduler, thermal limits, CPU idle, and 64 ms devfreq input boost unchanged. It is not selected automatically because `PATCH_PROFILE=auto` remains patch-free for the Southwest-NG source.
+
 The CI uses provider-native integration and strict compatibility gates.
 
 ## Linux 4.19

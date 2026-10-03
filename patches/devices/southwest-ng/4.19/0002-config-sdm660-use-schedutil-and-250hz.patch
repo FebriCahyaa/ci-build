@@ -1,0 +1,22 @@
+diff --git a/arch/arm64/configs/vendor/xiaomi/sdm660_defconfig b/arch/arm64/configs/vendor/xiaomi/sdm660_defconfig
+--- a/arch/arm64/configs/vendor/xiaomi/sdm660_defconfig
++++ b/arch/arm64/configs/vendor/xiaomi/sdm660_defconfig
+@@ -63,7 +63,8 @@ CONFIG_PCI=y
+ CONFIG_PCI_MSM=y
+ CONFIG_SCHED_MC=y
+ CONFIG_NR_CPUS=8
+-CONFIG_HZ_100=y
++# CONFIG_HZ_100 is not set
++CONFIG_HZ_250=y
+ CONFIG_SECCOMP=y
+ # CONFIG_UNMAP_KERNEL_AT_EL0 is not set
+ # CONFIG_HARDEN_BRANCH_PREDICTOR is not set
+@@ -93,7 +93,8 @@ CONFIG_CPU_FREQ_STAT=y
+ # CONFIG_CPU_FREQ_TIMES is not set
+ CONFIG_CPU_FREQ_GOV_POWERSAVE=y
+ CONFIG_CPU_FREQ_GOV_USERSPACE=y
+ CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
++CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
+ CONFIG_CPU_FREQ_MSM=y
+ CONFIG_CRYPTO_SHA1_ARM64_CE=y
+ CONFIG_CRYPTO_SHA2_ARM64_CE=y

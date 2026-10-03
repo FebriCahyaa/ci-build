@@ -7,7 +7,9 @@ The patch registry is intentionally outside `scripts/build_kernel.sh`.
 ```text
 patches/
 ├── devices/
-│   └── lavender/
+│   ├── lavender/
+│   │   └── 4.19/
+│   └── southwest-ng/
 │       └── 4.19/
 ├── root-manager/
 │   ├── kernelsu/
@@ -48,6 +50,11 @@ recognized `KSU_PROVIDER` is active.
 The CodeLinaro set remains available for legacy Lavender 4.19 builds. It is not
 enabled by default for Southwest-NG; use an explicit upstream profile only after
 verifying that the selected commits are absent from the source.
+
+The explicit `southwest-ng` device profile contains the conservative
+scheduler/performance patch pair validated against the SouthWest-NG source.
+Select it with `PATCH_PROFILE=southwest-ng`; `PATCH_PROFILE=auto` remains
+patch-free for this repository.
 
 LTO+ is optional and disabled by default. Enable it with:
 

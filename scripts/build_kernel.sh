@@ -46,6 +46,14 @@ EXTRA_MAKE_ARGS="${EXTRA_MAKE_ARGS:-}"
 SCHEDULER_PROFILE="${SCHEDULER_PROFILE:-auto}"
 PATCH_PROFILE="${PATCH_PROFILE:-auto}"
 UPSTREAM_PROFILE="${UPSTREAM_PROFILE:-auto}"
+
+# The Southwest-NG performance profile is selected through the existing
+# PATCH_PROFILE input so the GitHub workflows remain within GitHub's
+# 25-input workflow_dispatch limit.
+if [[ "$PATCH_PROFILE" == "southwest-ng" && "$SCHEDULER_PROFILE" == "auto" ]]; then
+  SCHEDULER_PROFILE="southwest-ng"
+fi
+
 LTO_PLUS="${LTO_PLUS:-false}"
 KERNEL_NAME="${KERNEL_NAME:-}"
 # Zairenkai build identity. Kbuild embeds these values in the kernel
