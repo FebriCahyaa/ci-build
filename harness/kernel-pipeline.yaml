@@ -4,86 +4,70 @@ pipeline:
   projectIdentifier: ci_build
   orgIdentifier: default
 
-  properties:
-    ci:
-      codebase:
-        connectorRef: github_connector
-        repoName: ci-build
-        build: <+input>
-
   variables:
     - name: KERNEL_REPO
       type: String
       value: <+input>
-
     - name: KERNEL_BRANCH
       type: String
       value: main
-
     - name: DEVICE
       type: String
       value: generic
-
     - name: ARCH
       type: String
       value: arm64
-
     - name: DEFCONFIG
       type: String
       value: <+input>
-
     - name: JOBS
       type: String
       value: "0"
-
     - name: KERNEL_TARGET
       type: String
       value: ""
-
+    - name: TOOLCHAIN
+      type: String
+      value: auto
     - name: LLVM
       type: String
       value: "1"
-
     - name: LLVM_IAS
       type: String
-      value: "1"
-
+      value: auto
     - name: CROSS_COMPILE
       type: String
       value: ""
-
     - name: CROSS_COMPILE_ARM32
       type: String
       value: ""
-
     - name: APT_PACKAGES
       type: String
       value: ""
-
     - name: CLANG_URL
       type: String
       value: ""
-
+    - name: GCC_URL
+      type: String
+      value: ""
     - name: EXTRA_MAKE_ARGS
       type: String
       value: ""
-
+    - name: SCHEDULER_PROFILE
+      type: String
+      value: auto
     - name: ENABLE_KSU
       type: String
       value: "false"
-
     - name: KSU_REF
       type: String
       value: ""
-
     - name: PACKAGE_ANYKERNEL
       type: String
       value: "false"
-
     - name: ANYKERNEL_REPO
       type: String
       value: https://github.com/osm0sis/AnyKernel3
-
     - name: ANYKERNEL_BRANCH
       type: String
       value: master
@@ -94,16 +78,13 @@ pipeline:
         identifier: kernel_build
         type: CI
         spec:
-          cloneCodebase: true
-
+          cloneCodebase: false
           platform:
             os: Linux
             arch: Amd64
-
           runtime:
             type: Cloud
             spec: {}
-
           execution:
             steps:
               - step:
@@ -123,23 +104,24 @@ pipeline:
                       DEFCONFIG: <+pipeline.variables.DEFCONFIG>
                       JOBS: <+pipeline.variables.JOBS>
                       KERNEL_TARGET: <+pipeline.variables.KERNEL_TARGET>
+                      TOOLCHAIN: <+pipeline.variables.TOOLCHAIN>
                       LLVM: <+pipeline.variables.LLVM>
                       LLVM_IAS: <+pipeline.variables.LLVM_IAS>
                       CROSS_COMPILE: <+pipeline.variables.CROSS_COMPILE>
                       CROSS_COMPILE_ARM32: <+pipeline.variables.CROSS_COMPILE_ARM32>
                       APT_PACKAGES: <+pipeline.variables.APT_PACKAGES>
                       CLANG_URL: <+pipeline.variables.CLANG_URL>
+                      GCC_URL: <+pipeline.variables.GCC_URL>
                       EXTRA_MAKE_ARGS: <+pipeline.variables.EXTRA_MAKE_ARGS>
+                      SCHEDULER_PROFILE: <+pipeline.variables.SCHEDULER_PROFILE>
                       ENABLE_KSU: <+pipeline.variables.ENABLE_KSU>
                       KSU_REF: <+pipeline.variables.KSU_REF>
                       PACKAGE_ANYKERNEL: <+pipeline.variables.PACKAGE_ANYKERNEL>
                       ANYKERNEL_REPO: <+pipeline.variables.ANYKERNEL_REPO>
                       ANYKERNEL_BRANCH: <+pipeline.variables.ANYKERNEL_BRANCH>
                       RUN_URL: <+pipeline.executionUrl>
-
                     command: |
                       set -euo pipefail
-
                       export DEBIAN_FRONTEND=noninteractive
 
                       apt-get update
@@ -150,9 +132,11 @@ pipeline:
                         ca-certificates tar gzip \
                         ${APT_PACKAGES}
 
-                      if [ "${JOBS}" = "0" ] || [ -z "${JOBS}" ]; then
-                        export JOBS="$(nproc 2>/dev/null || echo 2)"
-                      fi
+                      CI_BUILD_DIR="$PWD/ci-build"
+                      rm -rf "$CI_BUILD_DIR"
+                      git clone --depth=1 --branch main \
+                        https://github.com/FebriCahyaa/ci-build.git "$CI_BUILD_DIR"
 
-                      chmod +x ./scripts/build_kernel.sh
-                      ./scripts/build_kernel.sh
+                      chmod +x "$CI_BUILD_DIR/scripts/build_kernel.sh"
+                      WORK_DIR="$PWD/work" \
+                        "$CI_BUILD_DIR/scripts/build_kernel.sh"

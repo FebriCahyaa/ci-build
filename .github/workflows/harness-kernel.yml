@@ -1,4 +1,3 @@
-
 name: Harness Kernel Build
 
 on:
@@ -9,7 +8,7 @@ on:
         required: true
         type: string
       kernel_branch:
-        description: "Kernel branch"
+        description: "Kernel branch/tag/commit ref"
         required: true
         default: "main"
         type: string
@@ -18,21 +17,87 @@ on:
         required: true
         default: "garnet"
         type: string
+      arch:
+        description: "Kernel architecture"
+        required: true
+        default: "arm64"
+        type: string
       defconfig:
-        description: "Kernel defconfig"
+        description: "Kernel defconfig target"
         required: true
         type: string
       jobs:
-        description: "Build jobs"
+        description: "Parallel build jobs; 0 = auto"
         required: true
-        default: "4"
+        default: "0"
         type: string
+      toolchain:
+        description: "auto, clang, or gcc"
+        required: true
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - clang
+          - gcc
+      llvm_ias:
+        description: "LLVM IAS: auto, 1, or 0"
+        required: true
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - "1"
+          - "0"
+      cross_compile:
+        description: "Optional CROSS_COMPILE prefix"
+        required: false
+        default: ""
+        type: string
+      clang_url:
+        description: "Optional Clang toolchain tarball URL"
+        required: false
+        default: ""
+        type: string
+      gcc_url:
+        description: "Optional GCC toolchain tarball URL"
+        required: false
+        default: ""
+        type: string
+      scheduler_profile:
+        description: "auto, eas, hmp, or none (reporting only)"
+        required: true
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - eas
+          - hmp
+          - none
+      extra_make_args:
+        description: "Optional extra make arguments"
+        required: false
+        default: ""
+        type: string
+      enable_ksu:
+        description: "Enable KernelSU"
+        required: true
+        default: false
+        type: boolean
+      package_anykernel:
+        description: "Create AnyKernel3 ZIP"
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   trigger-harness:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
-      - name: Trigger Harness pipeline
+      - name: Validate and trigger Harness
         env:
           HARNESS_API_KEY: ${{ secrets.HARNESS_API_KEY }}
           HARNESS_ACCOUNT: ${{ secrets.HARNESS_ACCOUNT_ID }}
@@ -42,23 +107,86 @@ jobs:
           KERNEL_REPO: ${{ inputs.kernel_repo }}
           KERNEL_BRANCH: ${{ inputs.kernel_branch }}
           DEVICE: ${{ inputs.device }}
+          ARCH: ${{ inputs.arch }}
           DEFCONFIG: ${{ inputs.defconfig }}
           JOBS: ${{ inputs.jobs }}
+          TOOLCHAIN: ${{ inputs.toolchain }}
+          LLVM_IAS: ${{ inputs.llvm_ias }}
+          CROSS_COMPILE: ${{ inputs.cross_compile }}
+          CLANG_URL: ${{ inputs.clang_url }}
+          GCC_URL: ${{ inputs.gcc_url }}
+          SCHEDULER_PROFILE: ${{ inputs.scheduler_profile }}
+          EXTRA_MAKE_ARGS: ${{ inputs.extra_make_args }}
+          ENABLE_KSU: ${{ inputs.enable_ksu }}
+          PACKAGE_ANYKERNEL: ${{ inputs.package_anykernel }}
         run: |
-          echo "Triggering Harness pipeline..."
-          curl --fail-with-body -X POST \
-            "https://app.harness.io/pipeline/api/pipeline/execute/${PIPELINE_ID}?accountIdentifier=${HARNESS_ACCOUNT}&orgIdentifier=${HARNESS_ORG}&projectIdentifier=${HARNESS_PROJECT}" \
+          set -euo pipefail
+          : "${HARNESS_API_KEY:?HARNESS_API_KEY secret is required}"
+          : "${HARNESS_ACCOUNT:?HARNESS_ACCOUNT_ID secret is required}"
+
+          yaml_quote() {
+            local value="$1"
+            value="${value//\'/\'\'}"
+            printf "'%s'" "$value"
+          }
+
+          inputs_yaml="$(cat <<EOF
+          pipeline:
+            identifier: $(yaml_quote "$PIPELINE_ID")
+            variables:
+              - name: KERNEL_REPO
+                type: String
+                value: $(yaml_quote "$KERNEL_REPO")
+              - name: KERNEL_BRANCH
+                type: String
+                value: $(yaml_quote "$KERNEL_BRANCH")
+              - name: DEVICE
+                type: String
+                value: $(yaml_quote "$DEVICE")
+              - name: ARCH
+                type: String
+                value: $(yaml_quote "$ARCH")
+              - name: DEFCONFIG
+                type: String
+                value: $(yaml_quote "$DEFCONFIG")
+              - name: JOBS
+                type: String
+                value: $(yaml_quote "$JOBS")
+              - name: TOOLCHAIN
+                type: String
+                value: $(yaml_quote "$TOOLCHAIN")
+              - name: LLVM_IAS
+                type: String
+                value: $(yaml_quote "$LLVM_IAS")
+              - name: CROSS_COMPILE
+                type: String
+                value: $(yaml_quote "$CROSS_COMPILE")
+              - name: CLANG_URL
+                type: String
+                value: $(yaml_quote "$CLANG_URL")
+              - name: GCC_URL
+                type: String
+                value: $(yaml_quote "$GCC_URL")
+              - name: SCHEDULER_PROFILE
+                type: String
+                value: $(yaml_quote "$SCHEDULER_PROFILE")
+              - name: EXTRA_MAKE_ARGS
+                type: String
+                value: $(yaml_quote "$EXTRA_MAKE_ARGS")
+              - name: ENABLE_KSU
+                type: String
+                value: $(yaml_quote "$( [[ "${ENABLE_KSU}" == true ]] && echo true || echo false )")
+              - name: PACKAGE_ANYKERNEL
+                type: String
+                value: $(yaml_quote "$( [[ "${PACKAGE_ANYKERNEL}" == true ]] && echo true || echo false )")
+          EOF
+          )"
+
+          payload="$(jq -n --arg inputs_yaml "$inputs_yaml" '{inputs_yaml:$inputs_yaml}')"
+
+          curl --fail-with-body -sS -X POST \
+            "https://app.harness.io/v1/orgs/${HARNESS_ORG}/projects/${HARNESS_PROJECT}/pipelines/${PIPELINE_ID}/execute?module=CI" \
+            -H "Harness-Account: ${HARNESS_ACCOUNT}" \
             -H "x-api-key: ${HARNESS_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"pipeline\": {
-                \"identifier\": \"${PIPELINE_ID}\",
-                \"variables\": [
-                  {\"name\":\"KERNEL_REPO\",\"type\":\"String\",\"value\":\"${KERNEL_REPO}\"},
-                  {\"name\":\"KERNEL_BRANCH\",\"type\":\"String\",\"value\":\"${KERNEL_BRANCH}\"},
-                  {\"name\":\"DEVICE\",\"type\":\"String\",\"value\":\"${DEVICE}\"},
-                  {\"name\":\"DEFCONFIG\",\"type\":\"String\",\"value\":\"${DEFCONFIG}\"},
-                  {\"name\":\"JOBS\",\"type\":\"String\",\"value\":\"${JOBS}\"}
-                ]
-              }
-            }"
+            -d "$payload"
