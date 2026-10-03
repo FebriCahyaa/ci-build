@@ -263,3 +263,27 @@ execution. Phase milestones are real build milestones; compile progress is
 derived from the Kbuild dry-run compile plan versus observed CC/AS actions.
 Telegram refreshes its presentation once per second while Harness API polling
 remains at three-second intervals.
+
+## Zairenkai branding and build identity
+
+The full CI bundle includes four AnyKernel banner variants:
+`none`, `kernelsu`, `kernelsu-next`, and `resukisu`. Packaging selects
+exactly one variant from the resolved root provider.
+
+Kernel build metadata is explicitly set through `KBUILD_BUILD_USER` and
+`KBUILD_BUILD_HOST`, defaulting to:
+
+  KBUILD_BUILD_USER=FebriCahyaa
+  KBUILD_BUILD_HOST=ZairenkaiProject
+
+These values are exported by `scripts/kbuild_identity.sh` and recorded in
+`build-info.txt`.
+
+## Banner style
+
+The installer banner uses the fixed-width Sub-Zero-style ASCII treatment from
+the Zairenkai reference. The logo is stored directly as plain text in each
+variant; no runtime font renderer is required in recovery.
+
+All four variants share the same logo and metadata layout. Only the root
+section changes according to the resolved provider.

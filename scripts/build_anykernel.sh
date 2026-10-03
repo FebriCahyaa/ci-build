@@ -4,6 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 SELECTOR="$SCRIPT_DIR/select_anykernel_profile.sh"
+BANNER_RENDERER="$SCRIPT_DIR/render_banner.sh"
 
 WORK_DIR="${WORK_DIR:-$PWD/work}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-$WORK_DIR/artifacts}"
@@ -94,16 +95,8 @@ if [[ "${DO_MODULES:-0}" == "1" && -f "$MODULES_ARCHIVE" ]]; then
   tar -xzf "$MODULES_ARCHIVE" -C "$AK_WORK/modules/system/lib/modules" || die "module extraction failed"
 fi
 
-cat > "$AK_WORK/banner" <<EOF_BANNER
-============================================
-             $KERNEL_NAME AnyKernel3
-============================================
-Profile : $PROFILE_ID
-Device  : $DEVICE
-Kernel  : ${KERNEL_VERSION:-unknown}
-ROM     : $ROM_FAMILY
-============================================
-EOF_BANNER
+# Render the CI-owned Zairenkai banner variant based on the resolved provider.
+BANNER_PROFILE="$PROFILE_ID" ROOT_PROVIDER="$ROOT_PROVIDER" BUILD_LABEL="$BUILD_LABEL" KERNEL_RELEASE="$KERNEL_RELEASE" TOOLCHAIN="$TOOLCHAIN" KBUILD_BUILD_USER="$KBUILD_BUILD_USER" KBUILD_BUILD_HOST="$KBUILD_BUILD_HOST" "$BANNER_RENDERER" "$AK_WORK/banner"
 
 if [[ -n "$VERSION_TEXT" ]]; then
   printf '%s\n' "$VERSION_TEXT" > "$AK_WORK/version"

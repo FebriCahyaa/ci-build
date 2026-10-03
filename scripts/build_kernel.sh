@@ -48,6 +48,9 @@ PATCH_PROFILE="${PATCH_PROFILE:-auto}"
 UPSTREAM_PROFILE="${UPSTREAM_PROFILE:-auto}"
 LTO_PLUS="${LTO_PLUS:-false}"
 KERNEL_NAME="${KERNEL_NAME:-}"
+# Zairenkai build identity. Kbuild embeds these values in the kernel
+# version string instead of the transient Harness runner identity.
+source "$SCRIPT_DIR/kbuild_identity.sh"
 
 # A blank/auto value means kernel-name is the single source of truth.
 if [[ -z "$KERNEL_NAME" || "$KERNEL_NAME" == "auto" ]]; then
@@ -110,7 +113,7 @@ export CI_HEARTBEAT_SECONDS="${CI_HEARTBEAT_SECONDS:-15}"
 
 # Harness workspaces can lose Git executable bits when CI source bundles are
 # transferred between systems. Restore the required helper permissions locally.
-chmod +x   "$SCRIPT_DIR/run_with_heartbeat.sh"   "$SCRIPT_DIR/sync_localversion_files.sh"   "$SCRIPT_DIR/apply_patch_series.sh"   "$SCRIPT_DIR/toolchain_resolver.sh"   "$SCRIPT_DIR/detect_defconfig.sh"   "$SCRIPT_DIR/set_kernel_name.sh"   "$SCRIPT_DIR/progress_beacon.sh"   "$SCRIPT_DIR/compile_progress.sh"   "$SCRIPT_DIR/select_anykernel_profile.sh"   "$SCRIPT_DIR/build_anykernel.sh"   2>/dev/null || true
+chmod +x   "$SCRIPT_DIR/kbuild_identity.sh"   "$SCRIPT_DIR/run_with_heartbeat.sh"   "$SCRIPT_DIR/sync_localversion_files.sh"   "$SCRIPT_DIR/apply_patch_series.sh"   "$SCRIPT_DIR/toolchain_resolver.sh"   "$SCRIPT_DIR/detect_defconfig.sh"   "$SCRIPT_DIR/set_kernel_name.sh"   "$SCRIPT_DIR/progress_beacon.sh"   "$SCRIPT_DIR/compile_progress.sh"   "$SCRIPT_DIR/select_anykernel_profile.sh"   "$SCRIPT_DIR/build_anykernel.sh"   2>/dev/null || true
 
 ci_phase() {
   local label="$1"
@@ -660,6 +663,8 @@ printf 'patch_profile=%s\n' "$PATCH_PROFILE" >> "$ARTIFACTS/build-info.txt"
 printf 'upstream_profile=%s\n' "$UPSTREAM_PROFILE" >> "$ARTIFACTS/build-info.txt"
 printf 'lto_plus=%s\n' "$LTO_PLUS" >> "$ARTIFACTS/build-info.txt"
 printf 'kernel_name=%s\n' "$KERNEL_NAME" >> "$ARTIFACTS/build-info.txt"
+printf 'build_user=%s\n' "$KBUILD_BUILD_USER" >> "$ARTIFACTS/build-info.txt"
+printf 'build_host=%s\n' "$KBUILD_BUILD_HOST" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_required=%s\n' "$KSU_REQUIRED" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_susfs_required=%s\n' "$KSU_SUSFS_REQUIRED" >> "$ARTIFACTS/build-info.txt"
 printf 'ksu_provider=%s\n' "$KSU_PROVIDER" >> "$ARTIFACTS/build-info.txt"
@@ -732,7 +737,7 @@ fi
 ci_phase "kernel-name"
 # Kernel name is intentionally independent from source patches.
 if ! CONFIG_FILE="$OUT/.config" \
-     KERNEL_NAME="$KERNEL_NAME" \
+     KERNEL_NAME="$KERNEL_NAME"     KBUILD_BUILD_USER="$KBUILD_BUILD_USER"     KBUILD_BUILD_HOST="$KBUILD_BUILD_HOST"     BANNER_ROOT="$SCRIPT_DIR/../anykernel" \
      "$SCRIPT_DIR/set_kernel_name.sh" 2>&1 | tee -a "$BUILD_LOG"; then
   fail "kernel name"
 fi
