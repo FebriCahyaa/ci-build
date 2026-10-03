@@ -350,10 +350,9 @@ if [[ "$KSU_REQUIRED" == true ]]; then
     # reproduce the same wiring while also supporting legacy nested trees
     # such as drivers/kernelsu/kernel/.
     if [[ "$KSU_NESTED_EXPECTED" == true ]]; then
-      echo "[ksu] installing nested layout drivers/kernelsu/kernel/" >&2
-      mkdir -p "$SRC_DIR/drivers/kernelsu"
-      rm -rf "$SRC_DIR/drivers/kernelsu/kernel"
-      cp -a "$KSU_SOURCE_KERNEL" "$SRC_DIR/drivers/kernelsu/kernel"
+      echo "[ksu] installing provider repository at drivers/kernelsu -> $KSU_DIR" >&2
+      rm -rf "$SRC_DIR/drivers/kernelsu"
+      ln -s "$KSU_DIR" "$SRC_DIR/drivers/kernelsu"
     else
       echo "[ksu] installing symlink layout drivers/kernelsu -> provider/kernel" >&2
       rm -rf "$SRC_DIR/drivers/kernelsu"
@@ -417,6 +416,38 @@ GCC_URL="$GCC_URL" \
   > "$TOOLCHAIN_ENV" || fail "toolchain resolution"
 
 source "$TOOLCHAIN_ENV"
+
+# ------------------------------------------------------------
+# Sanitize inherited compiler overrides.
+#
+# Kernel Makefile selects the actual compiler when LLVM=1.
+# Environment values such as CC=autogcc or CROSS_COMPILE=auto
+# must not override that logic.
+# ------------------------------------------------------------
+
+unset CC CXX CPP LD AS AR NM OBJCOPY OBJDUMP READELF OBJSIZE STRIP
+unset HOSTCC HOSTCXX
+unset MAKEFLAGS MAKEOVERRIDES
+
+# "auto" is a CI selector, not a valid compiler prefix.
+if [[ "${CROSS_COMPILE:-}" == "auto" ]]; then
+  unset CROSS_COMPILE
+fi
+
+# Empty ARM32 prefix is valid; keep it defined for set -u safety.
+if [[ "${CROSS_COMPILE_ARM32:-}" == "auto" ]]; then
+  CROSS_COMPILE_ARM32=""
+fi
+
+if [[ "${CLANG_TRIPLE:-}" == "auto" ]]; then
+  unset CLANG_TRIPLE
+fi
+
+echo "[toolchain] sanitized environment" >&2
+echo "[toolchain] clang=$(command -v clang || true)" >&2
+echo "[toolchain] ld.lld=$(command -v ld.lld || true)" >&2
+echo "[toolchain] aarch64-gcc=$(command -v aarch64-linux-gnu-gcc || true)" >&2
+echo "[toolchain] arm32-gcc=$(command -v arm-linux-gnueabi-gcc || true)" >&2
 
 if [[ -n "${RESOLVED_TOOLCHAIN_BIN:-}" ]]; then
   export PATH="${RESOLVED_TOOLCHAIN_BIN}:$PATH"
