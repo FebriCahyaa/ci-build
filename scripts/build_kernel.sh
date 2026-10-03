@@ -761,17 +761,17 @@ tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
 # Compile
 # ------------------------------------------------------------
 
+# Never run an unrestricted `make -n` before the real build.
+# On large Android 4.19 trees this can spend minutes expanding the full
+# command graph before the compiler gets a chance to start. Use a lightweight
+# source-file estimate for the progress denominator and derive actual progress
+# from observed Kbuild CC/AS actions.
 COMPILE_PLAN="$WORK/compile-plan.log"
-COMPILE_TOTAL=0
-set +e
-"${MAKE_CMD[@]}" -n 2>&1 | tee "$COMPILE_PLAN" >/dev/null
-PLAN_RC="${PIPESTATUS[0]}"
-set -e
-if [[ "$PLAN_RC" -eq 0 && -s "$COMPILE_PLAN" ]]; then
-  COMPILE_TOTAL="$(grep -Ec '[[:space:]]-c([[:space:]]|$).*-[oO][[:space:]]+[^[:space:]]+\.o([[:space:]]|$)' "$COMPILE_PLAN" 2>/dev/null || true)"
-fi
+COMPILE_TOTAL="$(git -C "$SRC_DIR" ls-files -z -- '*.c' '*.S' '*.s' 2>/dev/null | tr -cd '\0' | wc -c | tr -d ' ')"
 [[ "$COMPILE_TOTAL" =~ ^[0-9]+$ ]] || COMPILE_TOTAL=0
+printf 'compile_plan_mode=source-estimate\n' >> "$ARTIFACTS/build-info.txt"
 printf 'compile_plan_total=%s\n' "$COMPILE_TOTAL" >> "$ARTIFACTS/build-info.txt"
+printf '[CI-COMPILE] telemetry_total=source-estimate:%s\n' "$COMPILE_TOTAL" | tee -a "$BUILD_LOG"
 
 rm -f "$WORK/.stop-compile-telemetry"
 "$COMPILE_PROGRESS_SCRIPT" "$BUILD_LOG" "$COMPILE_TOTAL" "$WORK" "$PROGRESS_SCRIPT" &

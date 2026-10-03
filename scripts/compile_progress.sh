@@ -22,10 +22,10 @@ while [[ ! -f "$WORK_DIR/.stop-compile-telemetry" ]]; do
   count="$(count_actions)"
   pct="$OFFSET"
   if [[ "$TOTAL" =~ ^[0-9]+$ ]] && ((TOTAL>0)); then
-    ((count>TOTAL)) && count="$TOTAL"
+    if (( count > TOTAL )); then count="$TOTAL"; fi
     pct=$((OFFSET + count*SPAN/TOTAL))
   fi
-  ((pct>89)) && pct=89
-  if ((pct!=last)); then emit "$pct" "objects ${count}/${TOTAL}"; last="$pct"; fi
+  if (( pct > 89 )); then pct=89; fi
+  if (( pct != last )); then emit "$pct" "objects ${count}/${TOTAL}"; last="$pct"; fi
   sleep "$INTERVAL"
 done
