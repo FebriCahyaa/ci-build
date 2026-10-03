@@ -246,3 +246,20 @@ chmod +x scripts/start_local_harness.sh
 ```
 
 GitHub Actions menyimpan secret `HARNESS_API_KEY`, `HARNESS_ACCOUNT_ID`, dan Telegram secrets. Local hanya mengirim input workflow, jadi secret tidak perlu ditaruh di Termux/Ubuntu.
+
+
+## Packaging and live build telemetry
+
+The CI repository remains the source of truth for universal build orchestration,
+device packaging profiles, and Harness/Telegram integration. The build emits a
+flashable AnyKernel3 ZIP as a normal release artifact.
+
+A separate Zairenkai packaging repository can be introduced later for a
+standalone distribution channel, but duplicating the packager here now would
+create two sources of truth.
+
+Live build telemetry uses a unique GitHub commit-status context per Harness
+execution. Phase milestones are real build milestones; compile progress is
+derived from the Kbuild dry-run compile plan versus observed CC/AS actions.
+Telegram refreshes its presentation once per second while Harness API polling
+remains at three-second intervals.

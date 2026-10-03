@@ -97,6 +97,12 @@ SRC_DIR="$WORK/kernel"
 OUT="${KERNEL_OUT:-$WORK/kernel-out}"
 ARTIFACTS="$WORK/artifacts"
 BUILD_LOG="$WORK/build.log"
+CI_BUILD_SHA="${CI_BUILD_SHA:-$(git -C "$SCRIPT_DIR/.." rev-parse HEAD 2>/dev/null || true)}"
+HARNESS_EXECUTION_ID="${HARNESS_EXECUTION_ID:-}"
+GH_TOKEN="${GH_TOKEN:-}"
+GH_REPOSITORY="${GH_REPOSITORY:-}"
+PROGRESS_SCRIPT="$SCRIPT_DIR/progress_beacon.sh"
+COMPILE_PROGRESS_SCRIPT="$SCRIPT_DIR/compile_progress.sh"
 
 mkdir -p "$WORK" "$ARTIFACTS"
 
@@ -104,11 +110,18 @@ export CI_HEARTBEAT_SECONDS="${CI_HEARTBEAT_SECONDS:-15}"
 
 # Harness workspaces can lose Git executable bits when CI source bundles are
 # transferred between systems. Restore the required helper permissions locally.
-chmod +x   "$SCRIPT_DIR/run_with_heartbeat.sh"   "$SCRIPT_DIR/sync_localversion_files.sh"   "$SCRIPT_DIR/apply_patch_series.sh"   "$SCRIPT_DIR/toolchain_resolver.sh"   "$SCRIPT_DIR/detect_defconfig.sh"   "$SCRIPT_DIR/set_kernel_name.sh"   2>/dev/null || true
+chmod +x   "$SCRIPT_DIR/run_with_heartbeat.sh"   "$SCRIPT_DIR/sync_localversion_files.sh"   "$SCRIPT_DIR/apply_patch_series.sh"   "$SCRIPT_DIR/toolchain_resolver.sh"   "$SCRIPT_DIR/detect_defconfig.sh"   "$SCRIPT_DIR/set_kernel_name.sh"   "$SCRIPT_DIR/progress_beacon.sh"   "$SCRIPT_DIR/compile_progress.sh"   "$SCRIPT_DIR/select_anykernel_profile.sh"   "$SCRIPT_DIR/build_anykernel.sh"   2>/dev/null || true
 
 ci_phase() {
   local label="$1"
   echo "[CI-PHASE] ${label}" | tee -a "$BUILD_LOG"
+}
+
+progress_update() {
+  local pct="$1" phase="$2" detail="$3" state="${4:-pending}"
+  if [[ -n "$GH_TOKEN" && -n "$GH_REPOSITORY" && -n "$CI_BUILD_SHA" && -n "$HARNESS_EXECUTION_ID" ]]; then
+    GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" CI_BUILD_SHA="$CI_BUILD_SHA"     HARNESS_EXECUTION_ID="$HARNESS_EXECUTION_ID" RUN_URL="$RUN_URL" WORK_DIR="$WORK"       "$PROGRESS_SCRIPT" "$pct" "$state" "$phase" "$detail" || true
+  fi
 }
 
 run_live() {
@@ -209,6 +222,7 @@ fi
 
 cd "$SRC_DIR"
 ci_phase "source-checkout"
+progress_update 5 "source" "checkout complete"
 
 COMMIT="$(git log -1 --pretty='%h %s')"
 COMMIT_SHA="$(git rev-parse HEAD)"
@@ -465,6 +479,7 @@ else
 fi
 
 ci_phase "config-patches"
+progress_update 12 "config" "patch selection complete"
 if ! SOURCE_DIR="$SRC_DIR" \
      DEVICE="$DEVICE" \
      KERNEL_VERSION="$DETECTED_KERNEL_VERSION" \
@@ -495,6 +510,7 @@ GCC_URL="$GCC_URL" \
   2> >(tee -a "$BUILD_LOG" >&2) || fail "toolchain resolution"
 
 source "$TOOLCHAIN_ENV"
+progress_update 24 "toolchain" "$RESOLVED_TOOLCHAIN $RESOLVED_TOOLCHAIN_VERSION"
 
 # ------------------------------------------------------------
 # Sanitize inherited compiler overrides.
@@ -666,6 +682,7 @@ mkdir -p "$OUT"
 
 ci_phase "defconfig"
 run_live "defconfig" "${MAKE_CMD[@]}" "$DETECTED_DEFCONFIG" || fail "defconfig"
+progress_update 30 "defconfig" "$DETECTED_DEFCONFIG"
 
 if [[ -n "$SELECTED_FRAGMENT" ]]; then
   if [[ -x "$SRC_DIR/scripts/kconfig/merge_config.sh" ]]; then
@@ -684,6 +701,7 @@ if [[ -n "$SELECTED_FRAGMENT" ]]; then
     # command that will be used for the kernel build. This also prevents
     # interactive Kconfig prompts from leaking into CI.
     run_live "config-fragment-olddefconfig" "${MAKE_CMD[@]}" olddefconfig || fail "config fragment olddefconfig"
+progress_update 35 "config" "fragment resolved"
   else
     cat "$SELECTED_FRAGMENT" >> "$OUT/.config"
     run_live "fragment-olddefconfig" "${MAKE_CMD[@]}" olddefconfig || fail "fragment olddefconfig"
@@ -718,6 +736,7 @@ if ! CONFIG_FILE="$OUT/.config" \
      "$SCRIPT_DIR/set_kernel_name.sh" 2>&1 | tee -a "$BUILD_LOG"; then
   fail "kernel name"
 fi
+progress_update 41 "identity" "kernel name synchronized"
 
 # Mirror the source repository's localversion-cip/localversion-st mechanism.
 # Kbuild reads localversion* from the kernel source tree, not from the CI repo.
@@ -775,6 +794,7 @@ fi
 echo "Detected scheduler evidence: $SCHEDULER_DETECTED" >> "$ARTIFACTS/build-info.txt"
 
 ci_phase "compile"
+progress_update 44 "compile" "preparing compile plan"
 tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
 📱 $DEVICE | 🏗 $DETECTED_ARCH
 ⚙️ <code>$DETECTED_DEFCONFIG</code>
@@ -788,114 +808,42 @@ tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
 # Compile
 # ------------------------------------------------------------
 
+COMPILE_PLAN="$WORK/compile-plan.log"
+COMPILE_TOTAL=0
+set +e
+"${MAKE_CMD[@]}" -n 2>&1 | tee "$COMPILE_PLAN" >/dev/null
+PLAN_RC="${PIPESTATUS[0]}"
+set -e
+if [[ "$PLAN_RC" -eq 0 && -s "$COMPILE_PLAN" ]]; then
+  COMPILE_TOTAL="$(grep -Ec '[[:space:]]-c([[:space:]]|$).*-[oO][[:space:]]+[^[:space:]]+\.o([[:space:]]|$)' "$COMPILE_PLAN" 2>/dev/null || true)"
+fi
+[[ "$COMPILE_TOTAL" =~ ^[0-9]+$ ]] || COMPILE_TOTAL=0
+printf 'compile_plan_total=%s\n' "$COMPILE_TOTAL" >> "$ARTIFACTS/build-info.txt"
+
+rm -f "$WORK/.stop-compile-telemetry"
+"$COMPILE_PROGRESS_SCRIPT" "$BUILD_LOG" "$COMPILE_TOTAL" "$WORK" "$PROGRESS_SCRIPT" &
+COMPILE_TELEMETRY_PID=$!
+
+set +e
 if [[ -n "$KERNEL_TARGET" ]]; then
-  run_live "compile" "${MAKE_CMD[@]}" "$KERNEL_TARGET" || fail "compile"
+  run_live "compile" "${MAKE_CMD[@]}" "$KERNEL_TARGET"
+  COMPILE_RC=$?
 else
-  run_live "compile" "${MAKE_CMD[@]}" || fail "compile"
+  run_live "compile" "${MAKE_CMD[@]}"
+  COMPILE_RC=$?
+fi
+set -e
+
+touch "$WORK/.stop-compile-telemetry"
+kill "$COMPILE_TELEMETRY_PID" 2>/dev/null || true
+wait "$COMPILE_TELEMETRY_PID" 2>/dev/null || true
+rm -f "$WORK/.stop-compile-telemetry"
+
+if (( COMPILE_RC != 0 )); then
+  progress_update 45 "compile" "kernel compilation failed" failure
+  fail "compile"
 fi
 
-# ------------------------------------------------------------
-ci_phase "collect-artifacts"
-# Collect artifacts
-# ------------------------------------------------------------
+progress_update 90 "compile" "kernel compilation complete"
 
-shopt -s nullglob
 
-for item in \
-  "$OUT/arch/$DETECTED_ARCH/boot/Image" \
-  "$OUT/arch/$DETECTED_ARCH/boot/Image.gz" \
-  "$OUT/arch/$DETECTED_ARCH/boot/Image.lz4" \
-  "$OUT/arch/$DETECTED_ARCH/boot/Image.gz-dtb" \
-  "$OUT/arch/$DETECTED_ARCH/boot/Image-dtb" \
-  "$OUT/arch/$DETECTED_ARCH/boot/zImage" \
-  "$OUT/arch/$DETECTED_ARCH/boot/dt.img" \
-  "$OUT/arch/$DETECTED_ARCH/boot/dtb.img" \
-  "$OUT/arch/$DETECTED_ARCH/boot/dtbo.img"
-do
-  [[ -f "$item" ]] && cp -f "$item" "$ARTIFACTS/"
-done
-
-if [[ -d "$OUT/arch/$DETECTED_ARCH/boot/dts" ]]; then
-  tar -czf "$ARTIFACTS/dts.tar.gz" \
-    -C "$OUT/arch/$DETECTED_ARCH/boot" \
-    dts 2>/dev/null || true
-fi
-
-if find "$OUT" -type f -name '*.ko' -print -quit | grep -q .; then
-  find "$OUT" -type f -name '*.ko' -print0 |
-    tar --null -czf "$ARTIFACTS/modules.tar.gz" \
-      --files-from=- 2>/dev/null || true
-fi
-
-[[ -f "$OUT/.config" ]] && cp -f "$OUT/.config" "$ARTIFACTS/config"
-[[ -f "$OUT/System.map" ]] && cp -f "$OUT/System.map" "$ARTIFACTS/System.map"
-[[ -f "$OUT/vmlinux" ]] && cp -f "$OUT/vmlinux" "$ARTIFACTS/vmlinux"
-
-IMAGE=""
-
-for item in \
-  "$ARTIFACTS/Image" \
-  "$ARTIFACTS/Image.gz" \
-  "$ARTIFACTS/Image.lz4" \
-  "$ARTIFACTS/Image.gz-dtb" \
-  "$ARTIFACTS/Image-dtb" \
-  "$ARTIFACTS/zImage"
-do
-  if [[ -f "$item" ]]; then
-    IMAGE="$item"
-    break
-  fi
-done
-
-[[ -n "$IMAGE" ]] || fail "kernel image not found"
-
-# ------------------------------------------------------------
-# Optional Custom AnyKernel3
-# ------------------------------------------------------------
-
-if [[ "$PACKAGE_ANYKERNEL" == "true" ]]; then
-  [[ -x "$SCRIPT_DIR/build_anykernel.sh" ]] || fail "Custom AnyKernel packer missing"
-
-  run_live "anykernel-package" env \
-    ARTIFACT_DIR="$ARTIFACTS" \
-    OUTPUT_DIR="$ARTIFACTS" \
-    WORK_DIR="$WORK" \
-    DEVICE="$DEVICE" \
-    KERNEL_VERSION="$DETECTED_KERNEL_VERSION" \
-    ROM_FAMILY="$ROM_FAMILY" \
-    ANYKERNEL_PROFILE="$ANYKERNEL_PROFILE" \
-    ANYKERNEL3_REPO="$ANYKERNEL3_REPO" \
-    ANYKERNEL3_REF="$ANYKERNEL3_REF" \
-    KERNEL_IMAGE="$IMAGE" \
-    "$SCRIPT_DIR/build_anykernel.sh" || fail "AnyKernel package"
-fi
-
-# ------------------------------------------------------------
-ci_phase "package"
-# Final archive
-# ------------------------------------------------------------
-
-ARCHIVE="$WORK/Kernel-${DEVICE}-$(date +%Y%m%d-%H%M).tar.gz"
-
-tar -czf "$ARCHIVE" \
-  -C "$ARTIFACTS" . || fail "artifact archive"
-
-DURATION=$(( $(date +%s) - START ))
-SHA="$(sha256sum "$ARCHIVE" | cut -d' ' -f1)"
-
-tg_edit "$MID" "✅ <b>Kernel build selesai</b>
-📱 $DEVICE | 🏗 $DETECTED_ARCH
-🐧 ${DETECTED_KERNEL_VERSION}
-⚙️ <code>$DETECTED_DEFCONFIG</code>
-🛠 <code>$RESOLVED_TOOLCHAIN $RESOLVED_TOOLCHAIN_VERSION</code>
-📊 Scheduler: <code>$SCHEDULER_DETECTED</code>
-🔐 KSU: <code>$KSU_REQUIRED</code>
-⏱ $(fmt_dur "$DURATION")
-📦 <code>$(basename "$ARCHIVE")</code>
-🔐 SHA256: <code>${SHA:0:16}…</code>
-🔗 <a href=\"$RUN_URL\">CI log</a>"
-
-tg_file "$ARCHIVE" "📦 <b>Kernel artifacts — $DEVICE</b>"
-
-echo "ARTIFACT_ARCHIVE=$ARCHIVE"
-echo "ARTIFACT_SHA256=$SHA"

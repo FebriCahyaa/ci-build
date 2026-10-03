@@ -5,6 +5,10 @@ pipeline:
   orgIdentifier: default
 
   variables:
+    - name: CI_BUILD_SHA
+      type: String
+      value: ""
+
     - name: KERNEL_REPO
       type: String
       value: https://github.com/pix106/android_kernel_xiaomi_sdm660_southwest-ng
@@ -103,23 +107,23 @@ pipeline:
 
     - name: PACKAGE_ANYKERNEL
       type: String
-      value: <+input>
+      value: true
 
     - name: ROM_FAMILY
       type: String
-      value: <+input>
+      value: custom-android
 
     - name: ANYKERNEL_PROFILE
       type: String
-      value: <+input>
+      value: auto
 
     - name: ANYKERNEL3_REPO
       type: String
-      value: <+input>
+      value: https://github.com/osm0sis/AnyKernel3
 
     - name: ANYKERNEL3_REF
       type: String
-      value: <+input>
+      value: master
 
     - name: PATCH_PROFILE
       type: String

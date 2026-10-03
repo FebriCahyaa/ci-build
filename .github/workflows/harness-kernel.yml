@@ -115,16 +115,16 @@ on:
         default: ""
 
       package_anykernel:
-        description: "Package AnyKernel3"
+        description: "Package flashable AnyKernel3 ZIP"
         required: true
         type: boolean
-        default: false
+        default: true
       rom_family:
         description: "ROM family for AnyKernel profile selection"
         required: true
         type: choice
         options: [auto, oss, hyperos, miui, custom-android, legacy]
-        default: auto
+        default: custom-android
       anykernel_profile:
         description: "AnyKernel profile"
         required: true
@@ -168,6 +168,7 @@ jobs:
           HARNESS_ORG: default
           HARNESS_PROJECT: ci_build
           PIPELINE_ID: Universal_Kernel_Build
+          CI_BUILD_SHA: ${{ github.sha }}
           KERNEL_REPO: ${{ inputs.kernel_repo }}
           KERNEL_BRANCH: ${{ inputs.kernel_branch }}
           KERNEL_REF_TYPE: auto
@@ -205,13 +206,14 @@ jobs:
           python3 - <<'PY'
           import json, os
           names = [
-            "KERNEL_REPO","KERNEL_BRANCH","KERNEL_REF_TYPE","DEVICE","ARCH","DEFCONFIG","CONFIG_FRAGMENT","JOBS",
+            "CI_BUILD_SHA","KERNEL_REPO","KERNEL_BRANCH","KERNEL_REF_TYPE","DEVICE","ARCH","DEFCONFIG","CONFIG_FRAGMENT","JOBS",
             "TOOLCHAIN","TOOLCHAIN_VERSION","LLVM_IAS","CROSS_COMPILE","CROSS_COMPILE_ARM32",
             "CLANG_URL","GCC_URL","APT_PACKAGES","EXTRA_MAKE_ARGS","SCHEDULER_PROFILE",
             "PATCH_PROFILE","UPSTREAM_PROFILE","LTO_PLUS","KERNEL_NAME",
             "ENABLE_KSU","KSU_REF","KSU_PROVIDER","KSU_REPO","KSU_LAYOUT","KSU_HOOK_MODE","PACKAGE_ANYKERNEL","ROM_FAMILY","ANYKERNEL_PROFILE","ANYKERNEL3_REPO","ANYKERNEL3_REF"
           ]
           values = {n: os.environ.get(n, "") for n in names}
+          values["CI_BUILD_SHA"] = os.environ.get("CI_BUILD_SHA", "")
           values["KERNEL_REF_TYPE"] = "auto"
           values["CROSS_COMPILE_ARM32"] = ""
           values["SCHEDULER_PROFILE"] = "auto"
@@ -294,6 +296,7 @@ jobs:
           HARNESS_PROJECT: ci_build
           HARNESS_PIPELINE: Universal_Kernel_Build
           HARNESS_PLAN_EXECUTION_ID: ${{ steps.trigger.outputs.plan_execution_id }}
+          CI_BUILD_SHA: ${{ github.sha }}
           HARNESS_EXECUTION_URL: https://app.harness.io/ng/account/${{ secrets.HARNESS_ACCOUNT_ID }}/module/ci/orgs/default/projects/ci_build/pipelines/Universal_Kernel_Build/executions/${{ steps.trigger.outputs.plan_execution_id }}/pipeline
           DEVICE: ${{ inputs.device }}
           KERNEL_BRANCH: ${{ inputs.kernel_branch }}
@@ -302,7 +305,8 @@ jobs:
           TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
-          HARNESS_POLL_SECONDS: "6"
+          HARNESS_POLL_SECONDS: "3"
+          TG_UI_INTERVAL: "1"
           HARNESS_API_TIMEOUT: "10"
           HARNESS_GRAPH_FALLBACK_EVERY: "3"
           HARNESS_RELEASE_CHECK_EVERY: "6"

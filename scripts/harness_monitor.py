@@ -4,6 +4,8 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -16,7 +18,7 @@ ORG = os.environ.get("HARNESS_ORG", "default")
 PROJECT = os.environ.get("HARNESS_PROJECT", "ci_build")
 PIPELINE = os.environ.get("HARNESS_PIPELINE", "Universal_Kernel_Build")
 PLAN = os.environ["HARNESS_PLAN_EXECUTION_ID"]
-POLL = max(5, int(os.environ.get("HARNESS_POLL_SECONDS", "6")))
+POLL = max(3, int(os.environ.get("HARNESS_POLL_SECONDS", "3")))
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 TG_CHAT = os.environ.get("TG_CHAT_ID", "")
 TG_TOPIC = os.environ.get("TG_TOPIC_ID", "")
@@ -28,7 +30,7 @@ GITHUB_API = os.environ.get("GITHUB_API", "https://api.github.com")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GH_REPOSITORY = os.environ.get("GH_REPOSITORY", "")
 MAX_SECONDS = max(60, int(os.environ.get("HARNESS_MAX_SECONDS", "8100")))
-TG_EDIT_MIN_SECONDS = max(3.0, float(os.environ.get("TG_EDIT_MIN_SECONDS", str(POLL))))
+TG_EDIT_MIN_SECONDS = max(1.0, float(os.environ.get("TG_EDIT_MIN_SECONDS", "1")))
 TG_HTTP_TIMEOUT = max(4, int(os.environ.get("TG_HTTP_TIMEOUT", "8")))
 TG_MAX_RETRIES = max(1, int(os.environ.get("TG_MAX_RETRIES", "3")))
 API_TIMEOUT = max(4, int(os.environ.get("HARNESS_API_TIMEOUT", "10")))
@@ -36,6 +38,9 @@ GRAPH_FALLBACK_EVERY = max(2, int(os.environ.get("HARNESS_GRAPH_FALLBACK_EVERY",
 RELEASE_CHECK_EVERY = max(3, int(os.environ.get("HARNESS_RELEASE_CHECK_EVERY", "6")))
 EXPECTED_STAGE_NAME = os.environ.get("HARNESS_EXPECTED_STAGE_NAME", "Kernel Build")
 EXPECTED_STEP_NAME = os.environ.get("HARNESS_EXPECTED_STEP_NAME", "Build Universal Kernel")
+CI_BUILD_SHA = os.environ.get("CI_BUILD_SHA", "")
+PROGRESS_CONTEXT = os.environ.get("CI_PROGRESS_CONTEXT", f"harness-progress/{PLAN}")
+UI_INTERVAL = max(1.0, float(os.environ.get("TG_UI_INTERVAL", "1")))
 RELEASE_TAG = f"harness-{PLAN}"
 
 TERMINAL = {"SUCCEEDED","SUCCESS","FAILED","FAILURE","ERROR","ERRORED","ABORTED","EXPIRED","REJECTED","STOPPED","CANCELED"}
@@ -885,6 +890,43 @@ def github_release_state() -> tuple[str, str]:
 
 
 
+def github_progress_state() -> tuple[int | None, str, str]:
+    if not GH_REPOSITORY or not CI_BUILD_SHA:
+        return None, "", ""
+    path = (
+        f"/repos/{urllib.parse.quote(GH_REPOSITORY, safe='')}"
+        f"/commits/{urllib.parse.quote(CI_BUILD_SHA, safe='')}"
+        f"/statuses?context={urllib.parse.quote(PROGRESS_CONTEXT, safe='')}&per_page=100"
+    )
+    req = urllib.request.Request(
+        f"https://api.github.com{path}",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            **({"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}),
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            payload = json.load(resp)
+    except Exception:
+        return None, "", ""
+    if not isinstance(payload, list):
+        return None, "", ""
+    for item in reversed(payload):
+        if not isinstance(item, dict) or str(item.get("context", "")) != PROGRESS_CONTEXT:
+            continue
+        desc = str(item.get("description", "") or "")
+        m = re.match(r"^\[(\d{1,3})%\]\s*(.*)$", desc)
+        if not m:
+            continue
+        try:
+            pct = max(0, min(100, int(m.group(1))))
+        except ValueError:
+            continue
+        return pct, m.group(2).strip(), norm(item.get("state"))
+    return None, "", ""
+
 def duration(sec: int) -> str:
     return f"{sec // 60}m {sec % 60}s"
 
@@ -931,28 +973,23 @@ def progress_bar(
     done: int,
     total: int,
     frame: int,
+    telemetry_pct: int | None = None,
 ) -> tuple[str, str]:
-    """Show real completion plus a visible live activity indicator."""
     state = norm(status)
+
+    if telemetry_pct is not None:
+        pct = max(0, min(100, int(telemetry_pct)))
+        filled = int(round(BAR_WIDTH * pct / 100))
+        cells = ["█"] * filled + ["░"] * (BAR_WIDTH - filled)
+        if state in RUNNING_STATES and pct < 100 and BAR_WIDTH:
+            pulse = min(filled + (frame % max(1, BAR_WIDTH - filled)), BAR_WIDTH - 1)
+            cells[pulse] = "▓"
+        return "".join(cells), f"{pct:3d}%"
 
     if total > 0:
         pct = int(round(done * 100 / total))
         if state not in TERMINAL:
             pct = min(pct, 99)
-        pct = max(0, min(100, pct))
-
-        # A single active Harness step has no trustworthy sub-step percentage.
-        # Keep the numeric completion honest while animating a moving cursor so
-        # Telegram visibly changes during a long compile.
-        if state in RUNNING_STATES and done < total:
-            span = max(1, BAR_WIDTH * 2 - 2)
-            pos = frame % span
-            if pos >= BAR_WIDTH:
-                pos = span - pos
-            cells = ["░"] * BAR_WIDTH
-            cells[pos] = "█"
-            return "".join(cells), f"{pct:3d}% LIVE"
-
         filled = int(round(BAR_WIDTH * pct / 100))
         return ("█" * filled + "░" * (BAR_WIDTH - filled), f"{pct:3d}%")
 
@@ -964,7 +1001,6 @@ def progress_bar(
         cells = ["░"] * BAR_WIDTH
         cells[pos] = "█"
         return "".join(cells), "LIVE"
-
     return ("░" * BAR_WIDTH, "LIVE")
 
 
@@ -1061,6 +1097,8 @@ def render(
     active: int = 0,
     frame: int = 0,
     tree_text: str = "",
+    telemetry_pct: int | None = None,
+    telemetry_detail: str = "",
 ) -> str:
     state = norm(status)
 
@@ -1079,6 +1117,7 @@ def render(
         done,
         total,
         frame,
+        telemetry_pct,
     )
 
     current = html.escape(
@@ -1095,9 +1134,10 @@ def render(
         f"{tree_text or '📦 <b>PIPELINE</b>'}\n\n"
         f"🎯 Stage: <code>{html.escape(stage or '-')}</code>\n"
         f"🔨 Step: <code>{html.escape(step or '-')}</code>\n"
-        f"📊 Pipeline: <code>{bar}</code> "
+        f"📊 Build: <code>{bar}</code> "
         f"<b>{pct}</b>\n"
-        f"✅ Completed: <code>{done}/{total}</code>\n"
+        f"📡 <code>{html.escape(telemetry_detail or 'Harness execution state')}</code>\n"
+        f"✅ Harness: <code>{done}/{total}</code>\n"
         f"⚡ Active: <code>{active}</code>\n"
         f"💓 Monitor poll: <code>#{frame}</code>\n"
         f"⏱ <code>{duration(elapsed)}</code>\n"
@@ -1122,355 +1162,258 @@ def render(
 
 def main() -> int:
     started = time.time()
-    frame = 0
+    api_frame = 0
+    ui_frame = 0
+    shared = {
+        "status": "STARTING", "stage": "", "step": "", "error": "",
+        "done": 0, "total": 0, "active": 0, "tree_text": "",
+        "telemetry_pct": None,
+        "telemetry_detail": "waiting for build telemetry",
+        "message_id": send(
+            f"🚀 <b>Universal Kernel Build</b>\n"
+            f"📱 <code>{html.escape(DEVICE)}</code>\n"
+            f"🌿 <code>{html.escape(BRANCH)}</code>\n"
+            f"🆔 <code>{html.escape(PLAN)}</code>\n"
+            f"🟡 Starting…"
+        ),
+        "edit_failures": 0,
+    }
+    lock = threading.Lock()
+    stop_ui = threading.Event()
 
-    message_id = send(
-        f"🚀 <b>Universal Kernel Build</b>\n"
-        f"📱 <code>{html.escape(DEVICE)}</code>\n"
-        f"🌿 <code>{html.escape(BRANCH)}</code>\n"
-        f"🆔 <code>{html.escape(PLAN)}</code>\n"
-        f"🟡 Starting…"
-    )
+    def ui_loop() -> None:
+        nonlocal ui_frame
+        while not stop_ui.wait(UI_INTERVAL):
+            ui_frame += 1
+            with lock:
+                snap = dict(shared)
+            elapsed = int(time.time() - started)
+            msg = render(
+                str(snap["status"] or "RUNNING"),
+                str(snap["stage"] or ""),
+                str(snap["step"] or ""),
+                elapsed,
+                str(snap["error"] or ""),
+                int(snap["done"] or 0),
+                int(snap["total"] or 0),
+                int(snap["active"] or 0),
+                ui_frame,
+                str(snap["tree_text"] or ""),
+                snap["telemetry_pct"],
+                str(snap["telemetry_detail"] or ""),
+            )
+            mid = str(snap["message_id"] or "")
+            if not mid:
+                nid = send(msg)
+                if nid:
+                    with lock:
+                        shared["message_id"] = nid
+                        shared["edit_failures"] = 0
+                continue
+            if edit(mid, msg):
+                with lock:
+                    shared["edit_failures"] = 0
+            else:
+                with lock:
+                    shared["edit_failures"] += 1
+                    failures = shared["edit_failures"]
+                if failures >= 3:
+                    nid = send(msg)
+                    if nid:
+                        with lock:
+                            shared["message_id"] = nid
+                            shared["edit_failures"] = 0
 
-    last_signature = ""
-    last_text = ""
-    last_edit_at = 0.0
-    edit_failures = 0
+    ui_thread = threading.Thread(target=ui_loop, name="telegram-ui", daemon=True)
+    ui_thread.start()
 
     final: dict[str, object] = {}
     api_failures = 0
-
-    last_done = 0
-    last_total = 0
-    last_active = 0
+    last_done = last_total = last_active = 0
     last_tree = ""
+    telemetry_pct: int | None = None
+    telemetry_detail = "waiting for build telemetry"
 
-    while True:
-        frame += 1
-
-        query = (
-            f"?accountIdentifier={urllib.parse.quote(ACCOUNT)}"
-            f"&orgIdentifier={urllib.parse.quote(ORG)}"
-            f"&projectIdentifier={urllib.parse.quote(PROJECT)}"
-        )
-        detail_query = query + "&renderFullBottomGraph=true"
-
-        details = {}
-        graph = {}
-        detail_error = ""
-        graph_error = ""
-
-        try:
-            details = api_get(
-                "/pipeline/api/pipelines/execution/v2/"
-                f"{urllib.parse.quote(PLAN, safe='')}"
-                f"{detail_query}"
+    try:
+        while True:
+            api_frame += 1
+            query = (
+                f"?accountIdentifier={urllib.parse.quote(ACCOUNT)}"
+                f"&orgIdentifier={urllib.parse.quote(ORG)}"
+                f"&projectIdentifier={urllib.parse.quote(PROJECT)}"
             )
-        except Exception as exc:
-            detail_error = f"{type(exc).__name__}: {exc}"
-
-        # The v2 response is the primary source. The legacy graph endpoint is
-        # expensive and was being queried every five seconds, which could
-        # block the monitor for tens of seconds. Use it only when the primary
-        # response is sparse and at a controlled fallback interval.
-        tree, raw_nodes = pipeline_tree(details)
-        active_stage_present = any(
-            item[4] == "stage" and norm(item[3]) in RUNNING_STATES
-            for item in raw_nodes
-        )
-        has_real_step = any(
-            item[4] == "step" and not _is_infra_name(item[2])
-            for item in raw_nodes
-        )
-        needs_graph_fallback = (
-            not raw_nodes
-            or (active_stage_present and not has_real_step)
-        )
-
-        if needs_graph_fallback and (
-            frame == 1 or frame % GRAPH_FALLBACK_EVERY == 0
-        ):
+            detail_query = query + "&renderFullBottomGraph=true"
+            details = {}
+            graph = {}
+            detail_error = ""
+            graph_error = ""
             try:
-                graph = api_get(
-                    "/pipeline/api/pipelines/execution/"
-                    "getExecutionGraph/"
-                    f"{urllib.parse.quote(PLAN, safe='')}"
-                    f"{query}"
+                details = api_get(
+                    "/pipeline/api/pipelines/execution/v2/"
+                    f"{urllib.parse.quote(PLAN, safe='')}{detail_query}"
                 )
             except Exception as exc:
-                graph_error = f"{type(exc).__name__}: {exc}"
+                detail_error = f"{type(exc).__name__}: {exc}"
 
-        if graph:
-            graph_tree, graph_nodes = pipeline_tree(graph)
-            if graph_nodes or not raw_nodes:
-                tree, raw_nodes = graph_tree, graph_nodes
+            tree, raw_nodes = pipeline_tree(details)
+            active_stage_present = any(
+                item[4] == "stage" and norm(item[3]) in RUNNING_STATES for item in raw_nodes
+            )
+            has_real_step = any(
+                item[4] == "step" and not _is_infra_name(item[2]) for item in raw_nodes
+            )
+            if (not raw_nodes or (active_stage_present and not has_real_step)) and (
+                api_frame == 1 or api_frame % GRAPH_FALLBACK_EVERY == 0
+            ):
+                try:
+                    graph = api_get(
+                        "/pipeline/api/pipelines/execution/getExecutionGraph/"
+                        f"{urllib.parse.quote(PLAN, safe='')}{query}"
+                    )
+                except Exception as exc:
+                    graph_error = f"{type(exc).__name__}: {exc}"
 
-        if detail_error and not raw_nodes:
-            api_failures += 1
-            final["monitor_error"] = detail_error
-        elif not detail_error:
-            api_failures = 0
-        elif graph_error:
-            api_failures += 1
-            final["monitor_error"] = detail_error + "; graph=" + graph_error
+            if graph:
+                graph_tree, graph_nodes = pipeline_tree(graph)
+                if graph_nodes or not raw_nodes:
+                    tree, raw_nodes = graph_tree, graph_nodes
 
-        status = status_of(details)
+            if detail_error and not raw_nodes:
+                api_failures += 1
+                monitor_error = detail_error
+            else:
+                api_failures = 0
+                monitor_error = detail_error + (("; graph=" + graph_error) if graph_error else "")
 
-        raw_nodes = infer_active_children(raw_nodes)
-        tree = tree_from_raw(raw_nodes)
+            status = status_of(details)
+            raw_nodes = infer_active_children(raw_nodes)
+            stage, step = current_node(raw_nodes, status)
+            if not status:
+                active_nodes = [n for n in raw_nodes if norm(n[3]) in RUNNING_STATES]
+                if active_nodes:
+                    active_nodes.sort(key=lambda n: (n[0], n[1], n[2]), reverse=True)
+                    status = active_nodes[0][3]
+            state = norm(status) or "UNKNOWN"
 
-        stage, step = current_node(raw_nodes, status)
+            tree = canonical_monitor_tree(raw_nodes, state, stage, step)
+            err = error_of(details) or error_of(graph)
+            elapsed = int(time.time() - started)
+            done_nodes, total_nodes, active_nodes_count = progress_of(raw_nodes, state)
+            tree_text = render_tree(tree)
 
-        if not status:
-            active_nodes = [
-                node
-                for node in raw_nodes
-                if norm(node[3]) in RUNNING_STATES
-            ]
+            tp, td, _ts = github_progress_state()
+            if tp is not None:
+                telemetry_pct = tp
+                telemetry_detail = td or "build telemetry active"
 
-            if active_nodes:
-                active_nodes.sort(
-                    key=lambda node: (
-                        node[0],
-                        node[1],
-                        node[2],
-                    ),
-                    reverse=True,
+            if state in TERMINAL or api_frame == 1 or api_frame % RELEASE_CHECK_EVERY == 0:
+                release_status, release_error = github_release_state()
+            else:
+                release_status, release_error = "", ""
+
+            completion_source = ""
+            if release_status:
+                state = norm(release_status) or state
+                status = release_status
+                err = err or release_error
+                completion_source = "github_release"
+
+            if not raw_nodes and last_tree:
+                tree_text, done_nodes, total_nodes, active_nodes_count = (
+                    last_tree, last_done, last_total, last_active
+                )
+            elif raw_nodes:
+                last_tree, last_done, last_total, last_active = (
+                    tree_text, done_nodes, total_nodes, active_nodes_count
                 )
 
-                status = active_nodes[0][3]
+            with lock:
+                shared.update({
+                    "status": state, "stage": stage, "step": step, "error": err,
+                    "done": done_nodes, "total": total_nodes, "active": active_nodes_count,
+                    "tree_text": tree_text, "telemetry_pct": telemetry_pct,
+                    "telemetry_detail": telemetry_detail,
+                })
 
-        # Normalize the state before all completion/progress decisions.
-        state = norm(status) or "UNKNOWN"
+            print(
+                f"[monitor] api_poll={api_frame} status={state} "
+                f"harness={done_nodes}/{total_nodes} active={active_nodes_count} "
+                f"telemetry={telemetry_pct if telemetry_pct is not None else '-'}% "
+                f"stage={stage or '-'} step={step or '-'} elapsed={elapsed}s",
+                flush=True,
+            )
 
-        # Keep the user-facing tree focused on the actual workflow path.
-        tree = canonical_monitor_tree(raw_nodes, state, stage, step)
+            if state in TERMINAL:
+                final = {
+                    "plan_execution_id": PLAN, "status": state,
+                    "stage": stage, "step": step, "error": err,
+                    "elapsed_seconds": elapsed, "execution_url": RUN_URL,
+                    "completion_source": completion_source or "harness_api",
+                    "progress": {"completed": done_nodes, "total": total_nodes, "active": active_nodes_count},
+                    "build_telemetry": {"percent": telemetry_pct, "detail": telemetry_detail,
+                                        "context": PROGRESS_CONTEXT, "ci_build_sha": CI_BUILD_SHA},
+                }
+                break
 
-        # The normalized live state is now available for the release check.
-        err = error_of(details) or error_of(graph)
-        elapsed = int(time.time() - started)
+            if elapsed >= MAX_SECONDS:
+                final = {
+                    "plan_execution_id": PLAN, "status": "MONITOR_TIMEOUT",
+                    "stage": stage, "step": step,
+                    "error": f"Monitor exceeded {MAX_SECONDS}s without a terminal Harness/release state.",
+                    "elapsed_seconds": elapsed, "execution_url": RUN_URL,
+                    "completion_source": "monitor_timeout",
+                    "progress": {"completed": done_nodes, "total": total_nodes, "active": active_nodes_count},
+                    "build_telemetry": {"percent": telemetry_pct, "detail": telemetry_detail,
+                                        "context": PROGRESS_CONTEXT, "ci_build_sha": CI_BUILD_SHA},
+                }
+                break
 
-        done_nodes, total_nodes, active_nodes_count = progress_of(
-            raw_nodes, status
-        )
+            if api_failures >= 12:
+                final = {
+                    "plan_execution_id": PLAN, "status": "MONITOR_ERROR",
+                    "stage": stage, "step": step,
+                    "error": monitor_error or "Harness API polling failed",
+                    "elapsed_seconds": elapsed, "execution_url": RUN_URL,
+                    "completion_source": "harness_api_error",
+                    "progress": {"completed": done_nodes, "total": total_nodes, "active": active_nodes_count},
+                    "build_telemetry": {"percent": telemetry_pct, "detail": telemetry_detail,
+                                        "context": PROGRESS_CONTEXT, "ci_build_sha": CI_BUILD_SHA},
+                }
+                break
 
-        tree_text = render_tree(tree)
-
-        # Harness creates the GitHub Release only from the EXIT trap after
-        # the build process terminates. Keep it as a secondary signal, but do
-        # not perform another network request on every poll.
-        if state in TERMINAL or frame == 1 or frame % RELEASE_CHECK_EVERY == 0:
-            release_status, release_error = github_release_state()
-        else:
-            release_status, release_error = "", ""
-
-        completion_source = ""
-
-        if release_status:
-            status = release_status
-            err = err or release_error
-            completion_source = "github_release"
-
-        state = norm(status) or "UNKNOWN"
-
-        # Keep the last useful graph visible during transient API failures.
-        if not raw_nodes and last_tree:
-            tree_text = last_tree
-            done_nodes = last_done
-            total_nodes = last_total
-            active_nodes_count = last_active
-
-        if raw_nodes:
-            last_tree = tree_text
-            last_done = done_nodes
-            last_total = total_nodes
-            last_active = active_nodes_count
-
-        message_text = render(
-            status or "RUNNING",
-            stage,
-            step,
-            elapsed,
-            err,
-            done_nodes,
-            total_nodes,
-            active_nodes_count,
-            frame,
-            tree_text,
-        )
-
-        signature = (
-            f"{state}|{stage}|{step}|{err[:300]}|"
-            f"{done_nodes}|{total_nodes}|{active_nodes_count}|"
-            f"{tree_text}|{frame}"
-        )
-
-        now = time.monotonic()
-        if (
-            message_text != last_text
-            and (now - last_edit_at) >= TG_EDIT_MIN_SECONDS
-        ):
-            if message_id:
-                if edit(message_id, message_text):
-                    edit_failures = 0
-                    last_edit_at = now
-                else:
-                    edit_failures += 1
-
-                    # Do not let one broken Telegram message freeze the monitor.
-                    # After two consecutive edit failures, create a replacement
-                    # message and continue editing that one.
-                    if edit_failures >= 2:
-                        replacement_id = send(message_text)
-                        if replacement_id:
-                            message_id = replacement_id
-                            edit_failures = 0
-                            last_edit_at = now
-            else:
-                message_id = send(message_text)
-                if message_id:
-                    edit_failures = 0
-                    last_edit_at = now
-
-            last_text = message_text
-            last_signature = signature
-
-        # Persist a live snapshot, not only the final state.
-        write_monitor_state({
-            "plan_execution_id": PLAN,
-            "status": state,
-            "stage": stage,
-            "step": step,
-            "error": err,
-            "elapsed_seconds": elapsed,
-            "execution_url": RUN_URL,
-            "completion_source": completion_source or "live_poll",
-            "terminal": state in TERMINAL,
-            "poll": frame,
-            "api_failures": api_failures,
-            "graph_fallback": bool(graph),
-            "monitor_error": str(final.get("monitor_error", "")),
-            "telegram": {
-                "configured": bool(TG_TOKEN and TG_CHAT),
-                "message_id": message_id,
-                "edit_failures": edit_failures,
-                "last_error": TG_LAST_ERROR,
-            },
-            "progress": {
-                "completed": done_nodes,
-                "total": total_nodes,
-                "active": active_nodes_count,
-            },
-        })
-
-        print(
-            f"[monitor] poll={frame} status={state} "
-            f"progress={done_nodes}/{total_nodes} active={active_nodes_count} "
-            f"stage={stage or '-'} step={step or '-'} elapsed={elapsed}s",
-            flush=True,
-        )
-
-        if state in TERMINAL:
-            final = {
-                "plan_execution_id": PLAN,
-                "status": state,
-                "stage": stage,
-                "step": step,
-                "error": err,
-                "elapsed_seconds": elapsed,
-                "execution_url": RUN_URL,
-                "completion_source": (
-                    completion_source
-                    or "harness_api"
-                ),
-                "progress": {
-                    "completed": done_nodes,
-                    "total": total_nodes,
-                    "active": active_nodes_count,
-                },
-            }
-            break
-
-        if elapsed >= MAX_SECONDS:
-            final = {
-                "plan_execution_id": PLAN,
-                "status": "MONITOR_TIMEOUT",
-                "stage": stage,
-                "step": step,
-                "error": (
-                    f"Monitor exceeded {MAX_SECONDS}s "
-                    "without a terminal Harness/release state."
-                ),
-                "elapsed_seconds": elapsed,
-                "execution_url": RUN_URL,
-                "completion_source": "monitor_timeout",
-                "progress": {
-                    "completed": done_nodes,
-                    "total": total_nodes,
-                    "active": active_nodes_count,
-                },
-            }
-            break
-
-        if api_failures >= 12:
-            final = {
-                "plan_execution_id": PLAN,
-                "status": "MONITOR_ERROR",
-                "stage": stage,
-                "step": step,
-                "error": str(
-                    final.get(
-                        "monitor_error",
-                        "Harness API polling failed",
-                    )
-                ),
-                "elapsed_seconds": elapsed,
-                "execution_url": RUN_URL,
-                "completion_source": "harness_api_error",
-                "progress": {
-                    "completed": done_nodes,
-                    "total": total_nodes,
-                    "active": active_nodes_count,
-                },
-            }
-            break
-
-        time.sleep(POLL)
+            time.sleep(POLL)
+    finally:
+        stop_ui.set()
+        ui_thread.join(timeout=3)
 
     write_monitor_state(final)
 
-    final_progress = final.get("progress")
-    if not isinstance(final_progress, dict):
-        final_progress = {}
-
+    fp = final.get("progress") if isinstance(final.get("progress"), dict) else {}
+    ft = final.get("build_telemetry") if isinstance(final.get("build_telemetry"), dict) else {}
     final_text = render(
-        str(final.get("status", "UNKNOWN")),
-        str(final.get("stage", "")),
-        str(final.get("step", "")),
-        int(final.get("elapsed_seconds", 0)),
-        str(final.get("error", "")),
-        int(final_progress.get("completed", last_done)),
-        int(final_progress.get("total", last_total)),
-        int(final_progress.get("active", last_active)),
-        frame,
+        str(final.get("status","UNKNOWN")),
+        str(final.get("stage","")),
+        str(final.get("step","")),
+        int(final.get("elapsed_seconds", int(time.time()-started))),
+        str(final.get("error","")),
+        int(fp.get("completed", last_done)),
+        int(fp.get("total", last_total)),
+        int(fp.get("active", last_active)),
+        ui_frame + 1,
         last_tree,
+        ft.get("percent"),
+        str(ft.get("detail", telemetry_detail)),
     )
-
-    if message_id:
-        if not edit(message_id, final_text):
-            replacement_id = send(final_text)
-            if replacement_id:
-                message_id = replacement_id
+    with lock:
+        mid = str(shared.get("message_id",""))
+    if mid:
+        if not edit(mid, final_text):
+            nid = send(final_text)
+            if nid:
+                with lock: shared["message_id"] = nid
     else:
         send(final_text)
-
-    print(
-        json.dumps(
-            final,
-            ensure_ascii=False,
-        )
-    )
-
+    print(json.dumps(final, ensure_ascii=False))
     return 0
 
 

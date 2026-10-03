@@ -12,6 +12,8 @@ DEVICE="${DEVICE:-generic}"
 KERNEL_VERSION="${KERNEL_VERSION:-}"
 ROM_FAMILY="${ROM_FAMILY:-oss}"
 KERNEL_NAME="${KERNEL_NAME:-Zairenkai}"
+KERNEL_CODENAME_FILE="${KERNEL_CODENAME_FILE:-$ROOT_DIR/kernel-codename}"
+KERNEL_BUILD_FILE="${KERNEL_BUILD_FILE:-$ROOT_DIR/kernel-build}"
 ANYKERNEL_PROFILE_REQUESTED="${ANYKERNEL_PROFILE:-auto}"
 ANYKERNEL3_REPO="${ANYKERNEL3_REPO:-https://github.com/osm0sis/AnyKernel3.git}"
 ANYKERNEL3_REF_REQUESTED="${ANYKERNEL3_REF:-}"
@@ -57,6 +59,11 @@ if ! git -C "$AK_WORK" checkout --quiet "$REF" >/dev/null 2>&1; then
   git -C "$AK_WORK" checkout --quiet "$REF" || die "unable to checkout AnyKernel3 ref $REF"
 fi
 UPSTREAM_COMMIT="$(git -C "$AK_WORK" rev-parse HEAD)"
+KERNEL_CODENAME="$(sed -n '1p' "$KERNEL_CODENAME_FILE" 2>/dev/null | tr -d '\r' || true)"
+KERNEL_BUILD="$(sed -n '1p' "$KERNEL_BUILD_FILE" 2>/dev/null | tr -d '\r' || true)"
+[[ -n "$KERNEL_CODENAME" ]] || KERNEL_CODENAME="VEGA"
+[[ -n "$KERNEL_BUILD" ]] || KERNEL_BUILD="1"
+BUILD_LABEL="${KERNEL_NAME}-${KERNEL_CODENAME}${KERNEL_BUILD}"
 
 if [[ -z "$KERNEL_IMAGE" ]]; then
   for candidate in \
@@ -149,6 +156,7 @@ ui_print "CI-Build Custom AnyKernel3";
 ui_print "Profile : $PROFILE_ID";
 ui_print "Device  : $DEVICE";
 ui_print "Kernel  : ${KERNEL_VERSION:-unknown}";
+ui_print "Version : $BUILD_LABEL";
 ui_print "ROM     : $ROM_FAMILY";
 ui_print " ";
 
@@ -166,7 +174,7 @@ ui_print "Kernel installation completed.";
 EOF_AK
 chmod 755 "$AK_WORK/anykernel.sh"
 
-ZIP="$OUTPUT_DIR/Kernel-${DEVICE}-${PROFILE_ID}-AnyKernel3.zip"
+ZIP="$OUTPUT_DIR/${BUILD_LABEL}-${DEVICE}-AnyKernel3.zip"
 rm -f "$ZIP"
 (
   cd "$AK_WORK"
