@@ -119,6 +119,30 @@ jobs:
           test "$(DEVICE=garnet KERNEL_VERSION=5.10.0 ROM_FAMILY=oss ANYKERNEL_PROFILE=auto ./scripts/select_anykernel_profile.sh | xargs basename)" = "garnet-oss.conf"
           test "$(DEVICE=garnet KERNEL_VERSION=5.10.0 ROM_FAMILY=hyperos ANYKERNEL_PROFILE=auto ./scripts/select_anykernel_profile.sh | xargs basename)" = "garnet-hyperos.conf"
 
+      - name: Harness variable alignment
+        run: |
+          set -euo pipefail
+          ruby - <<'RUBY'
+          require "yaml"
+
+          pipeline = YAML.load_file("harness/kernel-pipeline.yaml")["pipeline"]
+          pipeline_vars = pipeline.fetch("variables").map { |v| v.fetch("name") }
+
+          workflow_text = File.read(".github/workflows/harness-kernel.yml")
+          names_block = workflow_text[/names\s*=\s*\[(.*?)\]/m, 1]
+          abort "harness-kernel.yml: payload names list not found" unless names_block
+
+          payload_vars = names_block.scan(/"([A-Z0-9_]+)"/).flatten.uniq
+
+          missing = pipeline_vars - payload_vars
+          extra = payload_vars - pipeline_vars
+
+          abort "Harness payload missing pipeline variables: #{missing.join(", ")}" unless missing.empty?
+          abort "Harness payload has unknown pipeline variables: #{extra.join(", ")}" unless extra.empty?
+
+          puts "Harness variable alignment OK (#{pipeline_vars.length} variables)"
+          RUBY
+
       - name: YAML parse
         run: |
           set -euo pipefail
