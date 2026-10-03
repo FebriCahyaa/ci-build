@@ -285,7 +285,7 @@ jobs:
           TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
           GITHUB_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
-          HARNESS_POLL_SECONDS: "10"
+          HARNESS_POLL_SECONDS: "5"
           HARNESS_MAX_SECONDS: "8100"
         run: python3 scripts/harness_monitor.py
 
