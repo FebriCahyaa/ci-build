@@ -1,83 +1,238 @@
 #!/usr/bin/env bash
-set -uo pipefail
-source "$(dirname "$0")/tg.sh"
+set -Eeuo pipefail
 
-: "${KERNEL_REPO:?}" "${KERNEL_BRANCH:?}" "${DEFCONFIG:?}"
-DEVICE="${DEVICE:-garnet}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/tg.sh"
+
+: "${KERNEL_REPO:?KERNEL_REPO is required}"
+: "${KERNEL_BRANCH:?KERNEL_BRANCH is required}"
+: "${DEFCONFIG:?DEFCONFIG is required}"
+
+DEVICE="${DEVICE:-generic}"
+ARCH="${ARCH:-arm64}"
+JOBS="${JOBS:-0}"
+if [[ "$JOBS" == "0" || -z "$JOBS" ]]; then
+  JOBS="$(nproc 2>/dev/null || echo 2)"
+fi
+KERNEL_TARGET="${KERNEL_TARGET:-}"
+LLVM="${LLVM:-1}"
+LLVM_IAS="${LLVM_IAS:-1}"
+CROSS_COMPILE="${CROSS_COMPILE:-}"
+CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32:-}"
+CLANG_URL="${CLANG_URL:-}"
+KERNEL_OUT="${KERNEL_OUT:-}"
+ENABLE_KSU="${ENABLE_KSU:-false}"
+KSU_REF="${KSU_REF:-}"
+PACKAGE_ANYKERNEL="${PACKAGE_ANYKERNEL:-false}"
 ANYKERNEL_REPO="${ANYKERNEL_REPO:-https://github.com/osm0sis/AnyKernel3}"
 ANYKERNEL_BRANCH="${ANYKERNEL_BRANCH:-master}"
-ENABLE_KSU="${ENABLE_KSU:-false}"
-CLANG_URL="${CLANG_URL:-}"
+EXTRA_MAKE_ARGS="${EXTRA_MAKE_ARGS:-}"
+BUILD_ENV="${BUILD_ENV:-}"
 RUN_URL="${RUN_URL:-}"
-START=$(date +%s)
-WORK="$PWD/work"; mkdir -p "$WORK"; cd "$WORK"
 
-MID=$(tg_msg "🚀 <b>Build Kernel dimulai</b>
+START="$(date +%s)"
+WORK="${WORK_DIR:-$PWD/work}"
+mkdir -p "$WORK" "$WORK/artifacts"
+BUILD_LOG="$WORK/build.log"
+TOOLCHAIN_DIR="$WORK/toolchain"
+OUT="${KERNEL_OUT:-$WORK/kernel-out}"
+
+# Preserve a single, deterministic make invocation.
+declare -a MAKE_BASE
+MAKE_BASE=(make -j"$JOBS" O="$OUT" ARCH="$ARCH")
+
+if [[ "$LLVM" == "1" || "$LLVM" == "true" ]]; then
+  MAKE_BASE+=(LLVM=1)
+fi
+if [[ "$LLVM_IAS" == "1" || "$LLVM_IAS" == "true" ]]; then
+  MAKE_BASE+=(LLVM_IAS=1)
+fi
+[[ -n "$CROSS_COMPILE" ]] && MAKE_BASE+=(CROSS_COMPILE="$CROSS_COMPILE")
+[[ -n "$CROSS_COMPILE_ARM32" ]] && MAKE_BASE+=(CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32")
+
+read -r -a EXTRA_ARGS <<< "$EXTRA_MAKE_ARGS"
+MAKE_CMD=("${MAKE_BASE[@]}" "${EXTRA_ARGS[@]}")
+
+MID="$(tg_msg "🚀 <b>Universal Kernel Build</b>
 📱 Device: <code>$DEVICE</code>
+🏗 ARCH: <code>$ARCH</code>
 🌿 Repo: <code>$KERNEL_REPO</code>
-🔀 Branch: <code>$KERNEL_BRANCH</code>
+🔀 Ref: <code>$KERNEL_BRANCH</code>
 ⚙️ Defconfig: <code>$DEFCONFIG</code>
-🛡 KernelSU: <code>$ENABLE_KSU</code>
-🔗 <a href=\"$RUN_URL\">Lihat log CI</a>")
+🧵 Jobs: <code>$JOBS</code>
+🛡 KSU: <code>$ENABLE_KSU</code>
+🔗 <a href=\"$RUN_URL\">CI log</a>")"
 
 fail() {
-  local d=$(( $(date +%s) - START ))
-  tg_edit "$MID" "❌ <b>Build Kernel GAGAL</b> pada tahap: <code>$1</code>
-📱 $DEVICE | ⏱ $(fmt_dur $d)
-🔗 <a href=\"$RUN_URL\">Log CI</a>"
-  if [ -f "$WORK/build.log" ]; then
-    tail -n 300 "$WORK/build.log" > "$WORK/error_tail.log"
-    tg_file "$WORK/error_tail.log" "📄 300 baris terakhir log — $DEVICE"
+  local reason="$1"
+  local duration=$(( $(date +%s) - START ))
+
+  tg_edit "$MID" "❌ <b>Kernel build gagal</b>
+📱 $DEVICE | 🏗 $ARCH
+🧩 Tahap: <code>$reason</code>
+⏱ $(fmt_dur "$duration")
+🔗 <a href=\"$RUN_URL\">CI log</a>"
+
+  if [[ -f "$BUILD_LOG" ]]; then
+    tail -n 300 "$BUILD_LOG" > "$WORK/error_tail.log" || true
+    tg_file "$WORK/error_tail.log" "📄 Last 300 build log lines — $DEVICE"
   fi
   exit 1
 }
+trap 'fail "unexpected error at line $LINENO"' ERR
 
-# ---- Toolchain ----
-if [ -n "$CLANG_URL" ]; then
-  mkdir -p clang && curl -sL "$CLANG_URL" | tar -xz -C clang || fail "download clang"
-  export PATH="$PWD/clang/bin:$PATH"
+# ---- Optional custom toolchain ----
+if [[ -n "$CLANG_URL" ]]; then
+  mkdir -p "$TOOLCHAIN_DIR"
+  curl -fL --retry 3 --retry-delay 2 "$CLANG_URL" -o "$WORK/clang.tar.gz" || fail "download clang"
+  tar -xzf "$WORK/clang.tar.gz" -C "$TOOLCHAIN_DIR" || fail "extract clang"
+
+  CLANG_BIN="$(find "$TOOLCHAIN_DIR" -type f -path '*/bin/clang' -print -quit || true)"
+  [[ -n "$CLANG_BIN" ]] || fail "clang binary not found in toolchain"
+  export PATH="$(dirname "$CLANG_BIN"):$PATH"
 fi
-clang --version | head -n1 > clang_ver.txt || fail "clang tidak ditemukan"
+
+if command -v clang >/dev/null 2>&1; then
+  clang --version | head -n1 > "$WORK/clang_version.txt"
+else
+  fail "clang not found"
+fi
 
 # ---- Source ----
+cd "$WORK"
 git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel || fail "clone kernel"
-cd kernel
-if [ "$ENABLE_KSU" = "true" ]; then
-  curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash - || fail "setup KernelSU"
+cd "$WORK/kernel"
+
+COMMIT="$(git log -1 --pretty='%h %s')"
+echo "Kernel commit: $COMMIT" | tee -a "$BUILD_LOG"
+echo "Make command: ${MAKE_CMD[*]}" | tee -a "$BUILD_LOG"
+
+if [[ -n "$BUILD_ENV" ]]; then
+  # BUILD_ENV is intentionally opt-in for user-supplied build environments.
+  eval "$BUILD_ENV"
 fi
-COMMIT=$(git log -1 --pretty='%h %s')
 
-# ---- Build ----
-MK=(make -j"$(nproc)" O=out ARCH=arm64 LLVM=1 LLVM_IAS=1
-    CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-)
-"${MK[@]}" "$DEFCONFIG" > "$WORK/build.log" 2>&1 || fail "defconfig"
-if [ "$ENABLE_KSU" = "true" ]; then
-  ./scripts/config --file out/.config -e KSU
-  "${MK[@]}" olddefconfig >> "$WORK/build.log" 2>&1
+# ---- KernelSU ----
+if [[ "$ENABLE_KSU" == "true" ]]; then
+  if [[ -n "$KSU_REF" ]]; then
+    curl -fLSs "https://raw.githubusercontent.com/tiann/KernelSU/${KSU_REF}/kernel/setup.sh" | bash - || fail "KernelSU setup"
+  else
+    curl -fLSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash - || fail "KernelSU setup"
+  fi
 fi
-tg_edit "$MID" "🔨 <b>Compiling kernel…</b> 📱 $DEVICE
+
+# ---- Configure ----
+rm -rf "$OUT"
+mkdir -p "$OUT"
+"${MAKE_CMD[@]}" "$DEFCONFIG" > "$BUILD_LOG" 2>&1 || fail "defconfig"
+
+if [[ "$ENABLE_KSU" == "true" ]]; then
+  ./scripts/config --file "$OUT/.config" -e KSU || fail "enable KSU"
+  "${MAKE_CMD[@]}" olddefconfig >> "$BUILD_LOG" 2>&1 || fail "olddefconfig"
+fi
+
+tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
+📱 $DEVICE | 🏗 $ARCH
 🧱 <code>$COMMIT</code>
-🛠 <code>$(cat "$WORK/clang_ver.txt")</code>"
-"${MK[@]}" >> "$WORK/build.log" 2>&1 || fail "compile"
+🛠 <code>$(cat "$WORK/clang_version.txt")</code>"
 
-IMG=out/arch/arm64/boot/Image
-[ -f "$IMG.gz-dtb" ] && IMG="$IMG.gz-dtb"
-[ -f "$IMG" ] || fail "Image tidak ditemukan"
+if [[ -n "$KERNEL_TARGET" ]]; then
+  "${MAKE_CMD[@]}" "$KERNEL_TARGET" >> "$BUILD_LOG" 2>&1 || fail "compile"
+else
+  "${MAKE_CMD[@]}" >> "$BUILD_LOG" 2>&1 || fail "compile"
+fi
 
-# ---- Package ----
-git clone --depth=1 -b "$ANYKERNEL_BRANCH" "$ANYKERNEL_REPO" "$WORK/AK3" || fail "clone AnyKernel3"
-cp "$IMG" "$WORK/AK3/"
-[ -f out/arch/arm64/boot/dtbo.img ] && cp out/arch/arm64/boot/dtbo.img "$WORK/AK3/"
-cd "$WORK/AK3" && rm -rf .git
-ZIP="Kernel-${DEVICE}-$(date +%Y%m%d-%H%M).zip"
-zip -r9 "$WORK/$ZIP" . -x "*.git*" > /dev/null || fail "zip"
+# ---- Collect artifacts ----
+ARTIFACTS="$WORK/artifacts"
+shopt -s nullglob
 
-D=$(( $(date +%s) - START ))
-SHA=$(sha256sum "$WORK/$ZIP" | cut -d' ' -f1)
-tg_edit "$MID" "✅ <b>Build Kernel SELESAI</b>
-📱 $DEVICE | ⏱ $(fmt_dur $D)
+declare -a CANDIDATES=(
+  "$OUT/arch/$ARCH/boot/Image"
+  "$OUT/arch/$ARCH/boot/Image.gz"
+  "$OUT/arch/$ARCH/boot/Image.lz4"
+  "$OUT/arch/$ARCH/boot/Image.gz-dtb"
+  "$OUT/arch/$ARCH/boot/zImage"
+  "$OUT/arch/$ARCH/boot/dtbo.img"
+)
+
+FOUND=0
+for item in "${CANDIDATES[@]}"; do
+  if [[ -f "$item" ]]; then
+    cp -f "$item" "$ARTIFACTS/"
+    FOUND=1
+  fi
+done
+
+# dtb/dtbo and modules are optional; collect anything useful without failing.
+if [[ -d "$OUT/arch/$ARCH/boot/dts" ]]; then
+  tar -czf "$ARTIFACTS/dts.tar.gz" -C "$OUT/arch/$ARCH/boot" dts 2>/dev/null || true
+fi
+
+if find "$OUT" -type f -name '*.ko' -print -quit | grep -q .; then
+  find "$OUT" -type f -name '*.ko' -print0 | tar --null -czf "$ARTIFACTS/modules.tar.gz" --files-from=- 2>/dev/null || true
+fi
+
+[[ "$FOUND" -eq 1 ]] || fail "kernel image not found"
+
+cat > "$ARTIFACTS/build-info.txt" <<INFO
+device=$DEVICE
+arch=$ARCH
+kernel_repo=$KERNEL_REPO
+kernel_branch=$KERNEL_BRANCH
+commit=$COMMIT
+defconfig=$DEFCONFIG
+jobs=$JOBS
+kernel_target=$KERNEL_TARGET
+llvm=$LLVM
+llvm_ias=$LLVM_IAS
+enable_ksu=$ENABLE_KSU
+INFO
+
+# ---- Optional AnyKernel3 package ----
+if [[ "$PACKAGE_ANYKERNEL" == "true" ]]; then
+  IMAGE=""
+  for item in "$ARTIFACTS/Image" "$ARTIFACTS/Image.gz" "$ARTIFACTS/Image.lz4" "$ARTIFACTS/Image.gz-dtb" "$ARTIFACTS/zImage"; do
+    [[ -f "$item" ]] && { IMAGE="$item"; break; }
+  done
+
+  [[ -n "$IMAGE" ]] || fail "AnyKernel image source not found"
+
+  rm -rf "$WORK/AnyKernel3"
+  git clone --depth=1 -b "$ANYKERNEL_BRANCH" "$ANYKERNEL_REPO" "$WORK/AnyKernel3" \
+    || fail "clone AnyKernel3"
+
+  rm -f "$WORK/AnyKernel3"/Image "$WORK/AnyKernel3"/Image.gz \
+        "$WORK/AnyKernel3"/Image.lz4 "$WORK/AnyKernel3"/Image.gz-dtb \
+        "$WORK/AnyKernel3"/zImage
+
+  cp "$IMAGE" "$WORK/AnyKernel3/$(basename "$IMAGE")"
+  [[ -f "$ARTIFACTS/dtbo.img" ]] && cp "$ARTIFACTS/dtbo.img" "$WORK/AnyKernel3/"
+
+  (
+    cd "$WORK/AnyKernel3"
+    rm -rf .git
+    zip -r9 "$ARTIFACTS/Kernel-${DEVICE}-$(date +%Y%m%d-%H%M).zip" . -x '*.git*' > /dev/null
+  ) || fail "AnyKernel package"
+fi
+
+# ---- Final archive ----
+ARCHIVE="$WORK/Kernel-${DEVICE}-$(date +%Y%m%d-%H%M).tar.gz"
+tar -czf "$ARCHIVE" -C "$ARTIFACTS" . || fail "artifact archive"
+
+DURATION=$(( $(date +%s) - START ))
+SHA="$(sha256sum "$ARCHIVE" | cut -d' ' -f1)"
+
+tg_edit "$MID" "✅ <b>Kernel build selesai</b>
+📱 $DEVICE | 🏗 $ARCH
+⏱ $(fmt_dur "$DURATION")
 🧱 <code>$COMMIT</code>
-🛠 <code>$(cat "$WORK/clang_ver.txt")</code>
-🛡 KernelSU: $ENABLE_KSU
+🛠 <code>$(cat "$WORK/clang_version.txt")</code>
+🛡 KSU: $ENABLE_KSU
+📦 <code>$(basename "$ARCHIVE")</code>
 🔐 SHA256: <code>${SHA:0:16}…</code>"
-tg_file "$WORK/$ZIP" "📦 <b>$ZIP</b>"
+
+tg_file "$ARCHIVE" "📦 <b>Kernel artifacts — $DEVICE</b>"
+
+echo "ARTIFACT_ARCHIVE=$ARCHIVE"
+echo "ARTIFACT_SHA256=$SHA"

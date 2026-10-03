@@ -1,59 +1,116 @@
 pipeline:
-  name: Build Kernel
-  identifier: Build_Kernel
-  projectIdentifier: default_project   # ganti
-  orgIdentifier: default               # ganti
+  name: Universal Kernel Build
+  identifier: Universal_Kernel_Build
+  projectIdentifier: ci_build
+  orgIdentifier: default
+
   properties:
     ci:
       codebase:
-        connectorRef: github_connector # connector GitHub kamu
+        connectorRef: github_connector
         repoName: ci-build
         build: <+input>
+
   variables:
     - name: KERNEL_REPO
       type: String
       value: <+input>
+
     - name: KERNEL_BRANCH
       type: String
-      value: <+input>
-    - name: DEFCONFIG
-      type: String
-      value: garnet_defconfig
+      value: main
+
     - name: DEVICE
       type: String
-      value: garnet
+      value: generic
+
+    - name: ARCH
+      type: String
+      value: arm64
+
+    - name: DEFCONFIG
+      type: String
+      value: <+input>
+
+    - name: JOBS
+      type: String
+      value: "0"
+
+    - name: KERNEL_TARGET
+      type: String
+      value: ""
+
+    - name: LLVM
+      type: String
+      value: "1"
+
+    - name: LLVM_IAS
+      type: String
+      value: "1"
+
+    - name: CROSS_COMPILE
+      type: String
+      value: ""
+
+    - name: CROSS_COMPILE_ARM32
+      type: String
+      value: ""
+
+    - name: APT_PACKAGES
+      type: String
+      value: ""
+
+    - name: CLANG_URL
+      type: String
+      value: ""
+
+    - name: EXTRA_MAKE_ARGS
+      type: String
+      value: ""
+
     - name: ENABLE_KSU
       type: String
       value: "false"
+
+    - name: KSU_REF
+      type: String
+      value: ""
+
+    - name: PACKAGE_ANYKERNEL
+      type: String
+      value: "false"
+
+    - name: ANYKERNEL_REPO
+      type: String
+      value: https://github.com/osm0sis/AnyKernel3
+
+    - name: ANYKERNEL_BRANCH
+      type: String
+      value: master
+
   stages:
     - stage:
-        name: build
-        identifier: build
+        name: Kernel Build
+        identifier: kernel_build
         type: CI
         spec:
           cloneCodebase: true
+
           platform:
             os: Linux
             arch: Amd64
+
           runtime:
             type: Cloud
             spec: {}
+
           execution:
             steps:
               - step:
                   type: Run
-                  name: deps
-                  identifier: deps
-                  spec:
-                    shell: Bash
-                    command: |
-                      sudo apt-get update
-                      sudo apt-get install -y bc bison flex libssl-dev libelf-dev clang lld llvm \
-                        gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi zip python3 curl git cpio xz-utils
-              - step:
-                  type: Run
-                  name: build kernel
-                  identifier: build_kernel
+                  name: Build Universal Kernel
+                  identifier: build_universal_kernel
+                  timeout: 2h
                   spec:
                     shell: Bash
                     envVariables:
@@ -61,8 +118,41 @@ pipeline:
                       TG_CHAT_ID: <+secrets.getValue("tg_chat_id")>
                       KERNEL_REPO: <+pipeline.variables.KERNEL_REPO>
                       KERNEL_BRANCH: <+pipeline.variables.KERNEL_BRANCH>
-                      DEFCONFIG: <+pipeline.variables.DEFCONFIG>
                       DEVICE: <+pipeline.variables.DEVICE>
+                      ARCH: <+pipeline.variables.ARCH>
+                      DEFCONFIG: <+pipeline.variables.DEFCONFIG>
+                      JOBS: <+pipeline.variables.JOBS>
+                      KERNEL_TARGET: <+pipeline.variables.KERNEL_TARGET>
+                      LLVM: <+pipeline.variables.LLVM>
+                      LLVM_IAS: <+pipeline.variables.LLVM_IAS>
+                      CROSS_COMPILE: <+pipeline.variables.CROSS_COMPILE>
+                      CROSS_COMPILE_ARM32: <+pipeline.variables.CROSS_COMPILE_ARM32>
+                      APT_PACKAGES: <+pipeline.variables.APT_PACKAGES>
+                      CLANG_URL: <+pipeline.variables.CLANG_URL>
+                      EXTRA_MAKE_ARGS: <+pipeline.variables.EXTRA_MAKE_ARGS>
                       ENABLE_KSU: <+pipeline.variables.ENABLE_KSU>
+                      KSU_REF: <+pipeline.variables.KSU_REF>
+                      PACKAGE_ANYKERNEL: <+pipeline.variables.PACKAGE_ANYKERNEL>
+                      ANYKERNEL_REPO: <+pipeline.variables.ANYKERNEL_REPO>
+                      ANYKERNEL_BRANCH: <+pipeline.variables.ANYKERNEL_BRANCH>
                       RUN_URL: <+pipeline.executionUrl>
-                    command: ./scripts/build_kernel.sh
+
+                    command: |
+                      set -euo pipefail
+
+                      export DEBIAN_FRONTEND=noninteractive
+
+                      apt-get update
+                      apt-get install -y --no-install-recommends \
+                        bc bison flex libssl-dev libelf-dev clang lld llvm \
+                        gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+                        build-essential cpio git curl python3 zip xz-utils \
+                        ca-certificates tar gzip \
+                        ${APT_PACKAGES}
+
+                      if [ "${JOBS}" = "0" ] || [ -z "${JOBS}" ]; then
+                        export JOBS="$(nproc 2>/dev/null || echo 2)"
+                      fi
+
+                      chmod +x ./scripts/build_kernel.sh
+                      ./scripts/build_kernel.sh

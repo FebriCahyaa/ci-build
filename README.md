@@ -21,11 +21,47 @@
   `RCLONE_REMOTE`, mis. `gdrive:ROM`, dan konfigurasikan rclone di mesin runner).
 
 ## Harness
-1. Buat project Harness, aktifkan CI.
-2. Buat connector GitHub (`github_connector`) dan secret Telegram.
-3. Pipelines -> Create -> YAML -> tempel `harness/kernel-pipeline.yaml`.
-4. Kernel boleh Harness Cloud. ROM: pasang Harness Docker Runner di server sendiri, lalu `harness/rom-pipeline.yaml`.
-5. Sesuaikan `projectIdentifier`, `orgIdentifier`, `connectorRef`.
+
+The repository contains reusable Harness Pipeline YAML under `harness/`.
+
+### Project configuration
+
+```text
+Organization        : default
+Project Identifier  : ci_build
+GitHub Connector    : github_connector
+```
+
+### Secrets
+
+Create these encrypted text secrets in the Harness project:
+
+```text
+tg_bot_token
+tg_chat_id
+```
+
+### Universal kernel pipeline
+
+Use `harness/kernel-pipeline.yaml` as a Remote Pipeline. It is parameterized for:
+
+- repository and branch/ref
+- architecture
+- defconfig
+- parallel jobs
+- LLVM/LLVM IAS
+- cross compiler prefixes
+- optional external Clang tarball
+- optional additional apt packages for non-ARM or custom toolchains
+- optional KernelSU
+- optional AnyKernel3 packaging
+- extra `make` arguments
+
+The build script is shared with GitHub Actions in `scripts/build_kernel.sh`.
+
+### ROM pipeline
+
+Use `harness/rom-pipeline.yaml` with a self-managed Harness Docker Runner. It uses `ubuntu:22.04` and installs the AOSP dependencies inside the same build step, then invokes `scripts/build_rom.sh`.
 
 ## AWS (kredit $200) sebagai runner ROM
 1. Upgrade akun ke Paid plan (kredit tetap berlaku), ajukan kenaikan quota vCPU (On-Demand/Spot) di Service Quotas,

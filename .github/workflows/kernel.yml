@@ -1,31 +1,90 @@
 name: Build Kernel
+
 on:
   workflow_dispatch:
     inputs:
-      kernel_repo:    { description: 'URL repo kernel', required: true, default: 'https://github.com/USER/kernel_xiaomi_sm7435' }
-      kernel_branch:  { description: 'Branch', required: true, default: 'main' }
-      defconfig:      { description: 'Defconfig', required: true, default: 'garnet_defconfig' }
-      device:         { description: 'Codename device', required: true, default: 'garnet' }
-      enable_ksu:     { description: 'Integrasi KernelSU', type: boolean, default: false }
-      clang_url:      { description: 'URL tarball clang (kosong = clang dari apt)', required: false, default: '' }
-      anykernel_repo: { description: 'Repo AnyKernel3 kamu', required: false, default: 'https://github.com/osm0sis/AnyKernel3' }
-      release:        { description: 'Upload ke GitHub Release', type: boolean, default: true }
+      kernel_repo:
+        description: "Kernel repository URL"
+        required: true
+        default: "https://github.com/USER/kernel.git"
+      kernel_branch:
+        description: "Kernel branch, tag, or ref"
+        required: true
+        default: "main"
+      defconfig:
+        description: "Kernel defconfig target"
+        required: true
+        default: "defconfig"
+      device:
+        description: "Device/codename label"
+        required: true
+        default: "generic"
+      arch:
+        description: "Kernel architecture (arm64, arm, x86, ...)"
+        required: true
+        default: "arm64"
+      jobs:
+        description: "Parallel jobs; 0 = auto"
+        required: true
+        default: "0"
+      kernel_target:
+        description: "Optional kernel target; empty = default all"
+        required: false
+        default: ""
+      clang_url:
+        description: "Optional clang tarball URL"
+        required: false
+        default: ""
+      cross_compile:
+        description: "Optional CROSS_COMPILE prefix"
+        required: false
+        default: ""
+      cross_compile_arm32:
+        description: "Optional 32-bit cross compiler prefix"
+        required: false
+        default: ""
+      apt_packages:
+        description: "Optional extra apt packages"
+        required: false
+        default: ""
+      extra_make_args:
+        description: "Optional extra make arguments"
+        required: false
+        default: ""
+      enable_ksu:
+        description: "Enable KernelSU"
+        type: boolean
+        default: false
+      ksu_ref:
+        description: "Optional KernelSU branch/tag/commit"
+        required: false
+        default: ""
+      package_anykernel:
+        description: "Package an AnyKernel3 ZIP"
+        type: boolean
+        default: false
+      anykernel_repo:
+        description: "AnyKernel3 repository"
+        required: false
+        default: "https://github.com/osm0sis/AnyKernel3"
+      anykernel_branch:
+        description: "AnyKernel3 branch"
+        required: false
+        default: "master"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Dependensi
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends bc bison flex libssl-dev libelf-dev \
-            clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi zip python3 curl git ccache cpio xz-utils
-      - name: Build
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependencies and Build
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
@@ -34,21 +93,37 @@ jobs:
           KERNEL_BRANCH: ${{ inputs.kernel_branch }}
           DEFCONFIG: ${{ inputs.defconfig }}
           DEVICE: ${{ inputs.device }}
-          ENABLE_KSU: ${{ inputs.enable_ksu }}
+          ARCH: ${{ inputs.arch }}
+          JOBS: ${{ inputs.jobs }}
+          KERNEL_TARGET: ${{ inputs.kernel_target }}
           CLANG_URL: ${{ inputs.clang_url }}
+          CROSS_COMPILE: ${{ inputs.cross_compile }}
+          CROSS_COMPILE_ARM32: ${{ inputs.cross_compile_arm32 }}
+          APT_PACKAGES: ${{ inputs.apt_packages }}
+          EXTRA_MAKE_ARGS: ${{ inputs.extra_make_args }}
+          ENABLE_KSU: ${{ inputs.enable_ksu }}
+          KSU_REF: ${{ inputs.ksu_ref }}
+          PACKAGE_ANYKERNEL: ${{ inputs.package_anykernel }}
           ANYKERNEL_REPO: ${{ inputs.anykernel_repo }}
+          ANYKERNEL_BRANCH: ${{ inputs.anykernel_branch }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: ./scripts/build_kernel.sh
-      - name: Upload artifact
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libssl-dev libelf-dev clang lld llvm \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            build-essential cpio git curl python3 zip xz-utils \
+            ca-certificates tar gzip ${{ inputs.apt_packages }}
+
+          chmod +x ./scripts/build_kernel.sh
+          ./scripts/build_kernel.sh
+
+      - name: Upload kernel artifacts
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: kernel-${{ inputs.device }}
-          path: work/Kernel-*.zip
-      - name: GitHub Release
-        if: success() && inputs.release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="kernel-${{ inputs.device }}-$(date +%Y%m%d-%H%M)"
-          gh release create "$TAG" work/Kernel-*.zip -t "$TAG" -n "Build otomatis, run ${{ github.run_id }}"
+          path: work/Kernel-${{ inputs.device }}-*.tar.gz
+          if-no-files-found: error
