@@ -32,3 +32,12 @@ official-KernelSU SUSFS patch set.
 
 KernelSU-Next + the external official-KernelSU 4.19 SUSFS patch set is blocked
 instead of applying an unverified API combination.
+
+
+## Compile telemetry safety
+
+The compile stage no longer performs an unrestricted `make -n` dry-run.
+Large Android kernel trees can spend substantial time expanding the dry-run
+command graph before the real compiler starts. CI now records a lightweight
+source-file estimate and computes live progress from actual Kbuild CC/AS
+actions, preserving build startup reliability and diagnostics.

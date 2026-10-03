@@ -761,17 +761,17 @@ tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
 # Compile
 # ------------------------------------------------------------
 
+# Do not run `make -n` here. On large Android 4.19 trees it can expand a
+# very large command graph, consume significant CPU/RAM, and delay the real
+# build without producing useful user-facing diagnostics. Progress telemetry
+# instead uses a lightweight source-file estimate and observed Kbuild actions.
 COMPILE_PLAN="$WORK/compile-plan.log"
-COMPILE_TOTAL=0
-set +e
-"${MAKE_CMD[@]}" -n 2>&1 | tee "$COMPILE_PLAN" >/dev/null
-PLAN_RC="${PIPESTATUS[0]}"
-set -e
-if [[ "$PLAN_RC" -eq 0 && -s "$COMPILE_PLAN" ]]; then
-  COMPILE_TOTAL="$(grep -Ec '[[:space:]]-c([[:space:]]|$).*-[oO][[:space:]]+[^[:space:]]+\.o([[:space:]]|$)' "$COMPILE_PLAN" 2>/dev/null || true)"
-fi
+COMPILE_TOTAL="$(find "$SRC_DIR" -type f \
+  \( -name '*.c' -o -name '*.S' -o -name '*.s' \) -print 2>/dev/null | wc -l | tr -d ' ')"
 [[ "$COMPILE_TOTAL" =~ ^[0-9]+$ ]] || COMPILE_TOTAL=0
+printf 'compile_plan_mode=source-estimate\n' >> "$ARTIFACTS/build-info.txt"
 printf 'compile_plan_total=%s\n' "$COMPILE_TOTAL" >> "$ARTIFACTS/build-info.txt"
+printf '[CI-COMPILE] telemetry_total=source-estimate:%s\n' "$COMPILE_TOTAL" | tee -a "$BUILD_LOG"
 
 rm -f "$WORK/.stop-compile-telemetry"
 "$COMPILE_PROGRESS_SCRIPT" "$BUILD_LOG" "$COMPILE_TOTAL" "$WORK" "$PROGRESS_SCRIPT" &
