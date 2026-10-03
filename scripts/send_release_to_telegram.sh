@@ -15,6 +15,10 @@ trap 'rm -rf "$WORK"' EXIT
 
 tg_text() {
   local text="$1"
+
+  # Convert literal "\\n" sequences to real newlines before sending.
+  text="${text//$'\\n'/$'\n'}"
+
   local args=(--data-urlencode "chat_id=$TG_CHAT_ID" --data-urlencode "text=$text" -d "parse_mode=HTML")
   [[ -n "${TG_TOPIC_ID:-}" ]] && args+=(-d "message_thread_id=$TG_TOPIC_ID")
   curl -fsS -X POST "$API_TG/sendMessage" "${args[@]}" >/dev/null || true
