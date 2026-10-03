@@ -110,7 +110,15 @@ ci_phase() {
 run_live() {
   local label="$1"
   shift
-  "$SCRIPT_DIR/run_with_heartbeat.sh" "$label" "$BUILD_LOG" "$@"
+  if [[ ! -f "$SCRIPT_DIR/run_with_heartbeat.sh" ]]; then
+    echo "[CI-WRAPPER] ERROR: missing $SCRIPT_DIR/run_with_heartbeat.sh" | tee -a "$BUILD_LOG" >&2
+    return 127
+  fi
+
+  # Invoke through bash so a lost executable bit or stale shebang cannot hide
+  # the actual wrapper/command failure from the build log.
+  bash "$SCRIPT_DIR/run_with_heartbeat.sh" "$label" "$BUILD_LOG" "$@" \
+    2> >(tee -a "$BUILD_LOG" >&2)
 }
 
 FAIL_HANDLED=false
@@ -529,6 +537,26 @@ else
 fi
 
 CLANG_TRIPLE="${RESOLVED_CLANG_TRIPLE:-}"
+
+# Toolchain resolver outputs are single-line Make variables. Normalize any
+# accidental CR/LF contamination so one compiler setting cannot become a
+# second unlabeled Make argument.
+CLANG_TRIPLE="$(printf '%s' "$CLANG_TRIPLE" | tr -d '\r' | awk 'NR == 1 {print; exit}')"
+CROSS_DEFAULT="$(printf '%s' "$CROSS_DEFAULT" | tr -d '\r' | awk 'NR == 1 {print; exit}')"
+CROSS_COMPILE_ARM32="$(printf '%s' "$CROSS_COMPILE_ARM32" | tr -d '\r' | awk 'NR == 1 {print; exit}')"
+
+# The Harness image installs the Debian ARM32 cross compiler. For this
+# ARM64 Android 4.19 tree, provide the 32-bit prefix when the selected
+# toolchain profile did not specify one.
+if [[ "$DETECTED_ARCH" == "arm64" && -z "$CROSS_COMPILE_ARM32" ]]; then
+  if command -v arm-linux-gnueabi-gcc >/dev/null 2>&1; then
+    CROSS_COMPILE_ARM32="arm-linux-gnueabi-"
+  fi
+fi
+
+echo "[toolchain] normalized CLANG_TRIPLE=$(printf '%q' "$CLANG_TRIPLE")" >&2
+echo "[toolchain] normalized CROSS_COMPILE=$(printf '%q' "$CROSS_DEFAULT")" >&2
+echo "[toolchain] normalized CROSS_COMPILE_ARM32=$(printf '%q' "$CROSS_COMPILE_ARM32")" >&2
 
 LLVM_VALUE="${RESOLVED_LLVM:-1}"
 LLVM_IAS_VALUE="${RESOLVED_LLVM_IAS:-1}"

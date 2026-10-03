@@ -16,6 +16,8 @@ mkdir -p "$(dirname -- "$LOG_FILE")"
 touch "$LOG_FILE"
 
 started="$(date +%s)"
+printf '[CI-WRAPPER] pid=%s shell=%s label=%s log=%s\n' \
+  "$$" "$BASH_VERSION" "$LABEL" "$LOG_FILE" | tee -a "$LOG_FILE"
 echo "[CI-PHASE] ${LABEL} START" | tee -a "$LOG_FILE"
 echo "[CI-COMMAND] ${LABEL}: $(printf '%q ' "$@")" | tee -a "$LOG_FILE"
 

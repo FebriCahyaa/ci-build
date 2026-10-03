@@ -1172,6 +1172,10 @@ def main() -> int:
 
                 status = active_nodes[0][3]
 
+        # Normalize state before the secondary GitHub Release check.
+        # This prevents the first polling cycle from raising UnboundLocalError.
+        state = norm(status) or "UNKNOWN"
+
         err = error_of(details) or error_of(graph)
         elapsed = int(time.time() - started)
 

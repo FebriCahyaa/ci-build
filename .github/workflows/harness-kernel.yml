@@ -153,6 +153,8 @@ jobs:
           set -euo pipefail
           chmod +x scripts/harness_monitor.py scripts/send_release_to_telegram.sh scripts/publish_ci_release.sh scripts/*.sh
           test -x scripts/harness_monitor.py
+          python3 -m py_compile scripts/harness_monitor.py
+          bash -n scripts/build_kernel.sh scripts/run_with_heartbeat.sh scripts/send_release_to_telegram.sh scripts/publish_ci_release.sh
           test -f kernel-name
           test -f scripts/send_release_to_telegram.sh
           test -f scripts/publish_ci_release.sh

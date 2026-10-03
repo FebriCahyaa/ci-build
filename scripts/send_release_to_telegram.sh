@@ -66,7 +66,7 @@ RELEASE_JSON="$WORK/release.json"
 
 release_found=false
 for attempt in $(seq 1 36); do
-  if curl -fsSL \
+  if curl -fsSL --retry 2 --retry-delay 2 \
       -H "Authorization: Bearer $GITHUB_TOKEN" \
       -H "Accept: application/vnd.github+json" \
       -H "X-GitHub-Api-Version: 2022-11-28" \
@@ -95,7 +95,7 @@ p=json.load(open(sys.argv[1], encoding="utf-8"))
 out=sys.argv[2]
 for a in p.get("assets",[]):
     name=a.get("name")
-    url=a.get("url")
+    url=a.get("browser_download_url") or a.get("url")
     if name and url:
         open(os.path.join(out,name+".url"),"w",encoding="utf-8").write(url)
 PY
@@ -104,11 +104,15 @@ for marker in "$WORK"/*.url; do
   [[ -f "$marker" ]] || continue
   name="$(basename "$marker" .url)"
   url="$(cat "$marker")"
-  curl -fsSL \
-    -H "Authorization: Bearer $GITHUB_TOKEN" \
-    -H "Accept: application/octet-stream" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "$url" -o "$WORK/$name"
+  echo "[telegram-relay] downloading asset: $name"
+  if ! curl -fsSL --retry 2 --retry-delay 2 \
+      -H "Authorization: Bearer $GITHUB_TOKEN" \
+      -H "Accept: application/octet-stream" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "$url" -o "$WORK/$name"; then
+    tg_text "⚠️ <b>Asset gagal diunduh</b>\n<code>$name</code>" || true
+    rm -f "$WORK/$name"
+  fi
 done
 rm -f "$WORK"/*.url
 
