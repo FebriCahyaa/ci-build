@@ -564,6 +564,43 @@ for relpath, forbidden in {
 
 print("[ksu] source compatibility validation: PASS")
 PY2
+
+  # ----------------------------------------------------------
+  # Runtime validation against the actual kernel checkout.
+  # This runs only after SRC_DIR has been created and patched.
+  # ----------------------------------------------------------
+
+  [[ -n "${SRC_DIR:-}" ]] || fail     "ReSukiSU compatibility: SRC_DIR is empty"
+
+  [[ -d "$SRC_DIR" ]] || fail     "ReSukiSU compatibility: SRC_DIR does not exist: $SRC_DIR"
+
+  echo "[ksu] validating patched kernel source: $SRC_DIR"
+
+  grep -q 'ksu_handle_setresuid'     "$SRC_DIR/kernel/sys.c"     || fail "missing ksu_handle_setresuid in kernel/sys.c"
+
+  grep -q 'ksu_handle_execveat'     "$SRC_DIR/fs/exec.c"     || fail "missing ksu_handle_execveat in fs/exec.c"
+
+  grep -q 'ksu_handle_faccessat'     "$SRC_DIR/fs/open.c"     || fail "missing ksu_handle_faccessat in fs/open.c"
+
+  grep -q 'ksu_handle_sys_read'     "$SRC_DIR/fs/read_write.c"     || fail "missing ksu_handle_sys_read in fs/read_write.c"
+
+  grep -q 'ksu_handle_stat'     "$SRC_DIR/fs/stat.c"     || fail "missing ksu_handle_stat in fs/stat.c"
+
+  grep -q 'ksu_handle_sys_reboot'     "$SRC_DIR/kernel/reboot.c"     || fail "missing ksu_handle_sys_reboot in kernel/reboot.c"
+
+  grep -q 'ksu_handle_input_handle_event'     "$SRC_DIR/drivers/input/input.c"     || fail "missing ksu_handle_input_handle_event in drivers/input/input.c"
+
+  ! grep -qw 'ksu_vfs_read_hook'     "$SRC_DIR/fs/read_write.c"     || fail "legacy ksu_vfs_read_hook remains"
+
+  ! grep -qw 'ksu_input_hook'     "$SRC_DIR/drivers/input/input.c"     || fail "legacy ksu_input_hook remains"
+
+  ! grep -qw 'ksu_execveat_hook'     "$SRC_DIR/fs/exec.c"     || fail "legacy ksu_execveat_hook remains"
+
+  ! grep -qw 'ksu_init_rc_hook'     "$SRC_DIR/fs/read_write.c"     || fail "legacy ksu_init_rc_hook remains in fs/read_write.c"
+
+  ! grep -qw 'ksu_init_rc_hook'     "$SRC_DIR/fs/stat.c"     || fail "legacy ksu_init_rc_hook remains in fs/stat.c"
+
+  echo "[ksu] ReSukiSU SUSFS inline-hook compatibility: PASS"
 }
 
 apply_resukisu_susfs_inline_compat
