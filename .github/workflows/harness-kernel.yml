@@ -188,14 +188,20 @@ jobs:
               "PACKAGE_ANYKERNEL","ROM_FAMILY","ANYKERNEL_PROFILE","ANYKERNEL3_REF","KERNEL_NAME","APT_PACKAGES","PUBLISH_RELEASE"
           ]
           values = {n: os.environ.get(n, "") for n in names}
-          payload = {"pipeline": {"identifier": os.environ["HARNESS_PIPELINE_ID"], "variables": [
-              {"name": n, "type": "String", "value": values[n]} for n in names
-          ]}}
           if len(names) > 25:
               raise SystemExit(f"Harness variable count {len(names)} exceeds limit 25")
-          with open("harness-payload.json", "w", encoding="utf-8") as f:
-              json.dump(payload, f, separators=(",", ":"))
-          print(f"Harness variable count: {len(names)}")
+          with open("harness-inputs.yaml", "w", encoding="utf-8") as f:
+              f.write("pipeline:\n")
+              f.write(f"  identifier: {os.environ['HARNESS_PIPELINE_ID']}\n")
+              f.write("  variables:\n")
+              for n in names:
+                  f.write(f"    - name: {n}\n")
+                  f.write("      type: String\n")
+                  # JSON quoting is valid YAML and safely preserves special characters.
+                  f.write(f"      value: {json.dumps(values[n], ensure_ascii=False)}\n")
+          print(f"Harness runtime variable count: {len(names)}")
+          print(f"Requested BUILD_PROFILE: {values['BUILD_PROFILE']}")
+          print(f"Requested ROOT_VARIANTS: {values['ROOT_VARIANTS']}")
           PY
 
       - name: Trigger Harness pipeline
@@ -211,18 +217,29 @@ jobs:
           TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
         run: |
           set -euo pipefail
-          endpoint="https://app.harness.io/pipeline/api/pipeline/execute/${PIPELINE_ID}?accountIdentifier=${HARNESS_ACCOUNT}&orgIdentifier=${HARNESS_ORG}&projectIdentifier=${HARNESS_PROJECT}"
+          endpoint="https://app.harness.io/pipeline/api/pipeline/execute/${PIPELINE_ID}?accountIdentifier=${HARNESS_ACCOUNT}&orgIdentifier=${HARNESS_ORG}&projectIdentifier=${HARNESS_PROJECT}&moduleType=CI"
           http_code="$(curl -sS --retry 2 --retry-delay 2 -X POST "$endpoint" \
-            -H "x-api-key: ${HARNESS_API_KEY}" -H "Content-Type: application/json" \
-            --data-binary @harness-payload.json -o harness-response.json -w '%{http_code}')"
+            -H "x-api-key: ${HARNESS_API_KEY}" \
+            -H "Content-Type: application/yaml" \
+            --data-binary @harness-inputs.yaml \
+            -o harness-response.json -w '%{http_code}')"
           if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
             cat harness-response.json >&2 || true
             exit 1
           fi
-          PLAN_ID="$(python3 -c 'import json; d=json.load(open("harness-response.json",encoding="utf-8")); print(((d.get("data") or {}).get("planExecution") or {}).get("uuid") or ((d.get("data") or {}).get("planExecution") or {}).get("planExecutionId") or d.get("planExecutionId") or d.get("executionId") or "")')"
+          PLAN_ID="$(python3 - <<'PY'
+          import json
+          d=json.load(open("harness-response.json", encoding="utf-8"))
+          data=d.get("data") or {}
+          pe=data.get("planExecution") or {}
+          print(pe.get("uuid") or pe.get("planExecutionId") or d.get("planExecutionId") or d.get("executionId") or "")
+          PY
+          )"
           [[ -n "$PLAN_ID" ]] || { cat harness-response.json >&2; exit 1; }
           echo "plan_execution_id=$PLAN_ID" >> "$GITHUB_OUTPUT"
           echo "release_tag=harness-$PLAN_ID" >> "$GITHUB_OUTPUT"
+          echo "Requested build profile: ${BUILD_PROFILE}"
+          echo "Requested root variants: ${ROOT_VARIANTS}"
           echo "Harness plan execution: $PLAN_ID"
 
       - name: Live monitor Harness execution
