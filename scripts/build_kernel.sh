@@ -184,13 +184,14 @@ run_helper() {
 # Initialize Telegram before any source-patch/root-manager work. Early failures
 # must have an existing message to edit and a place to attach diagnostics.
 VARIANT_LABEL="$(variant_label "$ROOT_VARIANT")"
+TG_RUN_URL_HTML="$(tg_escape_html "${RUN_URL:-}")"
 PROJECT_MAINTAINER="${MAINTAINER:-Febrian Rahmad Cahya}"
 MID="$(tg_msg "🚀 <b>Zairenkai Kernel Build</b>
 🧭 Target: <code>$BUILD_PROFILE_LABEL</code>
 📱 Device: <code>$DEVICE</code> | 🔐 <code>$VARIANT_LABEL</code>
 🧩 Phase: <code>preparing source and root-manager integration</code>
 🌿 Branch: <code>$KERNEL_BRANCH</code>
-🔗 <a href="$RUN_URL">CI log</a>")" || MID=""
+🔗 <a href="$TG_RUN_URL_HTML">CI log</a>")" || MID=""
 
 info() { printf '%s=%s\n' "$1" "$2" >> "$INFO"; }
 
@@ -255,7 +256,7 @@ fail() {
 🧩 Tahap: <code>$reason</code>
 🚨 <code>$(printf '%s' "$diag" | python3 -c 'import html,sys; print(html.escape(sys.stdin.read()))')</code>
 ⏱ $(fmt_dur "$duration")
-🔗 <a href=\"$RUN_URL\">CI log</a>" || true
+🔗 <a href=\"$TG_RUN_URL_HTML\">CI log</a>" || true
   if is_true "${TG_SEND_FAILURE_ARTIFACTS:-true}"; then
     tg_file "$WORK/failure-summary.txt" "🚨 Failure diagnostics — ${BUILD_PROFILE_LABEL} — $DEVICE $(variant_label "$ROOT_VARIANT")" || true
     if [[ -f "$WORK/failure-build.log.gz" ]]; then
@@ -478,7 +479,7 @@ if [[ -n "${MID:-}" ]]; then
 🧩 Fragment: <code>${DETECTED_FRAGMENT:-none}</code>
 🛠 Toolchain: <code>$RESOLVED_TOOLCHAIN $RESOLVED_TOOLCHAIN_VERSION</code>
 🧵 Jobs: <code>$JOBS</code>
-🔗 <a href="$RUN_URL">CI log</a>" || true
+🔗 <a href="$TG_RUN_URL_HTML">CI log</a>" || true
 fi
 
 for kv in \
@@ -678,7 +679,7 @@ tg_edit "$MID" "✅ <b>Zairenkai build selesai</b>
 🐧 <code>${KERNEL_RELEASE:-$KMM}</code> | 📊 $SCHEDULER_DETECTED
 📦 <code>$(basename "${ANYKERNEL_ZIP:-$ARCHIVE}")</code>
 ⏱ $(fmt_dur "$DURATION")
-🔗 <a href=\"$RUN_URL\">CI log</a>" || true
+🔗 <a href=\"$TG_RUN_URL_HTML\">CI log</a>" || true
 if is_true "${TG_SEND_ARTIFACTS:-false}"; then
   if [[ -n "$ANYKERNEL_ZIP" && -f "$ANYKERNEL_ZIP" ]]; then
     if ! tg_file "$ANYKERNEL_ZIP" "📦 <b>${BUILD_PROFILE_LABEL}</b> — <code>$(basename "$ANYKERNEL_ZIP")</code>"; then

@@ -9,6 +9,11 @@ set -Eeuo pipefail
 MONITOR="${HARNESS_MONITOR_FILE:-harness-monitor.json}"
 PROFILE="${BUILD_PROFILE:-unknown}"
 RUN_URL="${HARNESS_RUN_URL:-}"
+ESCAPED_RUN_URL="$(python3 - "$RUN_URL" <<'PYESC_URL'
+import html,sys
+print(html.escape(sys.argv[1], quote=True), end="")
+PYESC_URL
+)"
 
 if [[ ! -f "$MONITOR" ]]; then
   API="https://api.telegram.org/bot${TG_BOT_TOKEN}"
@@ -18,7 +23,7 @@ print(html.escape(sys.argv[1]), end='')
 PYESC0
 )"
   text="❌ <b>Zairenkai Harness Kernel Build gagal</b>\n🎯 Target: <code>${escaped_profile}</code>\n🚨 <code>harness-monitor.json tidak tersedia; cek GitHub Actions run untuk detail.</code>"
-  [[ -n "$RUN_URL" ]] && text+="\n🔗 <a href=\"$RUN_URL\">Harness CI log</a>"
+  [[ -n "$RUN_URL" ]] && text+="\n🔗 <a href=\"$ESCAPED_RUN_URL\">Harness CI log</a>"
   curl -fsS --retry 4 --retry-delay 2 -X POST "$API/sendMessage" \
     --data-urlencode "chat_id=$TG_CHAT_ID" \
     --data-urlencode "message_thread_id=$TG_RELEASE_TOPIC_ID" \
@@ -62,7 +67,7 @@ text+="📌 Status: <code>$(html_escape "$status")</code>\n"
 [[ -n "$plan" ]] && text+="🆔 Execution: <code>$(html_escape "$plan")</code>\n"
 [[ -n "$source" ]] && text+="🔎 Source: <code>$(html_escape "$source")</code>\n"
 [[ -n "$error" ]] && text+="🚨 Error: <code>$(html_escape "${error:0:1800}")</code>\n"
-[[ -n "$RUN_URL" ]] && text+="🔗 <a href=\"$RUN_URL\">Harness CI log</a>"
+[[ -n "$RUN_URL" ]] && text+="🔗 <a href=\"$ESCAPED_RUN_URL\">Harness CI log</a>"
 
 API="https://api.telegram.org/bot${TG_BOT_TOKEN}"
 curl -fsS --retry 4 --retry-delay 2 -X POST "$API/sendMessage" \

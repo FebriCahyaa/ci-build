@@ -7,6 +7,7 @@ LOCAL_MANIFEST_URL="${LOCAL_MANIFEST_URL:-}"
 LOCAL_MANIFEST_BRANCH="${LOCAL_MANIFEST_BRANCH:-}"
 BUILD_CMD="${BUILD_CMD:-mka bacon}"
 RUN_URL="${RUN_URL:-}"
+TG_RUN_URL_HTML="$(tg_escape_html "${RUN_URL:-}")"
 SRC="${ROM_DIR:-$HOME/rom}"
 START=$(date +%s)
 mkdir -p "$SRC" && cd "$SRC"
@@ -15,13 +16,13 @@ MID=$(tg_msg "🚀 <b>Build ROM dimulai</b>
 📱 Device: <code>$DEVICE</code>
 📦 Manifest: <code>$MANIFEST_URL</code> (<code>$MANIFEST_BRANCH</code>)
 🎯 Lunch: <code>$LUNCH_TARGET</code>
-🔗 <a href=\"$RUN_URL\">Log CI</a>") || MID=""
+🔗 <a href=\"$TG_RUN_URL_HTML\">Log CI</a>") || MID=""
 
 fail() {
   local d=$(( $(date +%s) - START ))
   tg_edit "$MID" "❌ <b>Build ROM GAGAL</b> pada tahap: <code>$1</code>
 📱 $DEVICE | ⏱ $(fmt_dur $d)
-🔗 <a href=\"$RUN_URL\">Log CI</a>" || true
+🔗 <a href=\"$TG_RUN_URL_HTML\">Log CI</a>" || true
   [ -f "$SRC/out/error.log" ] && tg_file "$SRC/out/error.log" "📄 error.log — $DEVICE" || true
   if [ -f "$SRC/build.log" ]; then
     tail -n 300 "$SRC/build.log" > "$SRC/tail.log"

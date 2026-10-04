@@ -172,6 +172,9 @@ jobs:
           set -euo pipefail
           bash tests/telegram_delivery_test.sh
           bash tests/telegram_release_test.sh
+          bash tests/telegram_html_escape_test.sh
+          bash tests/telegram_html_fallback_test.sh
+          bash tests/kernelsu_next_4_19_compat_test.sh
           bash tests/root_manager_submodule_test.sh
           bash tests/root_manager_provider_patch_test.sh
           bash tests/kernel_identity_test.sh

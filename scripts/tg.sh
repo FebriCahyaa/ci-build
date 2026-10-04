@@ -46,6 +46,26 @@ tg_msg() {
       python3 -c 'import json,sys; print(json.load(sys.stdin).get("result",{}).get("message_id",""))' <<<"$response"
       return 0
     fi
+    if [[ "$response" == *"can't parse entities"* || "$response" == *"parse entities"* ]]; then
+      echo "[telegram] sendMessage HTML rejected; retrying once as plain text" >&2
+      local plain
+      plain="$(python3 - "$message" <<'PYTGPLAIN'
+import html,re,sys
+s=sys.argv[1]
+s=re.sub(r'<[^>]+>', '', s)
+print(html.unescape(s), end='')
+PYTGPLAIN
+)"
+      local plain_args=(-d "chat_id=$TG_CHAT_ID" -d "disable_web_page_preview=true")
+      [[ -n "$TG_TOPIC_ID" ]] && plain_args+=(-d "message_thread_id=$TG_TOPIC_ID")
+      plain_args+=(--data-urlencode "text=$plain")
+      response="$(curl -sS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" -X POST "$API/sendMessage" "${plain_args[@]}" 2>/dev/null || true)"
+      if tg_api_ok "$response"; then
+        python3 -c 'import json,sys; print(json.load(sys.stdin).get("result",{}).get("message_id",""))' <<<"$response"
+        return 0
+      fi
+      break
+    fi
     echo "[telegram] sendMessage failed (attempt $attempt/$TG_MAX_RETRIES): $(printf '%s' "$response" | head -c 300)" >&2
     (( attempt < TG_MAX_RETRIES )) && { sleep "$delay"; delay=$((delay * 2)); }
   done
@@ -61,6 +81,23 @@ tg_edit() {
   for ((attempt=1; attempt<=TG_MAX_RETRIES; attempt++)); do
     response="$(curl -sS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" -X POST "$API/editMessageText" "${args[@]}" 2>/dev/null || true)"
     if tg_api_ok "$response" || [[ "$response" == *'message is not modified'* ]]; then return 0; fi
+    if [[ "$response" == *"can't parse entities"* || "$response" == *"parse entities"* ]]; then
+      echo "[telegram] editMessageText HTML rejected; retrying once as plain text" >&2
+      local plain
+      plain="$(python3 - "$message" <<'PYTGPLAINEDIT'
+import html,re,sys
+s=sys.argv[1]
+s=re.sub(r'<[^>]+>', '', s)
+print(html.unescape(s), end='')
+PYTGPLAINEDIT
+)"
+      local plain_args=(-d "chat_id=$TG_CHAT_ID" -d "message_id=$message_id" -d "disable_web_page_preview=true")
+      [[ -n "$TG_TOPIC_ID" ]] && plain_args+=(-d "message_thread_id=$TG_TOPIC_ID")
+      plain_args+=(--data-urlencode "text=$plain")
+      response="$(curl -sS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" -X POST "$API/editMessageText" "${plain_args[@]}" 2>/dev/null || true)"
+      if tg_api_ok "$response" || [[ "$response" == *'message is not modified'* ]]; then return 0; fi
+      break
+    fi
     echo "[telegram] editMessageText failed (attempt $attempt/$TG_MAX_RETRIES): $(printf '%s' "$response" | head -c 300)" >&2
     (( attempt < TG_MAX_RETRIES )) && { sleep "$delay"; delay=$((delay * 2)); }
   done
@@ -187,7 +224,7 @@ tg_progress_update() {
   bar="$(tg_progress_bar "$pct" "$TG_PROGRESS_WIDTH")"
   tail="$(tg_log_tail "$log_file")"
 
-  local icon safe_phase safe_detail safe_tail text
+  local icon safe_phase safe_detail safe_tail safe_run_url text
   case "$state" in
     success|passed) icon='✅' ;;
     failure|failed|error) icon='❌' ;;
@@ -195,6 +232,7 @@ tg_progress_update() {
   esac
   safe_phase="$(tg_escape_html "$phase")"
   safe_detail="$(tg_escape_html "$detail")"
+  safe_run_url="$(tg_escape_html "${RUN_URL:-}")"
   safe_tail="$tail"
   [[ -n "$safe_tail" ]] || safe_tail='Waiting for build output...'
   # Telegram caps message text at 4096 characters. Bound only the log tail so
@@ -208,7 +246,7 @@ tg_progress_update() {
   text+="🧩 <b>${safe_phase}</b> — ${safe_detail}"$'\n'
   text+="⏱ <code>$(fmt_dur "$elapsed")</code> | 🖥 CPU ~<code>${cpu}%</code> | RAM <code>${ram}%</code> | Load <code>${load}</code>"$'\n'
   if [[ -n "${RUN_URL:-}" ]]; then
-    text+="🔗 <a href=\"${RUN_URL}\">GitHub Actions</a>"$'\n'
+    text+="🔗 <a href=\"${safe_run_url}\">GitHub Actions</a>"$'\n'
   fi
   text+=$'\n'"📜 <b>Live log</b>"$'\n'"<pre>${safe_tail}</pre>"
 

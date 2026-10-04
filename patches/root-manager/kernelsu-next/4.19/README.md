@@ -1,15 +1,11 @@
-# KernelSU-Next / Linux 4.19
+# KernelSU-Next 4.19 compatibility
 
-CI integrates the upstream KernelSU-Next repository through its upstream
-setup layout and resolves `KSU_REF=auto` to **v3.4.0** for Linux 4.19.
-This is the current pinned KernelSU-Next release for all 4.19+/GKI profiles.
+KernelSU-Next v3.4.0 is used for Linux 4.19+. This directory contains only provider-side compatibility patches for legacy VFS layouts.
 
-KernelSU-Next v3.4.0 expects `path_umount()`, an API added upstream in Linux
-5.9. CI therefore applies the small host-kernel backport in
-`host-series.conf` to the 4.19 source tree before the provider is built. This
-is deliberately separate from the provider-local series so the upstream
-KernelSU-Next checkout remains clean.
+`0002-file-wrapper-linux-4.19-compat.patch` adapts the v3.4.0 file wrapper to the Linux 4.19 `struct file_operations` layout:
 
-The external SUSFS `kernel-4.19` patch set is intentionally not applied to
-KernelSU-Next because that patch set is authored against official KernelSU.
-CI fails closed rather than mixing unverified hook/API patches.
+- `iopoll` is fenced to mainline >= 5.1.
+- `remap_file_range` is fenced to mainline >= 4.20.
+- Linux 4.19 keeps the native `clone_file_range` and `dedupe_file_range` callbacks.
+
+The patch is applied to the isolated KernelSU-Next provider checkout by `scripts/root_manager_apply.sh`; the upstream provider gitlink is not modified.
