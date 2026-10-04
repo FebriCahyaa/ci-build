@@ -135,6 +135,10 @@ jobs:
   trigger-harness:
     runs-on: ubuntu-latest
     timeout-minutes: 150
+    # The Harness handoff is intentionally stored as a draft GitHub Release.
+    # GitHub only exposes draft releases to callers with push-level access.
+    permissions:
+      contents: write
     steps:
       - name: Checkout CI repository
         uses: actions/checkout@v4

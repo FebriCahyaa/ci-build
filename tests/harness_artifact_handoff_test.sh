@@ -20,6 +20,10 @@ grep -q 'SOURCE_ROOT="$PWD/work"' "$PIPE"
 grep -q 'ASSET_DIR="$PWD/release/assets"' "$PIPE"
 grep -q 'bash scripts/assemble_release_assets.sh' "$PIPE"
 
+# The handoff is a draft release, so the consuming Actions job needs push-level
+# contents access; contents: read cannot enumerate draft releases and appears as 404.
+grep -A6 '^  trigger-harness:' "$WF" | grep -q 'contents: write'
+
 # GitHub Actions must materialize the per-execution handoff, retain it as an
 # Actions artifact, and relay the same files to Telegram after the monitor exits.
 grep -q 'Materialize Harness artifacts into GitHub Actions' "$WF"

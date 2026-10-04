@@ -7,6 +7,7 @@ index 71d8e3a66d876e4a188e50d5e3ce42da26b1b87c..f512c6d03098b30e3ae34c4ebd1f7de9
  
  ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include
 +ccflags-y += -include $(KSU_KERNEL_DIR)/kernel/kernel_compat.h
++ccflags-y += -I$(KSU_KERNEL_DIR)/kernel/kpm/compat
  
  obj-$(CONFIG_KSU) += kernelsu.o
  
@@ -197,67 +198,27 @@ index c0def8c9fb542fcfba8112045665110699224008..88fe4482b6ef69befd427390c64aa15f
  
 -#endif
 +#endif /* __SUKISU_ULTRA_KERNEL_COMPAT_H */
-diff --git a/kernel/kpm/compact.c b/kernel/kpm/compact.c
-index 8b7a7d104052b24d2c41b62eb9aa60c5f5eb9d02..5e15f4f2c0528a047cc27c5626fcb5892a0f9964 100644
---- a/kernel/kpm/compact.c
-+++ b/kernel/kpm/compact.c
-@@ -20,7 +20,7 @@
- #include <asm/cacheflush.h>
- #include <linux/module.h>
- #include <linux/vmalloc.h>
--#include <linux/set_memory.h>
-+#include "compat_set_memory.h"
- #include <linux/version.h>
- #include <linux/export.h>
- #include <linux/slab.h>
-diff --git a/kernel/kpm/kpm.c b/kernel/kpm/kpm.c
-index ea5722153f1b461adf2eded946815a8bfd6bb5d6..f5ad625496ee72256db38a783dc65fd945a3dd58 100644
---- a/kernel/kpm/kpm.c
-+++ b/kernel/kpm/kpm.c
-@@ -26,7 +26,7 @@
- #include <linux/string.h>
- #include <asm/cacheflush.h>
- #include <linux/module.h>
--#include <linux/set_memory.h>
-+#include "compat_set_memory.h"
- #include <linux/export.h>
- #include <linux/slab.h>
- #include <asm/insn.h>
-diff --git a/kernel/kpm/super_access.c b/kernel/kpm/super_access.c
-index b49dcb3191288347b0eae49b2a82872ed5922a91..15eed187e5679fff1d588c12d38c2c47b0f04bbc 100644
---- a/kernel/kpm/super_access.c
-+++ b/kernel/kpm/super_access.c
-@@ -20,8 +20,8 @@
- #include <asm/cacheflush.h>
- #include <linux/module.h>
- #include <linux/vmalloc.h>
--#include <linux/set_memory.h>
-+#include "compat_set_memory.h"
- #include <linux/version.h>
- #include <linux/export.h>
- #include <linux/slab.h>
- 
-diff --git a/kernel/kpm/compat_set_memory.h b/kernel/kpm/compat_set_memory.h
+diff --git a/kernel/kpm/compat/linux/set_memory.h b/kernel/kpm/compat/linux/set_memory.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..bef6fcf7717a229f7d416b08e9d27bcbc0fd49c2
 --- /dev/null
-+++ b/kernel/kpm/compat_set_memory.h
-@@ -0,0 +1,18 @@
++++ b/kernel/kpm/compat/linux/set_memory.h
+@@ -0,0 +1,24 @@
 +/* SPDX-License-Identifier: GPL-2.0-only */
 +/*
-+ * KPM set_memory include compatibility for old Android kernels.
-+ * Linux 4.4 arm64 exposes the set_memory_* declarations through
-+ * <asm/cacheflush.h>, while newer kernels provide <linux/set_memory.h>.
++ * SukiSU Ultra Linux 4.4 compatibility overlay for <linux/set_memory.h>.
++ * Linux 4.4 ARM64 exports set_memory_* declarations via asm/cacheflush.h.
++ * Newer kernels already provide the real linux/set_memory.h; include_next
++ * keeps this provider-local overlay transparent on those kernels.
 + */
-+#ifndef __SUKISU_ULTRA_COMPAT_SET_MEMORY_H
-+#define __SUKISU_ULTRA_COMPAT_SET_MEMORY_H
++#ifndef __SUKISU_ULTRA_COMPAT_LINUX_SET_MEMORY_H
++#define __SUKISU_ULTRA_COMPAT_LINUX_SET_MEMORY_H
 +
 +#include <linux/version.h>
 +
 +#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0)
 +#include <asm/cacheflush.h>
 +#else
-+#include <linux/set_memory.h>
++#include_next <linux/set_memory.h>
 +#endif
 +
-+#endif /* __SUKISU_ULTRA_COMPAT_SET_MEMORY_H */
++#endif /* __SUKISU_ULTRA_COMPAT_LINUX_SET_MEMORY_H */

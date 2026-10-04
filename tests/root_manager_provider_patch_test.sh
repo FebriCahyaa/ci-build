@@ -35,8 +35,8 @@ check_series sukisu-ultra
 grep -q 'KERNEL_VERSION(4, 8, 0)' "$ROOT/patches/root-manager/kernelsu-next/4.4/0001-linux-4.4-compat.patch" && echo 'PASS: KSU-Next nofault compat guard' || { echo 'FAIL: KSU-Next nofault compat guard' >&2; fail=1; }
 grep -q 'KERNEL_VERSION(4, 11, 0)' "$ROOT/patches/root-manager/kernelsu-next/4.4/0001-linux-4.4-compat.patch" && echo 'PASS: KSU-Next refcount compat guard' || { echo 'FAIL: KSU-Next refcount compat guard' >&2; fail=1; }
 grep -q 'pud = pud_offset(pgd, addr)' "$ROOT/patches/root-manager/kernelsu-next/4.4/0001-linux-4.4-compat.patch" && echo 'PASS: KSU-Next pre-P4D page-table path' || { echo 'FAIL: KSU-Next pre-P4D page-table path' >&2; fail=1; }
-grep -q 'compat_set_memory.h' "$ROOT/patches/root-manager/sukisu-ultra/4.4/0001-linux-4.4-compat.patch" && echo 'PASS: SukiSU KPM set_memory shim' || { echo 'FAIL: SukiSU KPM set_memory shim' >&2; fail=1; }
-grep -q '^diff --git a/kernel/kpm/compat_set_memory.h b/kernel/kpm/compat_set_memory.h' "$ROOT/patches/root-manager/sukisu-ultra/4.4/0001-linux-4.4-compat.patch" && echo 'PASS: SukiSU KPM compat header is included in patch' || { echo 'FAIL: SukiSU KPM compat header missing from patch' >&2; fail=1; }
+grep -q 'kernel/kpm/compat/linux/set_memory.h' "$ROOT/patches/root-manager/sukisu-ultra/4.4/0001-linux-4.4-compat.patch" && echo 'PASS: SukiSU KPM set_memory shim' || { echo 'FAIL: SukiSU KPM set_memory shim' >&2; fail=1; }
+grep -q '^diff --git a/kernel/kpm/compat/linux/set_memory.h b/kernel/kpm/compat/linux/set_memory.h' "$ROOT/patches/root-manager/sukisu-ultra/4.4/0001-linux-4.4-compat.patch" && echo 'PASS: SukiSU KPM compat header is included in patch' || { echo 'FAIL: SukiSU KPM compat header missing from patch' >&2; fail=1; }
 grep -q 'KERNEL_VERSION(4, 12, 0)' "$ROOT/patches/root-manager/sukisu-ultra/4.4/0001-linux-4.4-compat.patch" && echo 'PASS: SukiSU kvmalloc compat guard' || { echo 'FAIL: SukiSU kvmalloc compat guard' >&2; fail=1; }
 
 exit "$fail"

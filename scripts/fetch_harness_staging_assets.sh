@@ -33,18 +33,28 @@ mkdir -p "$OUT_DIR"
 TAG_ENC="$(urlencode "$RELEASE_TAG")"
 RELEASE_JSON="$OUT_DIR/release.json"
 found=false
+last_status=0
 
 for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
-  if curl -fsSL --retry 2 --retry-delay 2 "${AUTH[@]}" \
-      "$API/repos/${GH_REPOSITORY}/releases/tags/${TAG_ENC}" > "$RELEASE_JSON"; then
+  set +e
+  status="$(curl -sSL --retry 2 --retry-delay 2 "${AUTH[@]}" \
+      -o "$RELEASE_JSON" -w '%{http_code}' \
+      "$API/repos/${GH_REPOSITORY}/releases/tags/${TAG_ENC}")"
+  curl_rc=$?
+  set -e
+
+  if (( curl_rc == 0 )) && [[ "$status" == "200" ]]; then
     found=true
     break
   fi
-  echo "[harness-fetch] waiting for release tag=$RELEASE_TAG attempt=$attempt/$MAX_ATTEMPTS" >&2
+
+  last_status="${status:-curl-error}"
+  echo "[harness-fetch] waiting for release tag=$RELEASE_TAG attempt=$attempt/$MAX_ATTEMPTS status=$last_status" >&2
   sleep "$SLEEP_SECONDS"
 done
 
-[[ "$found" == true ]] || ci_die "Harness staging release was not found: $RELEASE_TAG"
+[[ "$found" == true ]] || ci_die \
+  "Harness staging release was not found: $RELEASE_TAG (last_status=$last_status; draft releases require push-level contents access)"
 
 python3 - "$RELEASE_JSON" "$OUT_DIR" <<'PY'
 import json, os, sys
