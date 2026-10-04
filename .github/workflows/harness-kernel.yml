@@ -144,7 +144,7 @@ jobs:
           set -euo pipefail
           chmod +x scripts/*.sh
           python3 -m py_compile scripts/harness_monitor.py
-          bash -n scripts/build_variants.sh scripts/build_kernel.sh scripts/assemble_release_assets.sh scripts/publish_ci_release.sh scripts/stage_ci_release_assets.sh
+          bash -n scripts/build_variants.sh scripts/build_kernel.sh scripts/apply_nongki_4_4.sh scripts/apply_susfs.sh scripts/assemble_release_assets.sh scripts/publish_ci_release.sh scripts/stage_ci_release_assets.sh
           test -f profiles/targets/${{ inputs.build_profile }}.conf
           test -f anykernel/anykernel.sh
           git rev-parse HEAD

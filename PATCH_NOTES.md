@@ -31,3 +31,12 @@ official-KernelSU SUSFS patch set.
 
 KernelSU-Next + the external official-KernelSU 4.19 SUSFS patch set is blocked
 instead of applying an unverified API combination.
+
+## Lavender 4.4 NonGKI
+
+The `lavender-4.4` target now uses the 4.4-tested NonGKI syscall hook layer
+from `Lokitla/NonGKI_Kernel_Build_2nd`, pinned to commit
+`ab5b09509bcdf7a077468b0ab30bfe3cc86a0c77`. Enabling SUSFS switches to the
+upstream inline hook implementation and the dedicated SUSFS v2.3.0 4.4
+config surface. The full SUSFS source patch remains strict and refuses fuzzy
+application on divergent vendor trees.

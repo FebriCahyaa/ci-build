@@ -138,9 +138,15 @@ case "$KSU_HOOK_MODE" in
     ;;
 esac
 
-# KSU-Next + external SUSFS 4.19 is deliberately rejected by the SUSFS stage.
+# External SUSFS compatibility is kernel-generation specific. Keep the
+# historical 4.19 restriction, and explicitly keep the dedicated 4.4
+# SUSFS path conservative as well.
 if [[ "${ENABLE_SUSFS,,}" == "true" ]] && [[ "$PROVIDER" == "kernelsu-next" ]]; then
-  fail "external SUSFS 4.19 patch set is based on official KernelSU, not KSU-Next"
+  if [[ "$KERNEL_MM" == "4.19" ]]; then
+    fail "external SUSFS 4.19 patch set is based on official KernelSU, not KSU-Next"
+  elif [[ "$KERNEL_MM" == "4.4" ]]; then
+    fail "dedicated SUSFS 4.4 patch path is validated for official KernelSU/ReSukiSU; KSU-Next is intentionally blocked"
+  fi
 fi
 
 cat > "$WORK_DIR/root-manager.env" <<EOF

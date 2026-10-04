@@ -102,6 +102,8 @@ for variant in "${VARIANTS[@]}"; do
   export PATCH_PROFILE="${PATCH_PROFILE:-$PROFILE_PATCH_PROFILE}"
   export UPSTREAM_PROFILE="${UPSTREAM_PROFILE:-$PROFILE_UPSTREAM_PROFILE}"
   export LTO_PLUS="${LTO_PLUS:-$PROFILE_LTO_PLUS}"
+  export NONGKI_4_4_HOOKS="${NONGKI_4_4_HOOKS:-${PROFILE_NONGKI_4_4_HOOKS:-auto}}"
+  export NONGKI_4_4_MODE="${NONGKI_4_4_MODE:-${PROFILE_NONGKI_4_4_MODE:-auto}}"
 
   started="$(date +%s)"
   if "$SCRIPT_DIR/build_kernel.sh"; then

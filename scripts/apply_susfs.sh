@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 SOURCE_DIR="${SOURCE_DIR:-}"
 WORK_DIR="${WORK_DIR:-}"
 KERNEL_VERSION="${KERNEL_VERSION:-0.0}"
@@ -20,7 +22,10 @@ REST="${KERNEL_VERSION#*.}"
 MINOR="${REST%%.*}"
 MM="${MAJOR}.${MINOR}"
 
-[[ "$MM" == "4.19" ]] || fail "this SUSFS profile is only for Linux 4.19"
+case "$MM" in
+  4.19|4.4) ;;
+  *) fail "this SUSFS integration supports only Linux 4.19 and 4.4" ;;
+esac
 
 case "$ROOT_MANAGER" in
   official|kernelsu)
@@ -30,12 +35,68 @@ case "$ROOT_MANAGER" in
     PROVIDER="resukisu"
     ;;
   kernelsu-next|ksu-next|next)
-    fail "SUSFS 4.19 upstream patch set is based on official KernelSU; KSU-Next integration is intentionally blocked"
+    if [[ "$MM" == "4.19" ]]; then
+      fail "SUSFS 4.19 upstream patch set is based on official KernelSU; KSU-Next integration is intentionally blocked"
+    else
+      fail "SUSFS 4.4 dedicated patch path is validated for official KernelSU/ReSukiSU; KSU-Next integration is intentionally blocked"
+    fi
     ;;
   *)
     fail "SUSFS requires a supported root provider; ROOT_MANAGER=$ROOT_MANAGER"
     ;;
 esac
+
+if [[ "$MM" == "4.4" ]]; then
+  # Dedicated legacy patch from the NonGKI build project. It is fetched from
+  # an immutable commit and verified against the Git blob SHA. No fuzzy patch
+  # application is permitted on vendor trees.
+  MANIFEST="$SCRIPT_DIR/../patches/upstream/lokitla-nongki/4.4/manifest.conf"
+  [[ -f "$MANIFEST" ]] || fail "NonGKI 4.4 manifest missing: $MANIFEST"
+  # shellcheck source=/dev/null
+  source "$MANIFEST"
+  NON_GKI_COMMIT="$UPSTREAM_NONGKI_COMMIT"
+  NON_GKI_PATCH_BLOB="$UPSTREAM_SUSFS_4_4_BLOB"
+  NON_GKI_PATCH_URL="https://raw.githubusercontent.com/$UPSTREAM_NONGKI_REPO/${NON_GKI_COMMIT}/Patches/Patch/susfs_patch_to_4.4.patch"
+  NON_GKI_PATCH="$WORK_DIR/susfs_patch_to_4.4.patch"
+  command -v curl >/dev/null 2>&1 || fail "curl is required for the pinned SUSFS 4.4 patch"
+  curl -fsSL --retry 5 --retry-delay 2 --retry-connrefused --connect-timeout 15 --max-time 240 "$NON_GKI_PATCH_URL" -o "$NON_GKI_PATCH" ||
+    fail "unable to fetch pinned SUSFS 4.4 patch"
+  ACTUAL_BLOB="$(git hash-object "$NON_GKI_PATCH")"
+  [[ "$ACTUAL_BLOB" == "$NON_GKI_PATCH_BLOB" ]] ||
+    fail "SUSFS 4.4 patch SHA mismatch: expected $NON_GKI_PATCH_BLOB, got $ACTUAL_BLOB"
+
+  log "applying dedicated NonGKI SUSFS 4.4 patch commit=${NON_GKI_COMMIT}"
+  if git -C "$SOURCE_DIR" apply --check --whitespace=nowarn "$NON_GKI_PATCH" >/dev/null 2>&1; then
+    git -C "$SOURCE_DIR" apply --whitespace=nowarn "$NON_GKI_PATCH"
+  elif git -C "$SOURCE_DIR" apply -R --check --whitespace=nowarn "$NON_GKI_PATCH" >/dev/null 2>&1; then
+    log "SUSFS 4.4 patch already applied"
+  else
+    git -C "$SOURCE_DIR" apply --check --whitespace=nowarn "$NON_GKI_PATCH" || true
+    fail "dedicated SUSFS 4.4 patch does not apply cleanly to this kernel tree; refusing fuzzy application"
+  fi
+
+  [[ -f "$SOURCE_DIR/fs/susfs.c" ]] || fail "SUSFS 4.4 patch did not create fs/susfs.c"
+  [[ -f "$SOURCE_DIR/include/linux/susfs.h" ]] || fail "SUSFS 4.4 patch did not create include/linux/susfs.h"
+
+  SUSFS_REPO="https://github.com/Lokitla/NonGKI_Kernel_Build_2nd"
+  SUSFS_REF="$NON_GKI_COMMIT"
+  SUSFS_COMMIT="$NON_GKI_COMMIT"
+  SUSFS_VERSION="v2.3.0 / NonGKI 4.4"
+  SUSFS_SOURCE="Lokitla/NonGKI_Kernel_Build_2nd:susfs_patch_to_4.4.patch"
+  cat > "$WORK_DIR/susfs.env" <<EOF
+ENABLE_SUSFS=true
+SUSFS_REPO=$SUSFS_REPO
+SUSFS_REF=$SUSFS_REF
+SUSFS_COMMIT=$SUSFS_COMMIT
+SUSFS_VERSION=$SUSFS_VERSION
+SUSFS_SOURCE=$SUSFS_SOURCE
+EOF
+  log "source=$SUSFS_SOURCE"
+  log "ref=$SUSFS_REF"
+  log "commit=$SUSFS_COMMIT"
+  log "version=$SUSFS_VERSION"
+  exit 0
+fi
 
 SUSFS_REPO="https://gitlab.com/simonpunk/susfs4ksu.git"
 SUSFS_DIR="$WORK_DIR/susfs4ksu"

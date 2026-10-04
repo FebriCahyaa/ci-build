@@ -7,6 +7,7 @@
 #   KERNEL_BRANCH KERNEL_REF_TYPE DEVICE ARCH DEFCONFIG CONFIG_FRAGMENT JOBS KERNEL_TARGET
 #   ROOT_VARIANT=vanilla|kernelsu|kernelsu-next|resukisu   (preferred over ENABLE_KSU/KSU_PROVIDER)
 #   KSU_REF ENABLE_SUSFS SUSFS_REF KSU_REPO KSU_HOOK_MODE
+#   NONGKI_4_4_HOOKS NONGKI_4_4_MODE
 #   TOOLCHAIN TOOLCHAIN_VERSION LLVM LLVM_IAS CROSS_COMPILE CROSS_COMPILE_ARM32 CLANG_URL GCC_URL
 #   PATCH_PROFILE UPSTREAM_PROFILE LTO_PLUS SCHEDULER_PROFILE KERNEL_NAME EXTRA_MAKE_ARGS
 #   PACKAGE_ANYKERNEL ANYKERNEL_PROFILE ANYKERNEL3_REPO ANYKERNEL3_REF
@@ -94,6 +95,8 @@ SOURCE_LABEL="${SOURCE_LABEL:-${PROFILE_SOURCE_LABEL:-}}"
 KSU_NEXT_LEGACY_REF="${KSU_NEXT_LEGACY_REF:-${PROFILE_KSU_NEXT_LEGACY_REF:-v1.1.1}}"
 KSU_NEXT_GKI_REF="${KSU_NEXT_GKI_REF:-${PROFILE_KSU_NEXT_GKI_REF:-v3.4.0}}"
 RESUKISU_REF_DEFAULT="${RESUKISU_REF_DEFAULT:-${PROFILE_RESUKISU_REF:-v4.2.0-rc3}}"
+NONGKI_4_4_HOOKS="${NONGKI_4_4_HOOKS:-${PROFILE_NONGKI_4_4_HOOKS:-auto}}"
+NONGKI_4_4_MODE="${NONGKI_4_4_MODE:-${PROFILE_NONGKI_4_4_MODE:-auto}}"
 
 BUILD_ENV="${BUILD_ENV:-}"
 RUN_URL="${RUN_URL:-}"
@@ -311,6 +314,7 @@ else
 fi
 
 SUSFS_COMMIT=none SUSFS_VERSION=none SUSFS_SOURCE=none
+NONGKI_4_4_ENABLED=false NONGKI_4_4_UPSTREAM_COMMIT=none NONGKI_4_4_MODE_RESOLVED=none NONGKI_4_4_HOOK_BLOB=none
 if is_true "$ENABLE_SUSFS"; then
   ENABLE_SUSFS=true
   run_helper apply_susfs.sh \
@@ -319,6 +323,29 @@ if is_true "$ENABLE_SUSFS"; then
   source "$WORK/susfs.env"
 else
   ENABLE_SUSFS=false
+fi
+
+# ------------------------------------------------------------
+# Legacy NonGKI hook integration
+#
+# Lavender 4.4 is non-GKI. Root variants receive the upstream 4.4-tested
+# syscall hook layer automatically; SUSFS switches the hook layer to the
+# upstream inline implementation after the dedicated SUSFS patch succeeds.
+# ------------------------------------------------------------
+if [[ "$DEVICE" == "lavender" && "$KMM" == 4.4* && "$ROOT_VARIANT" != "vanilla" ]] && is_true "$NONGKI_4_4_HOOKS"; then
+  ci_phase "nongki-4.4-hooks"
+  run_helper apply_nongki_4_4.sh \
+    SOURCE_DIR="$SRC_DIR" WORK_DIR="$WORK" DEVICE="$DEVICE" KERNEL_VERSION="$KMM" \
+    ROOT_MANAGER="$KSU_PROVIDER" ENABLE_SUSFS="$ENABLE_SUSFS" \
+    NONGKI_4_4_HOOKS="$NONGKI_4_4_HOOKS" NONGKI_4_4_MODE="$NONGKI_4_4_MODE" \
+    DEFCONFIG_FILE="$SRC_DIR/arch/$DETECTED_ARCH/configs/$DETECTED_DEFCONFIG" \
+    KPM_ENABLE="${KPM_ENABLE:-false}" || fail "NonGKI 4.4 hook integration"
+  source "$WORK/nongki-4.4.env"
+  NONGKI_4_4_ENABLED=true
+  NONGKI_4_4_UPSTREAM_COMMIT="$NONGKI_4_4_UPSTREAM_COMMIT"
+  NONGKI_4_4_MODE_RESOLVED="$NONGKI_4_4_MODE"
+else
+  NONGKI_4_4_ENABLED=false
 fi
 
 # ------------------------------------------------------------
@@ -434,6 +461,7 @@ for kv in \
   "ksu_repo=${KSU_REPO:-}" "ksu_ref=${KSU_REF:-}" "ksu_version=${KSU_PROVIDER_VERSION:-none}" \
   "ksu_commit=${KSU_PROVIDER_COMMIT:-none}" "ksu_layout=${KSU_LAYOUT_RESOLVED:-none}" "ksu_hook_mode=$KSU_HOOK_MODE" \
   "susfs_enabled=$ENABLE_SUSFS" "susfs_source=$SUSFS_SOURCE" "susfs_ref=$SUSFS_REF" \
+  "nongki_4_4_enabled=$NONGKI_4_4_ENABLED" "nongki_4_4_mode=$NONGKI_4_4_MODE_RESOLVED" "nongki_4_4_commit=$NONGKI_4_4_UPSTREAM_COMMIT" "nongki_4_4_hook_blob=$NONGKI_4_4_HOOK_BLOB" \
   "susfs_commit=$SUSFS_COMMIT" "susfs_version=$SUSFS_VERSION"; do
   info "${kv%%=*}" "${kv#*=}"
 done
