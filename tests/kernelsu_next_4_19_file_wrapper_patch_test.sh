@@ -7,6 +7,7 @@ README="$ROOT_DIR/patches/root-manager/kernelsu-next/4.19/README.md"
 fail(){ echo "FAIL: $*" >&2; exit 1; }
 pass(){ echo "PASS: $*"; }
 
+git apply --stat "$PATCH" >/dev/null 2>&1 || fail "file_wrapper patch is syntactically corrupt"
 grep -qF '+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)' "$PATCH" || fail 'iopoll guard missing'
 grep -qF '+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)' "$PATCH" || fail 'remap guard missing'
 grep -qF 'ksu_wrapper_clone_file_range' "$PATCH" || fail 'clone_file_range wrapper missing'
