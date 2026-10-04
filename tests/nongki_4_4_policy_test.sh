@@ -26,3 +26,8 @@ set -e
 (( rc == 0 )) || { echo 'FAIL: NonGKI shell syntax' >&2; fail=1; }
 
 if (( fail == 0 )); then echo 'PASS: NonGKI 4.4 policy'; else exit 1; fi
+
+check "$ROOT/scripts/root_manager_apply.sh" 'sukisu-ultra' 'NonGKI 4.4 accepts SukiSU Ultra provider'
+check "$ROOT/patches/root-manager/sukisu-ultra/4.4/config.fragment" '^CONFIG_KSU_MANUAL_SU=y$' 'SukiSU Ultra 4.4 manual hook config'
+check "$ROOT/patches/root-manager/sukisu-ultra/4.4/config.fragment" '^CONFIG_KPROBES=y$' 'SukiSU Ultra 4.4 KPROBES prerequisite'
+check "$ROOT/scripts/apply_nongki_4_4.sh" 'kernelsu-next|sukisu-ultra' 'provider-native hook providers are explicit'

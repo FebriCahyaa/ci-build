@@ -47,6 +47,31 @@ is_true "$NONGKI_4_4_HOOKS" || {
   log "disabled (NONGKI_4_4_HOOKS=$NONGKI_4_4_HOOKS)"
   exit 0
 }
+
+# ReSukiSU's manual hook path is the one that needs the pinned external source
+# hook layer. KernelSU-Next and SukiSU Ultra already ship their own syscall
+# table/kprobe based legacy hook implementation; running the external patch on
+# top of those providers can double-hook the same paths. Their 4.4 compatibility
+# is handled by patches/root-manager/<provider>/4.4 instead.
+case "$ROOT_MANAGER" in
+  resukisu) ;;
+  kernelsu-next|sukisu-ultra)
+    cat > "$WORK_DIR/nongki-4.4.env" <<EOF_ENV
+NONGKI_4_4_ENABLED=true
+NONGKI_4_4_DEVICE=lavender
+NONGKI_4_4_KERNEL_VERSION=$KERNEL_VERSION
+NONGKI_4_4_MODE=provider-native
+NONGKI_4_4_UPSTREAM_REPO=https://github.com/$UPSTREAM_REPO
+NONGKI_4_4_UPSTREAM_COMMIT=$UPSTREAM_COMMIT
+NONGKI_4_4_HOOK_BLOB=provider-native
+NONGKI_4_4_HOOK_URL=provider-native
+EOF_ENV
+    log "provider-native legacy hook path selected for $ROOT_MANAGER; external NonGKI source-hook script skipped"
+    exit 0
+    ;;
+  *) fail "unsupported 4.4 non-GKI root provider: $ROOT_MANAGER" ;;
+esac
+
 [[ -d "$SOURCE_DIR/.git" ]] || fail "SOURCE_DIR must be a git working tree"
 [[ -n "$WORK_DIR" ]] || fail "WORK_DIR is required"
 

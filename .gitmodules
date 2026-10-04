@@ -1,0 +1,19 @@
+[submodule "third_party/root-managers/kernelsu"]
+	path = third_party/root-managers/kernelsu
+	url = https://github.com/tiann/KernelSU.git
+	branch = main
+
+[submodule "third_party/root-managers/kernelsu-next"]
+	path = third_party/root-managers/kernelsu-next
+	url = https://github.com/KernelSU-Next/KernelSU-Next.git
+	branch = dev
+
+[submodule "third_party/root-managers/resukisu"]
+	path = third_party/root-managers/resukisu
+	url = https://github.com/ReSukiSU/ReSukiSU.git
+	branch = main
+
+[submodule "third_party/root-managers/sukisu-ultra"]
+	path = third_party/root-managers/sukisu-ultra
+	url = https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
+	branch = main

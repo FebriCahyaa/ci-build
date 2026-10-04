@@ -10,10 +10,10 @@ on:
         options: [lavender-4.4, lavender-4.19, garnet-gki]
         default: lavender-4.4
       variants:
-        description: "Root variants: vanilla,kernelsu-next,resukisu or all"
+        description: "Root variants: vanilla,kernelsu-next,resukisu,sukisu-ultra or all"
         required: true
         type: string
-        default: vanilla,kernelsu-next,resukisu
+        default: vanilla,kernelsu-next,resukisu,sukisu-ultra
       kernel_repo_override:
         description: "Optional kernel repository override"
         required: false
@@ -157,9 +157,9 @@ jobs:
 
           case "${INPUT_VARIANTS}" in
             all|"")
-              variants='["vanilla","kernelsu-next","resukisu"]'
+              variants='["vanilla","kernelsu-next","resukisu","sukisu-ultra"]'
               ;;
-            vanilla|kernelsu-next|resukisu)
+            vanilla|kernelsu-next|resukisu|sukisu-ultra)
               variants="[\"${INPUT_VARIANTS}\"]"
               ;;
             *)
@@ -171,7 +171,7 @@ jobs:
                 [[ -n "${item}" ]] || continue
 
                 case "${item}" in
-                  vanilla|kernelsu-next|resukisu)
+                  vanilla|kernelsu-next|resukisu|sukisu-ultra)
                     selected+=("${item}")
                     ;;
                   *)
@@ -212,6 +212,8 @@ jobs:
     steps:
       - name: Checkout CI repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install dependencies
         env:
@@ -265,7 +267,7 @@ jobs:
           KERNEL_NAME: ${{ inputs.kernel_name }}
           APT_PACKAGES: ${{ inputs.apt_packages }}
           INSTALL_SHELLCHECK: "false"
-          TG_SEND_ARTIFACTS: "true"
+          TG_SEND_ARTIFACTS: "false"
         run: |
           set -euo pipefail
           bash scripts/build_kernel.sh
@@ -292,6 +294,8 @@ jobs:
     steps:
       - name: Checkout CI repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install minimal release tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends curl python3 zip
@@ -333,3 +337,17 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/publish_ci_release.sh
+\n      - name: Relay published kernel release to Telegram release topic
+        if: success()
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_RELEASE_TOPIC_ID: ${{ secrets.TG_RELEASE_TOPIC_ID }}
+          TG_RELEASE_REQUIRE_TOPIC: "true"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag != '' && inputs.release_tag || format('zairenkai-{0}-run-{1}', inputs.build_profile, github.run_number) }}
+          BUILD_PROFILE: ${{ inputs.build_profile }}
+          RELEASE_STATUS: "PUBLISHED"
+          TG_SKIP_ASSET_UPLOAD: "false"
+        run: bash scripts/send_release_to_telegram.sh

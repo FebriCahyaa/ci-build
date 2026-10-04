@@ -60,3 +60,31 @@ application on divergent vendor trees.
 - Set the AnyKernel maintainer banner to `Febrian Rahmad Cahya`.
 - Bridge the GitHub `TG_TOPIC_ID` secret into the remote Harness execution without exceeding its 25-variable runtime limit; optional kernel-name and apt-package overrides are bundled in one JSON runtime variable, while the exact CI commit pin is preserved.
 - Keep the target profile visible in the live progress message, not only the initial/final notification.
+
+
+## Root-manager submodule integration
+
+- Added Git submodules for KernelSU, KernelSU-Next, ReSukiSU, and SukiSU Ultra under `third_party/root-managers/`.
+- Provider sources are copied into isolated build checkouts before source patches are applied.
+- Added bootstrap/sync helpers for upstream synchronization.
+
+## SukiSU Ultra / Linux 4.4
+
+- Added `sukisu-ultra` as a first-class variant.
+- Added 4.4, 4.19, and 5.10 config fragments.
+- Linux 4.4 uses `CONFIG_KSU_MANUAL_SU=y` and the pinned NonGKI hook stage.
+- SukiSU Ultra + SUSFS is fail-closed on 4.4 until a verified upstream-compatible SUSFS contract is available.
+
+## Telegram release routing
+
+- Build progress remains on `TG_TOPIC_ID`.
+- Published releases use `TG_RELEASE_TOPIC_ID` from `tg_release_topic_id`.
+- Release message and release asset uploads are separate from build-completion notifications.
+
+
+## 4.4 provider compatibility layer
+
+- Added strict provider patch series for KernelSU-Next and SukiSU Ultra on Linux 4.4.
+- Added local shims for pre-4.8 user-copy APIs, pre-4.11 `refcount_t`, pre-4.12 `kvmalloc`/`kvfree`, and pre-P4D ARM64 page-table walking.
+- Added a SukiSU Ultra KPM `set_memory.h` compatibility shim for the documented sub-4.19 requirement.
+- ReSukiSU remains the only provider using the pinned external source-hook script in the Lavender 4.4 stage; KSU-Next/SukiSU Ultra use provider-native hook paths.

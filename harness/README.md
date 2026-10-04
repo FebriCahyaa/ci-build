@@ -8,7 +8,7 @@ Use `harness/kernel-pipeline.yaml` as a Remote Pipeline. The important variables
 
 ```text
 BUILD_PROFILE   = lavender-4.4 | lavender-4.19 | garnet-gki
-ROOT_VARIANTS   = vanilla,kernelsu-next,resukisu | subset | all
+ROOT_VARIANTS   = vanilla,kernelsu-next,resukisu,sukisu-ultra | subset | all
 PUBLISH_RELEASE = false | true
 ```
 
@@ -27,7 +27,7 @@ ci-build checkout
    -> dependency installation
    -> target profile resolution
    -> one kernel source seed
-   -> 3 root variants
+   -> 4 root variants
    -> AnyKernel3 + changelog
    -> optional GitHub release
 ```
@@ -42,7 +42,7 @@ Required Harness secret:
 github_token
 ```
 
-Telegram credentials are only needed for Telegram notification/relay behavior.
+Telegram build progress uses `TG_TOPIC_ID`. Published releases use the separate `tg_release_topic_id` secret and are relayed to `TG_RELEASE_TOPIC_ID`; the two topics are intentionally isolated.
 
 ## ROM pipeline
 

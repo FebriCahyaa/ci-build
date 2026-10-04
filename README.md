@@ -8,15 +8,16 @@ Universal Android kernel CI for the current Zairenkai targets:
 | `lavender-4.19` | Linux 4.19 | Dynamic Partition compatible |
 | `garnet-gki` | Linux 5.10 GKI | A/B boot, Dynamic Partition ROM compatible |
 
-The default release matrix produces exactly three root variants:
+The default release matrix produces four root variants:
 
 ```text
 vanilla
 kernelsu-next
 resukisu
+sukisu-ultra
 ```
 
-The shared `scripts/` layer is the single build implementation for GitHub Actions, Harness, and local execution. Toolchain metadata, progress telemetry, archive creation, and provider selection are validated by CI before release. Target details live in `profiles/targets/`; AnyKernel flash packaging details live in `anykernel/profiles/`.
+The shared `scripts/` layer is the single build implementation for GitHub Actions, Harness, and local execution. Toolchain metadata, progress telemetry, archive creation, root-provider selection, and provider compatibility patches are validated by CI before release. Target details live in `profiles/targets/`; AnyKernel flash packaging details live in `anykernel/profiles/`.
 
 ## Architecture
 
@@ -35,10 +36,10 @@ profiles/targets/<target>.conf
        build_kernel.sh
               │
      ┌────────┼─────────┐
-     ▼        ▼         ▼
- vanilla  KernelSU-Next ReSukiSU
-     │        │         │
-     └────────┼─────────┘
+     ▼        ▼         ▼        ▼
+ vanilla  KernelSU-Next ReSukiSU  SukiSU Ultra
+     │        │         │        │
+     └────────┴─────────┴────────┘
               ▼
      AnyKernel3 + changelog
               │
@@ -48,7 +49,7 @@ profiles/targets/<target>.conf
 
 ## GitHub Actions
 
-Run `Build Kernel` and choose one canonical profile. `variants` accepts comma- or space-separated values or `all`; the normal default is all three release variants.
+Run `Build Kernel` and choose one canonical profile. `variants` accepts comma- or space-separated values or `all`; the normal default is all four release variants.
 
 The workflow has 25 `workflow_dispatch` inputs, within GitHub's limit. Release creation is opt-in. A successful release contains:
 
@@ -65,7 +66,7 @@ Release tags default to `zairenkai-<profile>-run-<run_number>` and are non-prere
 
 ## Harness
 
-`harness/kernel-pipeline.yaml` is the reusable Harness Cloud pipeline. It uses the same profile registry and calls `scripts/build_variants.sh`, which prepares one pristine kernel source seed and shares ccache across its three variants.
+`harness/kernel-pipeline.yaml` is the reusable Harness Cloud pipeline. It uses the same profile registry and calls `scripts/build_variants.sh`, which prepares one pristine kernel source seed and shares ccache across its default four variants.
 
 `.github/workflows/harness-kernel.yml` is the GitHub-to-Harness bridge and keeps its workflow inputs under 25. The bridge monitors the Harness execution and can relay the resulting release to Telegram.
 The Harness dashboard uses an animated `LIVE` progress state while the single
@@ -101,7 +102,7 @@ For a local AnyKernel smoke/package flow:
 cd anykernel
 mkdir -p images/vanilla
 # Put a compiled image under images/vanilla/ using the profile's KERNEL_IMAGES order.
-./build.sh lavender-4.4 vanilla kernelsu-next resukisu
+./build.sh lavender-4.4 vanilla kernelsu-next resukisu sukisu-ultra
 ```
 
 The AnyKernel packager is fail-closed: it refuses to create a ZIP when no accepted kernel image exists.
@@ -138,6 +139,61 @@ The resolver uses deterministic defaults:
 KernelSU-Next 4.x: v1.1.1
 KernelSU-Next GKI: v3.4.0
 ReSukiSU:          v4.2.0-rc3
+SukiSU Ultra:      main
+Official KernelSU: v0.9.5 only where upstream still supports legacy kernels (4.14+)
 ```
 
-The legacy official KernelSU path remains available for compatibility, but it is not part of the default three-variant release matrix.
+The legacy official KernelSU path remains available for compatibility, but it is not part of the default four-variant release matrix.
+
+
+## Root-manager sources and synchronization
+
+The complete upstream root-manager projects are tracked as Git submodules under
+`third_party/root-managers/`. CI initializes them recursively and then copies the
+selected provider ref into an isolated checkout so build-time patches do not dirty
+the parent gitlink.
+
+Initialize the submodules in an existing Git checkout:
+
+```bash
+bash scripts/bootstrap_root_manager_submodules.sh
+```
+
+Synchronize their tracked upstream branches:
+
+```bash
+bash scripts/sync_root_managers.sh remote
+```
+
+### Upstream copyright and license notices
+
+This repository does not relicense upstream submodule contents. Their own LICENSE
+files remain authoritative:
+
+- **KernelSU** — `https://github.com/tiann/KernelSU` — upstream project authored by **weishu (tiann)**; `/kernel` is GPL-2.0-only and other project files are GPL-3.0-or-later. The provider tree retains its own per-file copyright notices.
+- **KernelSU-Next** — `https://github.com/KernelSU-Next/KernelSU-Next` — upstream source and its per-file copyright notices are retained; `/kernel` is GPL-2.0-only and other project files are GPL-3.0-or-later.
+- **ReSukiSU** — `https://github.com/ReSukiSU/ReSukiSU` — upstream fork/maintainer attribution is retained; `/kernel` is GPL-2.0-only and other project files are GPL-3.0-or-later. The upstream `LICENSE_icon_English` and `LICENSE_icon_SC` notices remain authoritative for artwork; the icon license records vectorization contribution copyright to **@MiRinChan**, and brand intellectual property for the covered icon files to **明风 OuO**; the license also references **怡子曰曰** and other third-party rights holders.
+- **SukiSU Ultra** — `https://github.com/SukiSU-Ultra/SukiSU-Ultra` — upstream source and its per-file copyright notices are retained; `/kernel` is GPL-2.0-only and other project files are GPL-3.0-or-later. The upstream `LICENSE_icon_English` and `LICENSE_icon_SC` files remain authoritative: vectorization contribution copyright is attributed to **@MiRinChan**, while the covered brand intellectual property belongs to **明风 OuO**; the license also references **怡子曰曰** and other third-party rights holders.
+
+### Telegram build vs release topics
+
+Build progress/status stays on `TG_TOPIC_ID`. Published kernel releases use the
+separate `TG_RELEASE_TOPIC_ID` from the `tg_release_topic_id` secret. The release
+message is intentionally different from the build-completion message and includes
+the published GitHub Release, variant summary, asset count, and release assets.
+The build job no longer uploads final AnyKernel ZIPs into the build topic.
+
+### Linux 4.4 non-GKI policy
+
+`lavender-4.4` supports KernelSU-Next, ReSukiSU, and SukiSU Ultra. ReSukiSU uses the
+pinned external NonGKI source-hook stage; KernelSU-Next and SukiSU Ultra use their
+provider-native legacy hook implementations so duplicate syscall/source hooks are
+not stacked. Provider-local 4.4 compatibility patches are applied only inside an
+isolated provider checkout. SukiSU Ultra uses `CONFIG_KSU_MANUAL_SU=y`. The official
+current KernelSU provider is fail-closed on 4.4 because its current upstream legacy
+support floor is 4.14.
+
+SukiSU Ultra documents that KPM on kernels below 4.19 requires a `set_memory.h`
+backport. The SukiSU Ultra 4.4 provider patch therefore includes a local compatibility
+header mapping the legacy ARM64 `set_memory_*` declarations without modifying the
+vendor kernel's public headers.

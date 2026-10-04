@@ -10,10 +10,10 @@ on:
         options: [lavender-4.4, lavender-4.19, garnet-gki]
         default: lavender-4.4
       root_variants:
-        description: "Root variants: vanilla,kernelsu-next,resukisu or all"
+        description: "Root variants: vanilla,kernelsu-next,resukisu,sukisu-ultra or all"
         required: true
         type: string
-        default: vanilla,kernelsu-next,resukisu
+        default: vanilla,kernelsu-next,resukisu,sukisu-ultra
       kernel_repo_override:
         description: "Optional kernel repository override"
         required: false
@@ -138,6 +138,8 @@ jobs:
     steps:
       - name: Checkout CI repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Harness preflight
         run: |
@@ -348,13 +350,13 @@ jobs:
           compression-level: 0
           retention-days: 14
 
-      - name: Relay Harness result to Telegram
-        if: always() && steps.trigger.outputs.plan_execution_id != ''
+      - name: Relay published Harness release to Telegram release topic
+        if: always() && steps.trigger.outputs.plan_execution_id != '' && inputs.publish_release
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
-          TG_REQUIRE_TOPIC: "true"
+          TG_RELEASE_TOPIC_ID: ${{ secrets.TG_RELEASE_TOPIC_ID }}
+          TG_RELEASE_REQUIRE_TOPIC: "true"
           GITHUB_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ steps.trigger.outputs.release_tag }}

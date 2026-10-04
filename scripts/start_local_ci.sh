@@ -6,7 +6,7 @@ TARGET="${TARGET:-github}"
 REPO="${REPO:-FebriCahyaa/ci-build}"
 REF="${REF:-main}"
 BUILD_PROFILE="${BUILD_PROFILE:-lavender-4.4}"
-VARIANTS="${VARIANTS:-vanilla,kernelsu-next,resukisu}"
+VARIANTS="${VARIANTS:-vanilla,kernelsu-next,resukisu,sukisu-ultra}"
 KERNEL_REPO_OVERRIDE="${KERNEL_REPO_OVERRIDE:-${KERNEL_REPO:-}}"
 KERNEL_REF_OVERRIDE="${KERNEL_REF_OVERRIDE:-${KERNEL_BRANCH:-}}"
 DEFCONFIG_OVERRIDE="${DEFCONFIG_OVERRIDE:-${DEFCONFIG:-}}"
@@ -41,7 +41,7 @@ Usage: TARGET=github|harness $0
 
 Common:
   BUILD_PROFILE=lavender-4.4|lavender-4.19|garnet-gki
-  VARIANTS=vanilla,kernelsu-next,resukisu|all
+  VARIANTS=vanilla,kernelsu-next,resukisu,sukisu-ultra|all
   REPO=owner/repo REF=branch
   RELEASE=true RELEASE_TAG=optional
 

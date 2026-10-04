@@ -85,7 +85,13 @@ aggregate() {
   {
     echo '# Zairenkai Kernel Release Changelog'
     echo
-    echo 'This release contains the Vanilla, KernelSU-Next and ReSukiSU builds for the selected target profile.'
+    providers=()
+    for file in "${files[@]}"; do
+      v="$(get_info root_variant "$file")"
+      [[ -n "$v" ]] || v="$(get_info ksu_provider "$file")"
+      [[ -n "$v" ]] && providers+=("$(variant_label "$v")") || true
+    done
+    printf 'This release contains the %s builds for the selected target profile.\n' "$(IFS=', '; echo "${providers[*]}")" 
     echo
     for file in "${files[@]}"; do
       cat "$file"

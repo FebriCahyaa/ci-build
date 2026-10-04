@@ -4,7 +4,7 @@
 #   source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 
 CI_ROOT="${CI_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)}"
-DEFAULT_VARIANTS="vanilla,kernelsu-next,resukisu"
+DEFAULT_VARIANTS="vanilla,kernelsu-next,resukisu,sukisu-ultra"
 
 ci_log() { printf '[%s] %s\n' "${CI_LOG_TAG:-ci}" "$*" >&2; }
 ci_die() { printf '[%s] ERROR: %s\n' "${CI_LOG_TAG:-ci}" "$*" >&2; exit 1; }
@@ -78,13 +78,14 @@ git_fetch_ref() {
 }
 
 # normalize_variant <name>: canonical root variant id.
-#   vanilla | kernelsu | kernelsu-next | resukisu
+#   vanilla | kernelsu | kernelsu-next | resukisu | sukisu-ultra
 normalize_variant() {
   case "${1,,}" in
     ""|vanilla|none|false|0|no|off|disabled) echo "vanilla" ;;
     ksu|kernelsu|official|kernel-su) echo "kernelsu" ;;
     ksun|kernelsu-next|ksu-next|next) echo "kernelsu-next" ;;
-    resukisu|re-sukisu|sukisu) echo "resukisu" ;;
+    suki|sukisu|sukisu-ultra|sukisu_ultra|sukisuultra) echo "sukisu-ultra" ;;
+    resukisu|re-sukisu) echo "resukisu" ;;
     *) return 1 ;;
   esac
 }
@@ -96,6 +97,7 @@ variant_label() {
     kernelsu) echo "KernelSU" ;;
     kernelsu-next) echo "KernelSU-Next" ;;
     resukisu) echo "ReSukiSU" ;;
+    sukisu-ultra|sukisu_ultra|sukisuultra) echo "SukiSU Ultra" ;;
     *) echo "$1" ;;
   esac
 }
@@ -105,7 +107,7 @@ expand_variants() {
   local raw="${1:-$DEFAULT_VARIANTS}" item v seen=" "
   [[ "${raw,,}" == "all" ]] && raw="$DEFAULT_VARIANTS"
   for item in ${raw//,/ }; do
-    v="$(normalize_variant "$item")" || ci_die "unknown variant: $item (use vanilla, kernelsu, kernelsu-next, resukisu)"
+    v="$(normalize_variant "$item")" || ci_die "unknown variant: $item (use vanilla, kernelsu, kernelsu-next, resukisu, sukisu-ultra)"
     [[ "$seen" == *" $v "* ]] && continue
     seen+="$v "
     echo "$v"

@@ -11,6 +11,8 @@ case "${ROOT_PROVIDER,,}" in
     echo "kernelsu-next" ;;
   resukisu|re-sukisu)
     echo "resukisu" ;;
+  sukisu-ultra|sukisu_ultra|sukisuultra)
+    echo "sukisu-ultra" ;;
   *)
     echo "none" ;;
 esac

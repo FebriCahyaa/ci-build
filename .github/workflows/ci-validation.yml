@@ -16,6 +16,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Initialize root-manager submodules
+        run: git submodule update --init --recursive
+
       - name: Install validation dependencies
         run: |
           set -euo pipefail
@@ -115,7 +118,7 @@ jobs:
         run: |
           set -euo pipefail
           profiles=(lavender-4.4 lavender-4.19 garnet-gki)
-          variants=(vanilla kernelsu-next resukisu)
+          variants=(vanilla kernelsu-next resukisu sukisu-ultra)
           for profile in "${profiles[@]}"; do
             for variant in "${variants[@]}"; do
               tmp="$(mktemp -d)"
@@ -162,6 +165,9 @@ jobs:
         run: |
           set -euo pipefail
           bash tests/telegram_delivery_test.sh
+          bash tests/telegram_release_test.sh
+          bash tests/root_manager_submodule_test.sh
+          bash tests/root_manager_provider_patch_test.sh
           bash tests/kernel_identity_test.sh
           bash tests/harness_artifact_handoff_test.sh
           python3 - <<'PY'
@@ -219,14 +225,14 @@ jobs:
         run: |
           set -euo pipefail
           tmp="$(mktemp -d)"
-          mkdir -p "$tmp/source" "$tmp/info/vanilla" "$tmp/info/kernelsu-next" "$tmp/info/resukisu"
+          mkdir -p "$tmp/source" "$tmp/info/vanilla" "$tmp/info/kernelsu-next" "$tmp/info/resukisu" "$tmp/info/sukisu-ultra"
           git -C "$tmp/source" init -q
           git -C "$tmp/source" config user.email ci@example.invalid
           git -C "$tmp/source" config user.name ci
           printf 'source\n' > "$tmp/source/file.c"
           git -C "$tmp/source" add file.c
           git -C "$tmp/source" commit -qm 'test: changelog source'
-          for v in vanilla kernelsu-next resukisu; do
+          for v in vanilla kernelsu-next resukisu sukisu-ultra; do
             cat > "$tmp/info/$v/build-info.txt" <<EOF_INFO
           build_profile=garnet-gki
           device=garnet
@@ -277,6 +283,7 @@ jobs:
         run: |
           set -euo pipefail
           bash tests/nongki_4_4_policy_test.sh
+          bash tests/root_manager_submodule_test.sh
 
       - name: Harness variable contract
         run: |

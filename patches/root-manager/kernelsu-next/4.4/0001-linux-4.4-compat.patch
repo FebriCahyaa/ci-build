@@ -1,0 +1,177 @@
+diff --git a/kernel/Kbuild b/kernel/Kbuild
+index b9d91f8e54c313feb632809c7ce3992961f59e34..f3a310aef14e439fa581be98d134a2b8f7e2f22e 100644
+--- a/kernel/Kbuild
++++ b/kernel/Kbuild
+@@ -87,6 +87,7 @@ KSU_KERNEL_DIR := $(src)
+ endif
+ 
+ ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include
++ccflags-y += -include $(KSU_KERNEL_DIR)/kernel/kernel_compat.h
+ 
+ obj-$(CONFIG_KSU) += kernelsu.o
+ 
+diff --git a/kernel/hook/arm64/patch_memory.c b/kernel/hook/arm64/patch_memory.c
+index d58f2e45ca5357b2352570688d0b94033e201f8c..c00a87037c3e5f0701c307950398e58c2cea2e62 100644
+--- a/kernel/hook/arm64/patch_memory.c
++++ b/kernel/hook/arm64/patch_memory.c
+@@ -12,6 +12,7 @@
+ #include "linux/stop_machine.h"
+ #include "asm/cacheflush.h"
+ #include "asm-generic/fixmap.h"
++#include <linux/version.h>
+ 
+ // https://github.com/fuqiuluo/ovo/blob/f7da411458e87d32438dc14fce5a3313ed0c967e/ovo/mmuhack.c#L21
+ 
+@@ -23,7 +24,9 @@ unsigned long phys_from_virt(unsigned long addr, int *err)
+ {
+     struct mm_struct *mm = &init_mm;
+     pgd_t *pgd;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+     p4d_t *p4d;
++#endif
+     pud_t *pud;
+     pmd_t *pmd;
+     pte_t *pte;
+@@ -36,6 +39,7 @@ unsigned long phys_from_virt(unsigned long addr, int *err)
+     pr_debug("pgd of 0x%lx p=0x%lx v=0x%lx", addr, (uintptr_t)pgd,
+              (uintptr_t)pgd_val(*pgd));
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+     p4d = p4d_offset(pgd, addr);
+     if (p4d_none(*p4d) || p4d_bad(*p4d))
+         goto fail;
+@@ -47,8 +51,10 @@ unsigned long phys_from_virt(unsigned long addr, int *err)
+         return __p4d_to_phys(*p4d) + ((addr & ~P4D_MASK));
+     }
+ #endif
+-
+     pud = pud_offset(p4d, addr);
++#else
++    pud = pud_offset(pgd, addr);
++#endif
+     if (pud_none(*pud) || pud_bad(*pud))
+         goto fail;
+     pr_debug("pud of 0x%lx p=0x%lx v=0x%lx", addr, (uintptr_t)pud,
+diff --git a/kernel/kernel_compat.h b/kernel/kernel_compat.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..afcaa588f37be4f949f1a08d5a1a933227c7be17
+--- /dev/null
++++ b/kernel/kernel_compat.h
+@@ -0,0 +1,117 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * KernelSU-Next legacy compatibility helpers for pre-4.12 kernels.
++ *
++ * These shims are deliberately provider-local. They let the provider source
++ * consume newer helper APIs without modifying the host kernel headers.
++ */
++#ifndef __KSU_NEXT_KERNEL_44_COMPAT_H
++#define __KSU_NEXT_KERNEL_44_COMPAT_H
++
++#include <linux/version.h>
++#include <linux/module.h>
++#include <linux/fs.h>
++#include <linux/uaccess.h>
++#include <linux/slab.h>
++#include <linux/vmalloc.h>
++#include <linux/atomic.h>
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
++static inline unsigned long ksu_next_copy_from_user_nofault(void *to,
++        const void __user *from, unsigned long count)
++{
++    unsigned long ret;
++    pagefault_disable();
++    ret = __copy_from_user(to, from, count);
++    pagefault_enable();
++    return ret;
++}
++
++static inline unsigned long ksu_next_copy_to_user_nofault(void __user *to,
++        const void *from, unsigned long count)
++{
++    unsigned long ret;
++    pagefault_disable();
++    ret = __copy_to_user(to, from, count);
++    pagefault_enable();
++    return ret;
++}
++
++static inline long ksu_next_strncpy_from_user_nofault(char *dst,
++        const char __user *src, long count)
++{
++    long ret;
++    pagefault_disable();
++    ret = strncpy_from_user(dst, src, count);
++    pagefault_enable();
++    return ret;
++}
++
++static inline long ksu_next_copy_from_kernel_nofault(void *dst,
++        const void *src, size_t size)
++{
++    return probe_kernel_read(dst, src, size);
++}
++
++static inline long ksu_next_copy_to_kernel_nofault(void *dst,
++        const void *src, size_t size)
++{
++    return probe_kernel_write(dst, src, size);
++}
++
++#ifndef copy_from_user_nofault
++#define copy_from_user_nofault ksu_next_copy_from_user_nofault
++#endif
++#ifndef copy_to_user_nofault
++#define copy_to_user_nofault ksu_next_copy_to_user_nofault
++#endif
++#ifndef strncpy_from_user_nofault
++#define strncpy_from_user_nofault ksu_next_strncpy_from_user_nofault
++#endif
++#ifndef copy_from_kernel_nofault
++#define copy_from_kernel_nofault ksu_next_copy_from_kernel_nofault
++#endif
++#ifndef copy_to_kernel_nofault
++#define copy_to_kernel_nofault ksu_next_copy_to_kernel_nofault
++#endif
++#endif /* < 4.8 */
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0)
++typedef atomic_t refcount_t;
++#ifndef REFCOUNT_INIT
++#define REFCOUNT_INIT(n) ATOMIC_INIT(n)
++#endif
++#endif
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
++extern int is_vmalloc_addr(const void *x);
++
++static inline void *ksu_next_kvmalloc(size_t size, gfp_t flags)
++{
++    void *p = kmalloc(size, flags);
++    return p ? p : vmalloc(size);
++}
++
++static inline void ksu_next_kvfree(const void *p)
++{
++    if (!p)
++        return;
++    if (is_vmalloc_addr(p))
++        vfree(p);
++    else
++        kfree(p);
++}
++
++#ifndef kvmalloc
++#define kvmalloc ksu_next_kvmalloc
++#endif
++#ifndef kvfree
++#define kvfree ksu_next_kvfree
++#endif
++#endif /* < 4.12 */
++
++#ifndef MODULE_IMPORT_NS
++#define MODULE_IMPORT_NS(ns)
++#endif
++
++#endif /* __KSU_NEXT_KERNEL_44_COMPAT_H */

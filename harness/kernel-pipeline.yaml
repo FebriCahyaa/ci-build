@@ -112,6 +112,8 @@ pipeline:
                       TG_BOT_TOKEN: <+secrets.getValue("tg_bot_token")>
                       TG_CHAT_ID: <+secrets.getValue("tg_chat_id")>
                       TG_TOPIC_ID: <+pipeline.variables.TG_TOPIC_ID>
+                      TG_RELEASE_TOPIC_ID: <+secrets.getValue("tg_release_topic_id")>
+                      TG_RELEASE_REQUIRE_TOPIC: "true"
                       TG_REQUIRE_TOPIC: "true"
                       # Harness is the persistence/staging layer. The GitHub Actions relay
                       # materializes these files into a native Actions artifact and Telegram.
@@ -149,7 +151,9 @@ pipeline:
                       export DEBIAN_FRONTEND=noninteractive
                       CI_DIR="$PWD/ci-build"
                       rm -rf "$CI_DIR"
-                      git clone --depth=1 https://github.com/FebriCahyaa/ci-build.git "$CI_DIR"
+                      git clone --depth=1 --recurse-submodules https://github.com/FebriCahyaa/ci-build.git "$CI_DIR"
+                      git -C "$CI_DIR" submodule sync --recursive
+                      git -C "$CI_DIR" submodule update --init --recursive
 
                       if [[ -n "${CI_BUILD_SHA:-}" ]]; then
                         git -C "$CI_DIR" fetch --depth=1 origin "$CI_BUILD_SHA"
@@ -220,6 +224,18 @@ pipeline:
                               ASSET_DIR="$PWD/release/assets" \
                               bash scripts/publish_ci_release.sh || \
                               echo "[harness] public release publication failed; staging handoff remains the fallback" >&2
+                            if [[ -n "${TG_RELEASE_TOPIC_ID:-}" ]]; then
+                              TG_BOT_TOKEN="$TG_BOT_TOKEN" TG_CHAT_ID="$TG_CHAT_ID" \
+                                TG_RELEASE_TOPIC_ID="$TG_RELEASE_TOPIC_ID" TG_RELEASE_REQUIRE_TOPIC=true \
+                                GITHUB_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" \
+                                RELEASE_TAG="harness-${HARNESS_EXECUTION_ID}" \
+                                BUILD_PROFILE="$BUILD_PROFILE" RELEASE_STATUS=PUBLISHED \
+                                TG_SKIP_ASSET_UPLOAD=false \
+                                bash scripts/send_release_to_telegram.sh || \
+                                echo "[harness] release-topic Telegram relay failed; GitHub Release remains published" >&2
+                            else
+                              echo "[harness] tg_release_topic_id secret is not configured; release Telegram relay skipped" >&2
+                            fi
                           else
                             echo "[harness] no installable package exists; retaining diagnostic staging release" >&2
                           fi

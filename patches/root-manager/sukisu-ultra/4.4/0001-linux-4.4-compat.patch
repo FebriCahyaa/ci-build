@@ -1,0 +1,263 @@
+diff --git a/kernel/Kbuild b/kernel/Kbuild
+index 71d8e3a66d876e4a188e50d5e3ce42da26b1b87c..f512c6d03098b30e3ae34c4ebd1f7de9d5f468c3 100644
+--- a/kernel/Kbuild
++++ b/kernel/Kbuild
+@@ -92,6 +92,7 @@ endif
+ endif
+ 
+ ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include
++ccflags-y += -include $(KSU_KERNEL_DIR)/kernel/kernel_compat.h
+ 
+ obj-$(CONFIG_KSU) += kernelsu.o
+ 
+diff --git a/kernel/hook/arm64/patch_memory.c b/kernel/hook/arm64/patch_memory.c
+index c344bd5517e165478518ea202ab21c9edea767ca..903ce3812892814de4f4568c9d6ba7fe5e2c1d48 100644
+--- a/kernel/hook/arm64/patch_memory.c
++++ b/kernel/hook/arm64/patch_memory.c
+@@ -13,6 +13,7 @@
+ #include "linux/stop_machine.h"
+ #include "asm/cacheflush.h"
+ #include "asm-generic/fixmap.h"
++#include <linux/version.h>
+ 
+ // https://github.com/fuqiuluo/ovo/blob/f7da411458e87d32438dc14fce5a3313ed0c967e/ovo/mmuhack.c#L21
+ 
+@@ -24,7 +25,9 @@ unsigned long phys_from_virt(unsigned long addr, int *err)
+ {
+     struct mm_struct *mm = &init_mm;
+     pgd_t *pgd;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+     p4d_t *p4d;
++#endif
+     pud_t *pud;
+     pmd_t *pmd;
+     pte_t *pte;
+@@ -36,6 +39,7 @@ unsigned long phys_from_virt(unsigned long addr, int *err)
+         goto fail;
+     pr_debug("pgd of 0x%lx p=0x%lx v=0x%lx", addr, (uintptr_t)pgd, (uintptr_t)pgd_val(*pgd));
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+     p4d = p4d_offset(pgd, addr);
+     if (p4d_none(*p4d) || p4d_bad(*p4d))
+         goto fail;
+@@ -46,8 +50,10 @@ unsigned long phys_from_virt(unsigned long addr, int *err)
+         return __p4d_to_phys(*p4d) + ((addr & ~P4D_MASK));
+     }
+ #endif
+-
+     pud = pud_offset(p4d, addr);
++#else
++    pud = pud_offset(pgd, addr);
++#endif
+     if (pud_none(*pud) || pud_bad(*pud))
+         goto fail;
+     pr_debug("pud of 0x%lx p=0x%lx v=0x%lx", addr, (uintptr_t)pud, (uintptr_t)pud_val(*pud));
+diff --git a/kernel/kernel_compat.h b/kernel/kernel_compat.h
+index c0def8c9fb542fcfba8112045665110699224008..88fe4482b6ef69befd427390c64aa15f9243f9cb 100644
+--- a/kernel/kernel_compat.h
++++ b/kernel/kernel_compat.h
+@@ -1,24 +1,126 @@
+-#ifndef __KSU_H_KERNEL_COMPAT
+-#define __KSU_H_KERNEL_COMPAT
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * SukiSU Ultra legacy compatibility helpers.
++ * Keep old-kernel shims inside the provider tree rather than modifying the
++ * vendor kernel's public headers.
++ */
++#ifndef __SUKISU_ULTRA_KERNEL_COMPAT_H
++#define __SUKISU_ULTRA_KERNEL_COMPAT_H
+ 
+-#include <linux/fs.h>
+ #include <linux/version.h>
++#include <linux/module.h>
++#include <linux/fs.h>
++#include <linux/uaccess.h>
++#include <linux/slab.h>
++#include <linux/vmalloc.h>
++#include <linux/atomic.h>
+ 
+-/*
+- * ksu_copy_from_user_retry
+- * try nofault copy first, if it fails, try with plain
+- * paramters are the same as copy_from_user
+- * 0 = success
+- */
+-static long ksu_copy_from_user_retry(void *to, const void __user *from,
+-                                     unsigned long count)
++#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
++static inline unsigned long suki_copy_from_user_nofault(void *to,
++        const void __user *from, unsigned long count)
++{
++    unsigned long ret;
++    pagefault_disable();
++    ret = __copy_from_user(to, from, count);
++    pagefault_enable();
++    return ret;
++}
++
++static inline unsigned long suki_copy_to_user_nofault(void __user *to,
++        const void *from, unsigned long count)
++{
++    unsigned long ret;
++    pagefault_disable();
++    ret = __copy_to_user(to, from, count);
++    pagefault_enable();
++    return ret;
++}
++
++static inline long suki_strncpy_from_user_nofault(char *dst,
++        const char __user *src, long count)
++{
++    long ret;
++    pagefault_disable();
++    ret = strncpy_from_user(dst, src, count);
++    pagefault_enable();
++    return ret;
++}
++
++static inline long suki_copy_from_kernel_nofault(void *dst,
++        const void *src, size_t size)
++{
++    return probe_kernel_read(dst, src, size);
++}
++
++static inline long suki_copy_to_kernel_nofault(void *dst,
++        const void *src, size_t size)
++{
++    return probe_kernel_write(dst, src, size);
++}
++
++#ifndef copy_from_user_nofault
++#define copy_from_user_nofault suki_copy_from_user_nofault
++#endif
++#ifndef copy_to_user_nofault
++#define copy_to_user_nofault suki_copy_to_user_nofault
++#endif
++#ifndef strncpy_from_user_nofault
++#define strncpy_from_user_nofault suki_strncpy_from_user_nofault
++#endif
++#ifndef copy_from_kernel_nofault
++#define copy_from_kernel_nofault suki_copy_from_kernel_nofault
++#endif
++#ifndef copy_to_kernel_nofault
++#define copy_to_kernel_nofault suki_copy_to_kernel_nofault
++#endif
++#endif /* < 4.8 */
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0)
++typedef atomic_t refcount_t;
++#ifndef REFCOUNT_INIT
++#define REFCOUNT_INIT(n) ATOMIC_INIT(n)
++#endif
++#endif
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
++extern int is_vmalloc_addr(const void *x);
++
++static inline void *suki_kvmalloc(size_t size, gfp_t flags)
++{
++    void *p = kmalloc(size, flags);
++    return p ? p : vmalloc(size);
++}
++
++static inline void suki_kvfree(const void *p)
++{
++    if (!p)
++        return;
++    if (is_vmalloc_addr(p))
++        vfree(p);
++    else
++        kfree(p);
++}
++
++#ifndef kvmalloc
++#define kvmalloc suki_kvmalloc
++#endif
++#ifndef kvfree
++#define kvfree suki_kvfree
++#endif
++#endif /* < 4.12 */
++
++#ifndef MODULE_IMPORT_NS
++#define MODULE_IMPORT_NS(ns)
++#endif
++
++/* Compatibility helper retained for providers which use the safe retry path. */
++static inline long ksu_copy_from_user_retry(void *to, const void __user *from,
++                                             unsigned long count)
+ {
+     long ret = copy_from_user_nofault(to, from, count);
+     if (likely(!ret))
+         return ret;
+-
+-    // we faulted! fallback to slow path
+     return copy_from_user(to, from, count);
+ }
+ 
+-#endif
++#endif /* __SUKISU_ULTRA_KERNEL_COMPAT_H */
+diff --git a/kernel/kpm/compact.c b/kernel/kpm/compact.c
+index 8b7a7d104052b24d2c41b62eb9aa60c5f5eb9d02..5e15f4f2c0528a047cc27c5626fcb5892a0f9964 100644
+--- a/kernel/kpm/compact.c
++++ b/kernel/kpm/compact.c
+@@ -20,7 +20,7 @@
+ #include <asm/cacheflush.h>
+ #include <linux/module.h>
+ #include <linux/vmalloc.h>
+-#include <linux/set_memory.h>
++#include "compat_set_memory.h"
+ #include <linux/version.h>
+ #include <linux/export.h>
+ #include <linux/slab.h>
+diff --git a/kernel/kpm/kpm.c b/kernel/kpm/kpm.c
+index ea5722153f1b461adf2eded946815a8bfd6bb5d6..f5ad625496ee72256db38a783dc65fd945a3dd58 100644
+--- a/kernel/kpm/kpm.c
++++ b/kernel/kpm/kpm.c
+@@ -26,7 +26,7 @@
+ #include <linux/string.h>
+ #include <asm/cacheflush.h>
+ #include <linux/module.h>
+-#include <linux/set_memory.h>
++#include "compat_set_memory.h"
+ #include <linux/export.h>
+ #include <linux/slab.h>
+ #include <asm/insn.h>
+diff --git a/kernel/kpm/super_access.c b/kernel/kpm/super_access.c
+index b49dcb3191288347b0eae49b2a82872ed5922a91..15eed187e5679fff1d588c12d38c2c47b0f04bbc 100644
+--- a/kernel/kpm/super_access.c
++++ b/kernel/kpm/super_access.c
+@@ -20,7 +20,7 @@
+ #include <asm/cacheflush.h>
+ #include <linux/module.h>
+ #include <linux/vmalloc.h>
+-#include <linux/set_memory.h>
++#include "compat_set_memory.h"
+ #include <linux/version.h>
+ #include <linux/export.h>
+ #include <linux/slab.h>
+
+diff --git a/kernel/kpm/compat_set_memory.h b/kernel/kpm/compat_set_memory.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..bef6fcf7717a229f7d416b08e9d27bcbc0fd49c2
+--- /dev/null
++++ b/kernel/kpm/compat_set_memory.h
+@@ -0,0 +1,18 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * KPM set_memory include compatibility for old Android kernels.
++ * Linux 4.4 arm64 exposes the set_memory_* declarations through
++ * <asm/cacheflush.h>, while newer kernels provide <linux/set_memory.h>.
++ */
++#ifndef __SUKISU_ULTRA_COMPAT_SET_MEMORY_H
++#define __SUKISU_ULTRA_COMPAT_SET_MEMORY_H
++
++#include <linux/version.h>
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0)
++#include <asm/cacheflush.h>
++#else
++#include <linux/set_memory.h>
++#endif
++
++#endif /* __SUKISU_ULTRA_COMPAT_SET_MEMORY_H */

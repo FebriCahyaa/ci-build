@@ -1,7 +1,9 @@
-# KernelSU-Next / Lavender 4.19
+# KernelSU-Next provider integration
 
-The universal builder keeps KernelSU-Next provider installation in its
-provider resolver. This directory is intentionally available for future
-KernelSU-Next-specific source fixes.
+Upstream source: https://github.com/KernelSU-Next/KernelSU-Next
+Tracked submodule branch: `dev`
 
-No source patch is registered for the current Lavender tree.
+For Linux 4.4 non-GKI, `4.4/series.conf` applies a provider-local compatibility
+layer for missing pre-4.12 APIs (`*_nofault`, `kvmalloc`/`kvfree`, legacy
+`refcount_t`, and the pre-P4D ARM64 page-table walk). The patch is applied to
+an isolated checkout, never to the parent submodule working tree.
