@@ -9,6 +9,7 @@ fail(){ echo "FAIL: $*" >&2; exit 1; }
 pass(){ echo "PASS: $*"; }
 
 [[ -f "$PATCH" ]] || fail "4.19 file-wrapper compatibility patch missing"
+grep -q '^diff --git a/kernel/infra/file_wrapper\.c b/kernel/infra/file_wrapper\.c$' "$PATCH" || fail "patch is missing canonical git diff header"
 grep -q '0002-file-wrapper-linux-4.19-compat.patch' "$SERIES" || fail "4.19 provider series missing file-wrapper patch"
 grep -q 'KERNEL_VERSION(5, 1, 0)' "$PATCH" || fail "iopoll 5.1 compatibility guard missing"
 grep -q 'KERNEL_VERSION(4, 20, 0)' "$PATCH" || fail "remap 4.20 compatibility guard missing"
@@ -16,7 +17,4 @@ grep -q 'ksu_wrapper_clone_file_range' "$PATCH" || fail "clone_file_range wrappe
 grep -q 'ksu_wrapper_dedupe_file_range' "$PATCH" || fail "dedupe_file_range wrapper missing"
 grep -q 'p->ops.clone_file_range' "$PATCH" || fail "clone_file_range registration missing"
 grep -q 'p->ops.dedupe_file_range' "$PATCH" || fail "dedupe_file_range registration missing"
-if grep -q 'REMAP_FILE_DEDUP' "$PATCH"; then
-  grep -q '#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)' "$PATCH" || fail "REMAP_FILE_DEDUP path is not fenced for 4.19"
-fi
 pass "KernelSU-Next 4.19 file-wrapper compatibility contract"

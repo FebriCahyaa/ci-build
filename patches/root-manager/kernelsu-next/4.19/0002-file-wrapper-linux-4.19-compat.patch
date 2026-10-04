@@ -1,6 +1,7 @@
+diff --git a/kernel/infra/file_wrapper.c b/kernel/infra/file_wrapper.c
 --- a/kernel/infra/file_wrapper.c
 +++ b/kernel/infra/file_wrapper.c
-@@ -6,6 +6,7 @@
+@@ -91,6 +91,7 @@
      return orig->f_op->write_iter(iocb, iovi);
  }
  
@@ -8,33 +9,27 @@
  #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
  static int ksu_wrapper_iopoll(struct kiocb *kiocb, struct io_comp_batch *icb,
                                unsigned int v)
-@@ -24,6 +25,7 @@
+@@ -109,6 +110,7 @@
      return orig->f_op->iopoll(kiocb, spin);
  }
  #endif
 +#endif
  
- static long ksu_wrapper_fallocate(struct file *fp, int mode, loff_t offset,
-                                   loff_t len)
-@@ -36,6 +38,7 @@
-     return -EINVAL;
+ #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
+ static int ksu_wrapper_iterate(struct file *fp, struct dir_context *dc)
+@@ -326,6 +328,7 @@
+                                        flags);
  }
  
 +#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
  // no REMAP_FILE_DEDUP: use file_in
  // https://cs.android.com/android/kernel/superproject/+/common-android-mainline:common/fs/read_write.c;l=1598-1599;drc=398da7defe218d3e51b0f3bdff75147e28125b60
  // https://cs.android.com/android/kernel/superproject/+/common-android-mainline:common/fs/remap_range.c;l=403-404;drc=398da7defe218d3e51b0f3bdff75147e28125b60
-@@ -59,6 +62,35 @@
+@@ -348,6 +351,30 @@
+                                             len, remap_flags);
      }
  }
- 
 +#else
-+/*
-+ * Linux 4.19 exposes the older split clone_file_range()/dedupe_file_range()
-+ * callbacks instead of remap_file_range(). Keep the wrapper functional for
-+ * legacy kernels without importing newer VFS fields into struct
-+ * file_operations.
-+ */
 +static int ksu_wrapper_clone_file_range(struct file *file_in, loff_t pos_in,
 +                                        struct file *file_out, loff_t pos_out,
 +                                        u64 len)
@@ -57,19 +52,21 @@
 +    return orig->f_op->dedupe_file_range(orig, pos_in, file_out, pos_out, len);
 +}
 +#endif
++
  static int ksu_wrapper_fadvise(struct file *fp, loff_t off1, loff_t off2,
                                 int flags)
  {
-@@ -85,14 +117,23 @@
+@@ -390,7 +416,9 @@
      p->ops.write = fp->f_op->write ? ksu_wrapper_write : NULL;
      p->ops.read_iter = fp->f_op->read_iter ? ksu_wrapper_read_iter : NULL;
      p->ops.write_iter = fp->f_op->write_iter ? ksu_wrapper_write_iter : NULL;
 +#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
      p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;
 +#endif
-     p->ops.iterate_shared =
-         fp->f_op->iterate_shared ? ksu_wrapper_iterate_shared : NULL;
-     p->ops.poll = fp->f_op->poll ? ksu_wrapper_poll : NULL;
+ #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
+     p->ops.iterate = fp->f_op->iterate ? ksu_wrapper_iterate : NULL;
+ #endif
+@@ -427,8 +455,15 @@
      p->ops.show_fdinfo = fp->f_op->show_fdinfo ? ksu_wrapper_show_fdinfo : NULL;
      p->ops.copy_file_range =
          fp->f_op->copy_file_range ? ksu_wrapper_copy_file_range : NULL;
@@ -83,4 +80,5 @@
 +        fp->f_op->dedupe_file_range ? ksu_wrapper_dedupe_file_range : NULL;
 +#endif
      p->ops.fadvise = fp->f_op->fadvise ? ksu_wrapper_fadvise : NULL;
- }
+ 
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
