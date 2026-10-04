@@ -116,12 +116,12 @@ jobs:
           for profile in lavender-4.4 lavender-4.19 garnet-gki; do
             tmp="$(mktemp -d)"
             mkdir -p "$tmp/profiles" "$tmp/images/vanilla" "$tmp/tools" "$tmp/out"
-            cp -a anykernel/anykernel.sh anykernel/banner anykernel/ci-patch.sh anykernel/version.conf "$tmp/"
+            cp -a anykernel/anykernel.sh anykernel/banner anykernel/build.sh anykernel/ci-patch.sh anykernel/version.conf "$tmp/"
             cp -a "anykernel/profiles/$profile.conf" "$tmp/profiles/"
             cp -a anykernel/tools/ak3-core.sh "$tmp/tools/"
             image="$(sed -n 's/^KERNEL_IMAGES="\(.*\)"/\1/p' "$tmp/profiles/$profile.conf" | awk '{print $1}')"
             printf 'fake kernel payload' > "$tmp/images/vanilla/$image"
-            (cd "$tmp" && OUT="$tmp/out" ./build.sh "$profile" vanilla)
+            (cd "$tmp" && OUT="$tmp/out" bash ./build.sh "$profile" vanilla)
             zipfile="$(find "$tmp/out" -type f -name '*.zip' -print -quit)"
             test -n "$zipfile"
             unzip -tq "$zipfile" >/dev/null
