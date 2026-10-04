@@ -158,8 +158,17 @@ fi
 # upstream submodule. Apply them only to the isolated provider checkout so the
 # parent submodule remains a clean gitlink.
 PROVIDER_PATCH_DIR="$CI_ROOT/patches/root-manager/$PROVIDER/$KERNEL_MM"
-if [[ -f "$PROVIDER_PATCH_DIR/series.conf" ]]; then
+# New provider-series.conf cleanly separates provider-tree patches from
+# host-kernel patches. Keep series.conf as a backwards-compatible fallback
+# for existing provider profiles that have not been migrated yet.
+if [[ -f "$PROVIDER_PATCH_DIR/provider-series.conf" ]]; then
+  PROVIDER_PATCH_SERIES="$PROVIDER_PATCH_DIR/provider-series.conf"
+elif [[ -f "$PROVIDER_PATCH_DIR/series.conf" ]]; then
   PROVIDER_PATCH_SERIES="$PROVIDER_PATCH_DIR/series.conf"
+else
+  PROVIDER_PATCH_SERIES=""
+fi
+if [[ -n "$PROVIDER_PATCH_SERIES" ]]; then
   PROVIDER_PATCHES_APPLIED=""
   while IFS= read -r patch_name || [[ -n "$patch_name" ]]; do
     [[ -z "$patch_name" || "$patch_name" == \#* ]] && continue

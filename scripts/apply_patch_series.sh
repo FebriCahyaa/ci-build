@@ -159,12 +159,15 @@ if [[ "$PHASE" == "source" ]]; then
     # patches in a separate host-series registry so they never touch the
     # provider gitlink/submodule.
     if [[ "$ROOT_MANAGER" == "kernelsu-next" ]]; then
+      # KernelSU-Next provider patches are applied inside the isolated
+      # provider checkout by root_manager_apply.sh. Only host-series.conf
+      # is allowed to touch the host kernel tree.
       host_series="$PATCH_ROOT/root-manager/kernelsu-next/$KERNEL_MM/host-series.conf"
       [[ -f "$host_series" ]] && series_apply "$host_series"
+    else
+      root_series="$(root_file "$ROOT_MANAGER" series.conf)"
+      [[ -n "$root_series" ]] && series_apply "$root_series"
     fi
-
-    root_series="$(root_file "$ROOT_MANAGER" series.conf)"
-    [[ -n "$root_series" ]] && series_apply "$root_series"
   fi
 
   case "$UPSTREAM_PROFILE" in
