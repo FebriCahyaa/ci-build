@@ -7,7 +7,7 @@
 #   ./ci-patch.sh <variant> [DIR]                 # legacy form, profile from $PROFILE_ID
 #
 #   profile : lavender-4.4 | lavender-4.19 | garnet-gki   (see profiles/)
-#   variant : vanilla | kernelsu | kernelsu-next | resukisu (aliases: ksu, ksun)
+#   variant : vanilla | kernelsu | kernelsu-next | resukisu | sukisu-ultra (aliases: ksu, ksun)
 #
 # Optional environment (empty -> auto-detected from the kernel image / fallback):
 #   KERNEL_NAME KERNEL_CODENAME KERNEL_BUILD BUILD_LABEL KERNEL_RELEASE SCHEDULER
@@ -37,7 +37,8 @@ case "${VARIANT,,}" in
   ksu|kernelsu)            ROOT="KernelSU";      MODE="KernelSU integrated" ;;
   ksun|kernelsu-next|next) ROOT="KernelSU-Next"; MODE="KernelSU-Next integrated" ;;
   resukisu)                ROOT="ReSukiSU";      MODE="ReSukiSU integrated" ;;
-  *) echo "[ci-patch] unknown variant '$VARIANT' (vanilla|kernelsu|kernelsu-next|resukisu)" >&2; exit 1 ;;
+  sukisu-ultra|sukisu_ultra|sukisuultra) ROOT="SukiSU Ultra"; MODE="SukiSU Ultra integrated" ;;
+  *) echo "[ci-patch] unknown variant '$VARIANT' (vanilla|kernelsu|kernelsu-next|resukisu|sukisu-ultra)" >&2; exit 1 ;;
 esac
 
 PROFILE_FILE="$DIR/profiles/$PROFILE.conf"
