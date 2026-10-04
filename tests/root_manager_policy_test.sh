@@ -4,8 +4,8 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 fail=0
 check(){ grep -qE "$2" "$1" && echo "PASS: $3" || { echo "FAIL: $3" >&2; fail=1; }; }
 check "$ROOT/scripts/root_manager_apply.sh" 'v0\.9\.5' 'official KernelSU 4.x pins v0.9.5'
-check "$ROOT/scripts/root_manager_apply.sh" 'v1\.1\.1' 'KernelSU-Next legacy line is pinned'
-check "$ROOT/scripts/root_manager_apply.sh" 'v3\.4\.0' 'KernelSU-Next GKI line is pinned'
+check "$ROOT/scripts/root_manager_apply.sh" 'v1\.1\.1' 'KernelSU-Next 4.4 compatibility line is pinned'
+check "$ROOT/scripts/root_manager_apply.sh" 'v3\.4\.0' 'KernelSU-Next 4.19/GKI line is pinned'
 check "$ROOT/scripts/root_manager_apply.sh" 'v4\.2\.0-rc3' 'ReSukiSU deterministic default is pinned'
 check "$ROOT/scripts/root_manager_apply.sh" 'SukiSU-Ultra/SukiSU-Ultra' 'SukiSU Ultra upstream is wired'
 check "$ROOT/scripts/root_manager_apply.sh" 'PROVIDER_PATCH_DIR' 'provider-specific patch registry is wired'

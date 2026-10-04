@@ -61,12 +61,12 @@ if [[ "${VERIFY_REMOTE_PATCHES:-false}" == "true" ]]; then
     git -C "$tmp/kernel" apply --check --whitespace=nowarn "$patch"
     echo "PASS: remote apply check $patch_name"
   done < <(sed '/^[[:space:]]*#/d;/^[[:space:]]*$/d' "$SERIES")
-  git clone --quiet --depth=1 --branch v1.1.1 --filter=blob:none \
+  git clone --quiet --depth=1 --branch v3.4.0 --filter=blob:none \
     https://github.com/KernelSU-Next/KernelSU-Next.git "$tmp/ksu-next"
   grep -qE 'config KPROBES' "$tmp/kernel/arch/Kconfig" || { echo 'FAIL: target KPROBES Kconfig missing' >&2; fail=1; }
   grep -qE 'depends on MODULES' "$tmp/kernel/arch/Kconfig" || { echo 'FAIL: target KPROBES MODULES dependency missing' >&2; fail=1; }
   grep -qE 'depends on KPROBES' "$tmp/ksu-next/kernel/Kconfig" || { echo 'FAIL: KSU-Next legacy dependency on KPROBES missing' >&2; fail=1; }
-  echo 'PASS: remote KSU-Next 4.19 Kconfig dependency contract'
+  echo 'PASS: remote KSU-Next v3.4.0 4.19 Kconfig dependency contract'
 fi
 
 exit "$fail"
