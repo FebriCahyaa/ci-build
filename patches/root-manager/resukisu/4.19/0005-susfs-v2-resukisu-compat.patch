@@ -34,7 +34,7 @@ diff --git a/include/linux/susfs_def.h b/include/linux/susfs_def.h
 +#define TIF_PROC_UMOUNTED_FOR_ZYGOTE_NEXT 35
  
  #define AS_FLAGS_SUS_PATH 33
-@@ -84,4 +91,11 @@
+@@ -84,5 +91,12 @@
  static inline void susfs_set_current_proc_umounted(void) {
  	set_ti_thread_flag(&current->thread_info, TIF_PROC_UMOUNTED);
  }
@@ -46,7 +46,7 @@ diff --git a/include/linux/susfs_def.h b/include/linux/susfs_def.h
 +void susfs_set_current_proc_umounted_for_zygote_next(void);
 +
  #endif // #ifndef KSU_SUSFS_DEF_H
-
+ 
 diff --git a/fs/susfs.c b/fs/susfs.c
 --- a/fs/susfs.c
 +++ b/fs/susfs.c

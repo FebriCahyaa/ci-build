@@ -227,7 +227,7 @@ diff --git a/kernel/kpm/super_access.c b/kernel/kpm/super_access.c
 index b49dcb3191288347b0eae49b2a82872ed5922a91..15eed187e5679fff1d588c12d38c2c47b0f04bbc 100644
 --- a/kernel/kpm/super_access.c
 +++ b/kernel/kpm/super_access.c
-@@ -20,7 +20,7 @@
+@@ -20,8 +20,8 @@
  #include <asm/cacheflush.h>
  #include <linux/module.h>
  #include <linux/vmalloc.h>
@@ -236,7 +236,7 @@ index b49dcb3191288347b0eae49b2a82872ed5922a91..15eed187e5679fff1d588c12d38c2c47
  #include <linux/version.h>
  #include <linux/export.h>
  #include <linux/slab.h>
-
+ 
 diff --git a/kernel/kpm/compat_set_memory.h b/kernel/kpm/compat_set_memory.h
 new file mode 100644
 index 0000000000000000000000000000000000000000..bef6fcf7717a229f7d416b08e9d27bcbc0fd49c2

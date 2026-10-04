@@ -7,7 +7,7 @@ signature.
 diff --git a/fs/open.c b/fs/open.c
 --- a/fs/open.c
 +++ b/fs/open.c
-@@ -446,6 +446,12 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
+@@ -446,7 +446,16 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
  	return res;
  }
  

@@ -6,7 +6,7 @@ Hook the 4.19 reboot syscall using ReSukiSU's supported manual hook API.
 diff --git a/kernel/reboot.c b/kernel/reboot.c
 --- a/kernel/reboot.c
 +++ b/kernel/reboot.c
-@@ -300,6 +300,10 @@ DEFINE_MUTEX(system_transition_mutex);
+@@ -300,5 +300,9 @@ DEFINE_MUTEX(system_transition_mutex);
   * reboot doesn't sync: do that yourself before calling this.
   */
 +#ifdef CONFIG_KSU_MANUAL_HOOK
