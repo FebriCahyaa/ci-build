@@ -48,8 +48,11 @@ if [[ "${VERIFY_REMOTE_PATCHES:-false}" == "true" ]]; then
   trap 'rm -rf "$tmp"' EXIT
   git clone --quiet --depth=1 --filter=blob:none --sparse --branch main \
     https://github.com/pix106/android_kernel_xiaomi_sdm660_southwest-ng.git "$tmp/kernel"
-  git -C "$tmp/kernel" sparse-checkout set \
-    fs/exec.c fs/open.c fs/stat.c kernel/reboot.c security/selinux/selinuxfs.c arch/Kconfig
+  # The sparse checkout is file-level, so cone mode cannot be used here.
+  # Keep paths anchored to the repository root to avoid non-cone glob matches.
+  git -C "$tmp/kernel" sparse-checkout set --no-cone \
+    /fs/exec.c /fs/open.c /fs/stat.c /kernel/reboot.c \
+    /security/selinux/selinuxfs.c /arch/Kconfig
   for patch in "$RDIR"/*.patch; do
     git -C "$tmp/kernel" apply --check --whitespace=nowarn "$patch"
     echo "PASS: remote apply check $(basename "$patch")"
