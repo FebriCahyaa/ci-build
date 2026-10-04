@@ -141,16 +141,74 @@ env:
   GH_REPOSITORY: ${{ github.repository }}
 
 jobs:
+  prepare:
+    name: Prepare build matrix
+    runs-on: ubuntu-latest
+    outputs:
+      variants: ${{ steps.resolve.outputs.variants }}
+    steps:
+      - name: Resolve variants
+        id: resolve
+        env:
+          INPUT_VARIANTS: ${{ inputs.variants }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          case "${INPUT_VARIANTS}" in
+            all|"")
+              variants='["vanilla","kernelsu-next","resukisu"]'
+              ;;
+            vanilla|kernelsu-next|resukisu)
+              variants="[\"${INPUT_VARIANTS}\"]"
+              ;;
+            *)
+              IFS=',' read -r -a requested <<< "${INPUT_VARIANTS}"
+              selected=()
+
+              for item in "${requested[@]}"; do
+                item="$(printf '%s' "${item}" | xargs)"
+                [[ -n "${item}" ]] || continue
+
+                case "${item}" in
+                  vanilla|kernelsu-next|resukisu)
+                    selected+=("${item}")
+                    ;;
+                  *)
+                    echo "::error::Unsupported variant: ${item}"
+                    exit 1
+                    ;;
+                esac
+              done
+
+              [[ "${#selected[@]}" -gt 0 ]] || {
+                echo "::error::No valid variants selected"
+                exit 1
+              }
+
+              # Preserve input order while removing duplicate variants.
+              variants="$({
+                printf '%s\n' "${selected[@]}"
+              } | awk '!seen[$0]++' | python3 -c '
+          import json, sys
+          print(json.dumps(sys.stdin.read().splitlines(), separators=(",", ":")))
+          ')"
+              ;;
+          esac
+
+          echo "variants=${variants}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved matrix: ${variants}"
+
   build:
     name: ${{ inputs.build_profile }} / ${{ matrix.variant }}
-    if: inputs.variants == 'all' || contains(inputs.variants, matrix.variant)
+    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 150
     strategy:
       fail-fast: false
       max-parallel: 3
       matrix:
-        variant: [vanilla, kernelsu-next, resukisu]
+        variant: ${{ fromJSON(needs.prepare.outputs.variants) }}
     steps:
       - name: Checkout CI repository
         uses: actions/checkout@v4
