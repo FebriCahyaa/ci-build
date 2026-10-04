@@ -162,8 +162,8 @@ jobs:
               "CLANG_URL", "GCC_URL", "EXTRA_MAKE_ARGS",
               "PATCH_PROFILE", "UPSTREAM_PROFILE", "LTO_PLUS", "KSU_REF",
               "PACKAGE_ANYKERNEL", "ROM_FAMILY", "ANYKERNEL_PROFILE",
-              "ANYKERNEL3_REF", "KERNEL_NAME", "APT_PACKAGES",
-              "PUBLISH_RELEASE",
+              "ANYKERNEL3_REF", "BUILD_CUSTOMIZATION",
+              "PUBLISH_RELEASE", "TG_TOPIC_ID",
           ]
           for name in names:
               m = re.search(
@@ -200,9 +200,10 @@ jobs:
           ROM_FAMILY: ${{ inputs.rom_family }}
           ANYKERNEL_PROFILE: ${{ inputs.anykernel_profile }}
           ANYKERNEL3_REF: ${{ inputs.anykernel3_ref }}
-          KERNEL_NAME: ${{ inputs.kernel_name }}
-          APT_PACKAGES: ${{ inputs.apt_packages }}
+          KERNEL_NAME_INPUT: ${{ inputs.kernel_name }}
+          APT_PACKAGES_INPUT: ${{ inputs.apt_packages }}
           PUBLISH_RELEASE: ${{ inputs.publish_release }}
+          TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -217,24 +218,29 @@ jobs:
               "CLANG_URL", "GCC_URL", "EXTRA_MAKE_ARGS",
               "PATCH_PROFILE", "UPSTREAM_PROFILE", "LTO_PLUS", "KSU_REF",
               "PACKAGE_ANYKERNEL", "ROM_FAMILY", "ANYKERNEL_PROFILE",
-              "ANYKERNEL3_REF", "KERNEL_NAME", "APT_PACKAGES",
-              "PUBLISH_RELEASE",
+              "ANYKERNEL3_REF", "BUILD_CUSTOMIZATION",
+              "PUBLISH_RELEASE", "TG_TOPIC_ID",
           ]
 
+          values = {name: os.environ.get(name, "") for name in names}
+          values["BUILD_CUSTOMIZATION"] = json.dumps({
+              "kernel_name": os.environ.get("KERNEL_NAME_INPUT", ""),
+              "apt_packages": os.environ.get("APT_PACKAGES_INPUT", ""),
+          }, separators=(",", ":"), ensure_ascii=False)
           lines = ["pipeline:", "  variables:"]
           for name in names:
               lines.extend([
                   f"    - name: {name}",
                   "      type: String",
-                  "      value: " + json.dumps(os.environ.get(name, ""), ensure_ascii=False),
+                  "      value: " + json.dumps(values[name], ensure_ascii=False),
               ])
 
           runtime_yaml = "\n".join(lines) + "\n"
           with open("harness-inputs.yaml", "w", encoding="utf-8") as fh:
               fh.write(runtime_yaml)
 
-          print("=== Harness Runtime Input YAML ===")
-          print(runtime_yaml)
+          print("=== Harness Runtime Input Names ===")
+          print("\n".join(names))
           print(f"Runtime input count: {len(names)}")
           if len(names) > 25:
               raise SystemExit("Harness runtime input count exceeds 25")
@@ -321,9 +327,12 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
+          TG_REQUIRE_TOPIC: "true"
           GITHUB_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ steps.trigger.outputs.release_tag }}
+          BUILD_PROFILE: ${{ inputs.build_profile }}
+          TG_SKIP_ASSET_UPLOAD: "true"
           HARNESS_MONITOR_FILE: harness-monitor.json
         run: bash scripts/send_release_to_telegram.sh
 

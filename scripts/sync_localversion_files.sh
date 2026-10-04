@@ -10,8 +10,9 @@ usage() {
 Usage:
   ./scripts/sync_localversion_files.sh /path/to/kernel/source
 
-Copies the CI repository's source-style localversion files into the kernel
-source tree so Kbuild's scripts/setlocalversion sees them during kernelrelease.
+Validates the CI localversion inputs and clears source localversion files.
+The canonical combined project/build suffix is written into CONFIG_LOCALVERSION
+by set_kernel_name.sh so the project name stays before the build suffix.
 USAGE
 }
 
@@ -21,9 +22,14 @@ USAGE
 validate_suffix_file() {
   local file="$1"
   local label="$2"
+  local allow_empty="${3:-false}"
   [[ -f "$file" ]] || { echo "ERROR: missing $label file: $file" >&2; exit 1; }
 
   mapfile -t lines < <(sed -e 's/\r$//' -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$file")
+  if ((${#lines[@]} == 0)) && [[ "$allow_empty" == true ]]; then
+    printf '\n'
+    return 0
+  fi
   if ((${#lines[@]} != 1)); then
     echo "ERROR: $label must contain exactly one non-empty value: $file" >&2
     exit 1
@@ -41,10 +47,12 @@ validate_suffix_file() {
   printf '%s\n' "$value"
 }
 
-CIP="$(validate_suffix_file "$REPO_ROOT/localversion-cip" localversion-cip)"
+CIP="$(validate_suffix_file "$REPO_ROOT/localversion-cip" localversion-cip true)"
 ST="$(validate_suffix_file "$REPO_ROOT/localversion-st" localversion-st)"
 
-install -m 0644 "$REPO_ROOT/localversion-cip" "$SRC_ROOT/localversion-cip"
-install -m 0644 "$REPO_ROOT/localversion-st" "$SRC_ROOT/localversion-st"
+# The complete suffix is already stored in CONFIG_LOCALVERSION by set_kernel_name.sh.
+# Clear both source files because Linux 4.4 appends them before CONFIG_LOCALVERSION.
+: > "$SRC_ROOT/localversion-cip"
+: > "$SRC_ROOT/localversion-st"
 
-printf '[localversion] synced: %s + %s -> %s\n' "$CIP" "$ST" "$SRC_ROOT"
+printf '[localversion] source localversion files cleared; suffix is controlled by .config -> %s\n' "$SRC_ROOT"

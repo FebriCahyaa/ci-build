@@ -29,6 +29,8 @@ elif [[ -z "${PROFILE_ID:-}" ]]; then
     eval "$(BUILD_PROFILE=auto DEVICE="$DEVICE" KERNEL_FAMILY="${KERNEL_FAMILY:-}" "$SCRIPT_DIR/resolve_build_profile.sh")"
   fi
 fi
+BUILD_PROFILE_LABEL="${PROFILE_ID:-${BUILD_PROFILE:-unknown}}"
+BUILD_PROFILE="$BUILD_PROFILE_LABEL"
 
 KERNEL_REPO="${KERNEL_REPO:-${PROFILE_KERNEL_REPO:-}}"
 : "${KERNEL_REPO:?KERNEL_REPO is required}"
@@ -136,10 +138,10 @@ progress_update() {
   local pct="$1" phase="$2" detail="$3" state="${4:-pending}"
   [[ -n "${TG_BOT_TOKEN:-}" && -n "${TG_CHAT_ID:-}" && -n "${TG_MESSAGE_ID:-}" ]] || \
     { [[ "${CI_GITHUB_STATUS_ENABLED:-false}" == "true" && -n "$GH_TOKEN" && -n "$GH_REPOSITORY" && -n "$CI_BUILD_SHA" ]] || return 0; }
-  TG_BOT_TOKEN="$TG_BOT_TOKEN" TG_CHAT_ID="$TG_CHAT_ID" TG_TOPIC_ID="$TG_TOPIC_ID" TG_MESSAGE_ID="$TG_MESSAGE_ID" \
+  TG_BOT_TOKEN="$TG_BOT_TOKEN" TG_CHAT_ID="$TG_CHAT_ID" TG_TOPIC_ID="$TG_TOPIC_ID" TG_REQUIRE_TOPIC="${TG_REQUIRE_TOPIC:-false}" TG_MESSAGE_ID="$TG_MESSAGE_ID" \
   TG_START_TIME="$START" GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" CI_BUILD_SHA="$CI_BUILD_SHA" \
   CI_GITHUB_STATUS_ENABLED="${CI_GITHUB_STATUS_ENABLED:-false}" HARNESS_EXECUTION_ID="$HARNESS_EXECUTION_ID" \
-  RUN_URL="$RUN_URL" WORK_DIR="$WORK" BUILD_LOG="$BUILD_LOG" DEVICE="$DEVICE" ROOT_VARIANT="$ROOT_VARIANT" \
+  RUN_URL="$RUN_URL" WORK_DIR="$WORK" BUILD_LOG="$BUILD_LOG" BUILD_PROFILE="$BUILD_PROFILE_LABEL" DEVICE="$DEVICE" ROOT_VARIANT="$ROOT_VARIANT" \
     bash "$PROGRESS_SCRIPT" "$pct" "$state" "$phase${VARIANT_TAG:+ [$VARIANT_TAG]}" "$detail" || true
 }
 VARIANT_TAG="${VARIANT_PROGRESS_TAG:-}"
@@ -221,15 +223,16 @@ fail() {
   local diag
   diag="$(grep -nEi '(fatal error:|error:|undefined reference|no rule to make target|recipe for target.*failed|killed|out of memory|oom|cannot find|not found|permission denied|make(\[[0-9]+\])?: \\*\*\*)' "$WORK/failure-summary.txt" 2>/dev/null | tail -n 8 | sed -E 's/^[0-9]+://g' | tr '\n' ' ' | cut -c1-900 || true)"
   [[ -n "$diag" ]] || diag="${reason}"
-  tg_edit "${MID:-}" "❌ <b>Kernel build gagal</b>
+  tg_edit "${MID:-}" "❌ <b>Zairenkai Build gagal</b>
+🧭 Target: <code>${BUILD_PROFILE:-unknown}</code>
 📱 <code>$DEVICE</code> | 🔐 <code>$(variant_label "$ROOT_VARIANT")</code>
 🧩 Tahap: <code>$reason</code>
 🚨 <code>$(printf '%s' "$diag" | python3 -c 'import html,sys; print(html.escape(sys.stdin.read()))')</code>
 ⏱ $(fmt_dur "$duration")
-🔗 <a href=\"$RUN_URL\">CI log</a>"
-  tg_file "$WORK/failure-summary.txt" "🚨 Failure diagnostics — $DEVICE $(variant_label "$ROOT_VARIANT")"
+🔗 <a href=\"$RUN_URL\">CI log</a>" || true
+  tg_file "$WORK/failure-summary.txt" "🚨 Failure diagnostics — ${BUILD_PROFILE_LABEL} — $DEVICE $(variant_label "$ROOT_VARIANT")" || true
   if [[ -f "$WORK/failure-build.log.gz" ]]; then
-    tg_file "$WORK/failure-build.log.gz" "📦 Full build log (gzip) — $DEVICE $(variant_label "$ROOT_VARIANT")"
+    tg_file "$WORK/failure-build.log.gz" "📦 Full build log (gzip) — ${BUILD_PROFILE_LABEL} — $DEVICE $(variant_label "$ROOT_VARIANT")" || true
   fi
   exit 1
 }
@@ -436,7 +439,9 @@ read -r -a EXTRA_ARGS <<< "$EXTRA_MAKE_ARGS"
 MAKE_CMD+=("${EXTRA_ARGS[@]}")
 
 VARIANT_LABEL="$(variant_label "$ROOT_VARIANT")"
-MID="$(tg_msg "🚀 <b>Universal Kernel Build</b>
+PROJECT_MAINTAINER="${MAINTAINER:-Febrian Rahmad Cahya}"
+MID="$(tg_msg "🚀 <b>Zairenkai Kernel Build</b>
+🧭 Target: <code>$BUILD_PROFILE_LABEL</code>
 📱 Device: <code>$DEVICE</code> | 🔐 <code>$VARIANT_LABEL</code>
 🐧 Kernel: <code>$DETECTED_KERNEL_FULL_VERSION</code> (<code>$DETECTED_ARCH</code>)
 🌿 Branch: <code>$KERNEL_BRANCH</code>
@@ -444,7 +449,7 @@ MID="$(tg_msg "🚀 <b>Universal Kernel Build</b>
 🧩 Fragment: <code>${DETECTED_FRAGMENT:-none}</code>
 🛠 Toolchain: <code>$RESOLVED_TOOLCHAIN $RESOLVED_TOOLCHAIN_VERSION</code>
 🧵 Jobs: <code>$JOBS</code>
-🔗 <a href=\"$RUN_URL\">CI log</a>")"
+🔗 <a href=\"$RUN_URL\">CI log</a>")" || MID=""
 
 for kv in \
   "device=$DEVICE" "arch=$DETECTED_ARCH" "kernel_version=$KMM" "kernel_full_version=$DETECTED_KERNEL_FULL_VERSION" \
@@ -456,7 +461,7 @@ for kv in \
   "llvm=$LLVM_VALUE" "llvm_ias=$LLVM_IAS_VALUE" "clang_triple=$CLANG_TRIPLE" "cross_compile=$CROSS_DEFAULT" \
   "cross_compile_arm32=$CROSS_COMPILE_ARM32" "ccache=${CCACHE_PREFIX:+true}" \
   "scheduler_profile=$SCHEDULER_PROFILE" "patch_profile=$PATCH_PROFILE" "upstream_profile=$UPSTREAM_PROFILE" \
-  "lto_plus=$LTO_PLUS" "kernel_name=$KERNEL_NAME" "build_user=$KBUILD_BUILD_USER" "build_host=$KBUILD_BUILD_HOST" \
+  "lto_plus=$LTO_PLUS" "kernel_name=$KERNEL_NAME" "build_user=$KBUILD_BUILD_USER" "build_host=$KBUILD_BUILD_HOST" "maintainer=$PROJECT_MAINTAINER" \
   "root_variant=$ROOT_VARIANT" "ksu_preintegrated=$KSU_PREINTEGRATED" "ksu_provider=$KSU_PROVIDER" \
   "ksu_repo=${KSU_REPO:-}" "ksu_ref=${KSU_REF:-}" "ksu_version=${KSU_PROVIDER_VERSION:-none}" \
   "ksu_commit=${KSU_PROVIDER_COMMIT:-none}" "ksu_layout=${KSU_LAYOUT_RESOLVED:-none}" "ksu_hook_mode=$KSU_HOOK_MODE" \
@@ -528,19 +533,20 @@ info scheduler "$SCHEDULER_DETECTED"
 ci_phase "compile"
 progress_update 44 "compile" "starting"
 tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
+🧭 Target: <code>${BUILD_PROFILE_LABEL}</code>
 📱 $DEVICE | 🔐 $VARIANT_LABEL | 🏗 $DETECTED_ARCH
 ⚙️ <code>$DETECTED_DEFCONFIG</code>
 🛠 <code>$RESOLVED_TOOLCHAIN $RESOLVED_TOOLCHAIN_VERSION</code>
 📊 Scheduler: <code>$SCHEDULER_DETECTED</code>
-🧵 Jobs: <code>$JOBS</code>"
+🧵 Jobs: <code>$JOBS</code>" || true
 
 # Progress denominator: source-file estimate (never an unrestricted `make -n`).
 COMPILE_TOTAL="$(git -C "$SRC_DIR" ls-files -- '*.c' '*.S' '*.s' 2>/dev/null | wc -l | tr -d ' ')"
 info compile_plan_total "$COMPILE_TOTAL"
 rm -f "$WORK/.stop-compile-telemetry"
-TG_BOT_TOKEN="$TG_BOT_TOKEN" TG_CHAT_ID="$TG_CHAT_ID" TG_TOPIC_ID="$TG_TOPIC_ID" TG_MESSAGE_ID="$MID" \
+TG_BOT_TOKEN="$TG_BOT_TOKEN" TG_CHAT_ID="$TG_CHAT_ID" TG_TOPIC_ID="$TG_TOPIC_ID" TG_REQUIRE_TOPIC="${TG_REQUIRE_TOPIC:-false}" TG_MESSAGE_ID="$MID" \
 TG_START_TIME="$START" GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" CI_BUILD_SHA="$CI_BUILD_SHA" \
-CI_GITHUB_STATUS_ENABLED="${CI_GITHUB_STATUS_ENABLED:-false}" RUN_URL="$RUN_URL" \
+BUILD_PROFILE="$BUILD_PROFILE_LABEL" CI_GITHUB_STATUS_ENABLED="${CI_GITHUB_STATUS_ENABLED:-false}" RUN_URL="$RUN_URL" \
 DEVICE="$DEVICE" ROOT_VARIANT="$ROOT_VARIANT" VARIANT_LABEL="$VARIANT_LABEL" BUILD_LOG="$BUILD_LOG" \
   bash "$SCRIPT_DIR/compile_progress.sh" "$BUILD_LOG" "$COMPILE_TOTAL" "$WORK" "$PROGRESS_SCRIPT" &
 COMPILE_TELEMETRY_PID=$!
@@ -611,6 +617,7 @@ if is_true "$PACKAGE_ANYKERNEL"; then
   WORK_DIR="$WORK" ARTIFACT_DIR="$ARTIFACTS" OUTPUT_DIR="$ARTIFACTS" DEVICE="$DEVICE" KERNEL_VERSION="$KMM" \
   ANYKERNEL_PROFILE="$ANYKERNEL_PROFILE" ROOT_VARIANT="$ROOT_VARIANT" KERNEL_NAME="$KERNEL_NAME" \
   KERNEL_RELEASE="$KERNEL_RELEASE" SCHEDULER="$SCHEDULER_DETECTED" TOOLCHAIN="$RESOLVED_COMPILER_STRING" \
+  MAINTAINER="$PROJECT_MAINTAINER" KBUILD_BUILD_USER="$KBUILD_BUILD_USER" KBUILD_BUILD_HOST="$KBUILD_BUILD_HOST" \
   SOURCE="$(basename "$KERNEL_REPO" .git)" ANYKERNEL3_REPO="$ANYKERNEL3_REPO" ANYKERNEL3_REF="$ANYKERNEL3_REF" \
     bash "$SCRIPT_DIR/build_anykernel.sh" > "$AK_ENV" 2> >(tee -a "$BUILD_LOG" >&2) || fail "AnyKernel3 packaging"
   source "$AK_ENV"
@@ -627,18 +634,19 @@ stage_artifacts "$ARTIFACTS"
 
 DURATION=$(( $(date +%s) - START ))
 progress_update 100 "done" "$VARIANT_LABEL ready" success
-tg_edit "$MID" "✅ <b>Kernel build selesai</b>
+tg_edit "$MID" "✅ <b>Zairenkai build selesai</b>
+🧭 Target: <code>${BUILD_PROFILE_LABEL}</code>
 📱 $DEVICE | 🔐 $VARIANT_LABEL
 🐧 <code>${KERNEL_RELEASE:-$KMM}</code> | 📊 $SCHEDULER_DETECTED
 📦 <code>$(basename "${ANYKERNEL_ZIP:-$ARCHIVE}")</code>
 ⏱ $(fmt_dur "$DURATION")
-🔗 <a href=\"$RUN_URL\">CI log</a>"
+🔗 <a href=\"$RUN_URL\">CI log</a>" || true
 if is_true "${TG_SEND_ARTIFACTS:-false}"; then
   if [[ -n "$ANYKERNEL_ZIP" && -f "$ANYKERNEL_ZIP" ]]; then
-    tg_file "$ANYKERNEL_ZIP" "📦 <code>$(basename "$ANYKERNEL_ZIP")</code>"
-  fi
-  if [[ -f "$ARCHIVE" ]]; then
-    tg_file "$ARCHIVE" "🧩 <code>$(basename "$ARCHIVE")</code>"
+    if ! tg_file "$ANYKERNEL_ZIP" "📦 <b>${BUILD_PROFILE_LABEL}</b> — <code>$(basename "$ANYKERNEL_ZIP")</code>"; then
+      echo "[telegram] ERROR: failed to upload AnyKernel package for ${BUILD_PROFILE_LABEL}" | tee -a "$BUILD_LOG" >&2
+      tg_msg "⚠️ <b>${BUILD_PROFILE_LABEL}</b>: ZIP gagal dikirim ke Telegram. Artifact tetap tersedia di GitHub Actions." || true
+    fi
   fi
 fi
 

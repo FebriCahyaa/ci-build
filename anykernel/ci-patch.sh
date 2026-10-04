@@ -107,7 +107,7 @@ declare -A VALUES=(
   [DEVICE_LABEL]="$DEVICE_LABEL" [ANDROID_LABEL]="$ANDROID_LABEL" [PARTITION_LABEL]="$PARTITION_LABEL"
   [TOOLCHAIN]="$TC" [BUILD_USER]="$B_USER" [BUILD_HOST]="$B_HOST"
   [BUILD_DATE]="${BUILD_DATE:-$(date -u +%Y-%m-%d)}"
-  [MAINTAINER]="${MAINTAINER:-FebriCahyaa}" [SOURCE]="${SOURCE:-unknown}"
+  [MAINTAINER]="${MAINTAINER:-Febrian Rahmad Cahya}" [SOURCE]="${SOURCE:-unknown}"
 )
 
 render() {

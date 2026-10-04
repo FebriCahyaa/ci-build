@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 KERNEL_NAME_FILE="${KERNEL_NAME_FILE:-$REPO_ROOT/kernel-name}"
 KERNEL_LOCALVERSION_FILE="${KERNEL_LOCALVERSION_FILE:-$REPO_ROOT/localversion-cip}"
+KERNEL_BUILD_SUFFIX_FILE="${KERNEL_BUILD_SUFFIX_FILE:-$REPO_ROOT/localversion-st}"
 CONFIG_FILE="${CONFIG_FILE:-}"
 KERNEL_NAME="${KERNEL_NAME:-}"
 
@@ -16,8 +17,8 @@ Usage:
 
 Behavior:
   empty/auto name -> read from kernel-name in the CI repository
-  the resolved name is stored in localversion-cip as a Kbuild suffix
-  CONFIG_LOCALVERSION is cleared to avoid duplicating the source LOCALVERSION
+  the resolved name and localversion-st build suffix are written to CONFIG_LOCALVERSION
+  source localversion files are cleared because Linux appends them before CONFIG_LOCALVERSION
   blank/missing kernel-name -> no-op
   name without leading '-' -> '-'<name>
 EOF
@@ -76,19 +77,36 @@ case "$KERNEL_NAME" in
     ;;
 esac
 
-export KERNEL_NAME KERNEL_LOCALVERSION_FILE
+export KERNEL_NAME KERNEL_LOCALVERSION_FILE KERNEL_BUILD_SUFFIX_FILE
 
-printf '%s\n' "$KERNEL_NAME" > "$KERNEL_LOCALVERSION_FILE"
+# The 4.4 setlocalversion script appends localversion* files before CONFIG_LOCALVERSION.
+# Put the project name and build suffix together in .config to guarantee their order.
+BUILD_SUFFIX=""
+if [[ -f "$KERNEL_BUILD_SUFFIX_FILE" ]]; then
+  mapfile -t _suffix_lines < <(sed -e 's/\r$//' -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$KERNEL_BUILD_SUFFIX_FILE")
+  if ((${#_suffix_lines[@]} > 1)); then
+    echo "ERROR: $KERNEL_BUILD_SUFFIX_FILE must contain exactly one non-empty value" >&2
+    exit 1
+  fi
+  if ((${#_suffix_lines[@]} == 1)); then
+    BUILD_SUFFIX="${_suffix_lines[0]}"
+    [[ "$BUILD_SUFFIX" == -* && ! "$BUILD_SUFFIX" =~ [[:cntrl:]] ]] || {
+      echo "ERROR: invalid build suffix: $BUILD_SUFFIX" >&2
+      exit 1
+    }
+  fi
+fi
+: > "$KERNEL_LOCALVERSION_FILE"
 
-python3 - "$CONFIG_FILE" <<'PY'
+python3 - "$CONFIG_FILE" "$KERNEL_NAME$BUILD_SUFFIX" <<'PY'
 from pathlib import Path
-import os
+import json
 import re
 import sys
 
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
-line = 'CONFIG_LOCALVERSION=""'
+line = 'CONFIG_LOCALVERSION=' + json.dumps(sys.argv[2])
 
 if re.search(r'^CONFIG_LOCALVERSION=', text, flags=re.MULTILINE):
     text = re.sub(r'^CONFIG_LOCALVERSION=.*$', line, text, count=1, flags=re.MULTILINE)
@@ -96,6 +114,6 @@ else:
     text += ("\n" if text and not text.endswith("\n") else "") + line + "\n"
 
 path.write_text(text, encoding="utf-8")
-print(f"[kernel-name] localversion-cip={os.environ['KERNEL_NAME']}")
-print("[kernel-name] CONFIG_LOCALVERSION=\"\" (source-style localversion files remain authoritative)")
+print(f"[kernel-name] CONFIG_LOCALVERSION={line.split('=',1)[1]}")
+print("[kernel-name] source localversion files are cleared to prevent duplicate/out-of-order suffixes")
 PY

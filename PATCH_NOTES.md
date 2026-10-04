@@ -40,3 +40,15 @@ from `Lokitla/NonGKI_Kernel_Build_2nd`, pinned to commit
 upstream inline hook implementation and the dedicated SUSFS v2.3.0 4.4
 config surface. The full SUSFS source patch remains strict and refuses fuzzy
 application on divergent vendor trees.
+
+
+## Telegram delivery and build identity hardening
+
+- Route new build messages and AnyKernel documents through `TG_TOPIC_ID`; main build workflows now require the topic and refuse to fall back to General when it is absent.
+- Include the canonical target profile (`lavender-4.4`, `lavender-4.19`, or `garnet-gki`) in Telegram build status and package captions.
+- Enable immediate AnyKernel ZIP delivery in the Harness pipeline independently of GitHub Release publication; release relay skips duplicate asset uploads.
+- Validate Telegram Bot API response bodies, retry document uploads, report failed delivery, and split large documents into chunks below the Bot API upload limit.
+- Set Kbuild defaults to `FebriCahyaa@Zairenkai`; write `CONFIG_LOCALVERSION="-Zairenkai"` explicitly and clear the duplicate `localversion-cip` suffix.
+- Set the AnyKernel maintainer banner to `Febrian Rahmad Cahya`.
+- Bridge the GitHub `TG_TOPIC_ID` secret into the remote Harness execution without exceeding its 25-variable runtime limit; optional kernel-name and apt-package overrides are bundled in one JSON runtime variable, while the exact CI commit pin is preserved.
+- Keep the target profile visible in the live progress message, not only the initial/final notification.

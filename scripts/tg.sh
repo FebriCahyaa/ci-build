@@ -6,6 +6,7 @@ set +u
 TG_BOT_TOKEN="${TG_BOT_TOKEN:-}"
 TG_CHAT_ID="${TG_CHAT_ID:-}"
 TG_TOPIC_ID="${TG_TOPIC_ID:-}"
+TG_REQUIRE_TOPIC="${TG_REQUIRE_TOPIC:-false}"
 TG_MESSAGE_ID="${TG_MESSAGE_ID:-}"
 TG_START_TIME="${TG_START_TIME:-$(date +%s)}"
 TG_PROGRESS_INTERVAL="${TG_PROGRESS_INTERVAL:-5}"
@@ -22,65 +23,91 @@ else
   TG_ENABLED=false
 fi
 
+tg_api_ok() {
+  python3 -c 'import json,sys
+try:
+ d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True else 1)
+except Exception: sys.exit(1)' <<<"${1:-}"
+}
+
 tg_msg() {
   [[ "$TG_ENABLED" == true ]] || return 0
-  local response="/tmp/tg_last_${TG_CHAT_ID//[^A-Za-z0-9_-]/_}.json"
-  curl -fsS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" -X POST "$API/sendMessage" \
-    -d chat_id="$TG_CHAT_ID" \
-    ${TG_TOPIC_ID:+-d message_thread_id="$TG_TOPIC_ID"} \
-    -d parse_mode=HTML \
-    -d disable_web_page_preview=true \
-    --data-urlencode "text=$1" > "$response" || return 0
-  python3 - "$response" <<'PYTG'
-import json,sys
-try:
-    print(json.load(open(sys.argv[1], encoding='utf-8')).get('result',{}).get('message_id',''))
-except Exception:
-    pass
-PYTG
+  if [[ "$TG_REQUIRE_TOPIC" == true && -z "$TG_TOPIC_ID" ]]; then
+    echo "[telegram] refusing to send: TG_TOPIC_ID is required; will not fall back to General" >&2
+    return 1
+  fi
+  local message="${1:-}" response="" attempt delay=1
+  local args=(-d "chat_id=$TG_CHAT_ID" -d "parse_mode=HTML" -d "disable_web_page_preview=true")
+  [[ -n "$TG_TOPIC_ID" ]] && args+=(-d "message_thread_id=$TG_TOPIC_ID")
+  args+=(--data-urlencode "text=$message")
+  for ((attempt=1; attempt<=TG_MAX_RETRIES; attempt++)); do
+    response="$(curl -sS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" -X POST "$API/sendMessage" "${args[@]}" 2>/dev/null || true)"
+    if tg_api_ok "$response"; then
+      python3 -c 'import json,sys; print(json.load(sys.stdin).get("result",{}).get("message_id",""))' <<<"$response"
+      return 0
+    fi
+    echo "[telegram] sendMessage failed (attempt $attempt/$TG_MAX_RETRIES): $(printf '%s' "$response" | head -c 300)" >&2
+    (( attempt < TG_MAX_RETRIES )) && { sleep "$delay"; delay=$((delay * 2)); }
+  done
+  return 1
 }
 
 tg_edit() {
   [[ "$TG_ENABLED" == true ]] || return 0
-  local message_id="${1:-}"
-  local message="${2:-}"
+  local message_id="${1:-}" message="${2:-}" response="" attempt delay=1
   [[ -n "$message_id" ]] || return 0
-  local delay=1 attempt response
+  local args=(-d "chat_id=$TG_CHAT_ID" -d "message_id=$message_id" -d "parse_mode=HTML" -d "disable_web_page_preview=true")
+  args+=(--data-urlencode "text=$message")
   for ((attempt=1; attempt<=TG_MAX_RETRIES; attempt++)); do
-    response="$(curl -sS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" -X POST "$API/editMessageText" \
-      -d chat_id="$TG_CHAT_ID" \
-      -d message_id="$message_id" \
-      -d parse_mode=HTML \
-      -d disable_web_page_preview=true \
-      --data-urlencode "text=$message" 2>/dev/null || true)"
-    if [[ "$response" == *'"ok":true'* || "$response" == *'message is not modified'* ]]; then
-      return 0
-    fi
-    [[ -n "$response" ]] || {
-      [[ "$attempt" -lt "$TG_MAX_RETRIES" ]] && { sleep "$delay"; delay=$((delay * 2)); continue; }
-      return 1
-    }
-    if [[ "$response" == *'retry after'* || "$response" == *'RetryAfter'* ]]; then
-      sleep "$delay"
-      delay=$((delay * 2))
-    else
-      return 0
-    fi
+    response="$(curl -sS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" -X POST "$API/editMessageText" "${args[@]}" 2>/dev/null || true)"
+    if tg_api_ok "$response" || [[ "$response" == *'message is not modified'* ]]; then return 0; fi
+    echo "[telegram] editMessageText failed (attempt $attempt/$TG_MAX_RETRIES): $(printf '%s' "$response" | head -c 300)" >&2
+    (( attempt < TG_MAX_RETRIES )) && { sleep "$delay"; delay=$((delay * 2)); }
   done
-  return 0
+  return 1
+}
+
+tg_send_document_once() {
+  local file="$1" caption="$2" response="" attempt delay=1
+  if [[ "$TG_REQUIRE_TOPIC" == true && -z "$TG_TOPIC_ID" ]]; then
+    echo "[telegram] refusing document upload: TG_TOPIC_ID is required; will not fall back to General" >&2
+    return 1
+  fi
+  local args=(-F "chat_id=$TG_CHAT_ID")
+  [[ -n "$TG_TOPIC_ID" ]] && args+=(-F "message_thread_id=$TG_TOPIC_ID")
+  args+=(-F "document=@$file" -F "parse_mode=HTML" -F "caption=$caption")
+  for ((attempt=1; attempt<=TG_MAX_RETRIES; attempt++)); do
+    response="$(curl -sS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time 180 -X POST "$API/sendDocument" "${args[@]}" 2>/dev/null || true)"
+    if tg_api_ok "$response"; then return 0; fi
+    echo "[telegram] sendDocument failed (attempt $attempt/$TG_MAX_RETRIES): $(printf '%s' "$response" | head -c 400)" >&2
+    (( attempt < TG_MAX_RETRIES )) && { sleep "$delay"; delay=$((delay * 2)); }
+  done
+  return 1
 }
 
 tg_file() {
   [[ "$TG_ENABLED" == true ]] || return 0
-  local file="${1:-}"
-  local caption="${2:-}"
-  [[ -f "$file" ]] || return 0
-  curl -fsS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" -F chat_id="$TG_CHAT_ID" \
-    ${TG_TOPIC_ID:+-F message_thread_id="$TG_TOPIC_ID"} \
-    -F "document=@${file}" \
-    -F parse_mode=HTML \
-    -F "caption=${caption}" \
-    "$API/sendDocument" > /dev/null 2>&1 || true
+  local file="${1:-}" caption="${2:-}" size max_bytes=47185920 tempdir part count i
+  [[ -f "$file" ]] || { echo "[telegram] file not found: $file" >&2; return 1; }
+  size="$(stat -c%s "$file" 2>/dev/null || wc -c < "$file")"
+  if (( size <= max_bytes )); then
+    tg_send_document_once "$file" "$caption"
+    return $?
+  fi
+  # Keep each chunk below Telegram Bot API's 50 MB document limit.
+  tempdir="$(mktemp -d "${TMPDIR:-/tmp}/tg-parts.XXXXXX")" || return 1
+  split -b 45M -d -a 3 "$file" "$tempdir/part-" || { rm -rf "$tempdir"; return 1; }
+  count="$(find "$tempdir" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+  i=1
+  for part in "$tempdir"/part-*; do
+    if ! tg_send_document_once "$part" "📦 ${caption} — part ${i}/${count}"; then
+      rm -rf "$tempdir"
+      return 1
+    fi
+    i=$((i+1))
+  done
+  rm -rf "$tempdir"
+  return 0
 }
 
 tg_escape_html() {
@@ -175,6 +202,7 @@ tg_progress_update() {
   safe_tail="${safe_tail:0:2500}"
 
   text="${icon} <b>Zairenkai Kernel Build</b>"$'\n'
+  text+="🧭 Target: <code>${BUILD_PROFILE:-unknown}</code>"$'\n'
   text+="📱 <code>${DEVICE:-unknown}</code> | 🔐 <code>${VARIANT_LABEL:-${ROOT_VARIANT:-unknown}}</code>"$'\n'
   text+="📊 <code>${pct}%</code> [<code>${bar}</code>]"$'\n'
   text+="🧩 <b>${safe_phase}</b> — ${safe_detail}"$'\n'

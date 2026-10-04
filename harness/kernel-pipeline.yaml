@@ -71,13 +71,13 @@ pipeline:
     - name: ANYKERNEL3_REF
       type: String
       value: <+input>
-    - name: KERNEL_NAME
-      type: String
-      value: <+input>
-    - name: APT_PACKAGES
+    - name: BUILD_CUSTOMIZATION
       type: String
       value: <+input>
     - name: PUBLISH_RELEASE
+      type: String
+      value: <+input>
+    - name: TG_TOPIC_ID
       type: String
       value: <+input>
 
@@ -108,14 +108,15 @@ pipeline:
                       GH_REPOSITORY: FebriCahyaa/ci-build
                       HARNESS_EXECUTION_ID: <+pipeline.executionId>
                       HARNESS_PIPELINE_ID: Universal_Kernel_Build
+                      CI_BUILD_SHA: <+pipeline.variables.CI_BUILD_SHA>
                       TG_BOT_TOKEN: <+secrets.getValue("tg_bot_token")>
                       TG_CHAT_ID: <+secrets.getValue("tg_chat_id")>
-                      TG_TOPIC_ID: <+secrets.getValue("tg_topic_id")>
-                      TG_SEND_ARTIFACTS: "false"
+                      TG_TOPIC_ID: <+pipeline.variables.TG_TOPIC_ID>
+                      TG_REQUIRE_TOPIC: "true"
+                      TG_SEND_ARTIFACTS: "true"
                       CI_ARTIFACT_STAGE: <+pipeline.variables.PUBLISH_RELEASE>
                       CI_ARTIFACT_RELEASE_TAG: harness-<+pipeline.executionId>
                       CI_GITHUB_STATUS_ENABLED: "false"
-                      CI_BUILD_SHA: <+pipeline.variables.CI_BUILD_SHA>
                       BUILD_PROFILE: <+pipeline.variables.BUILD_PROFILE>
                       ROOT_VARIANTS: <+pipeline.variables.ROOT_VARIANTS>
                       KERNEL_REPO: <+pipeline.variables.KERNEL_REPO_OVERRIDE>
@@ -137,8 +138,7 @@ pipeline:
                       ROM_FAMILY: <+pipeline.variables.ROM_FAMILY>
                       ANYKERNEL_PROFILE: <+pipeline.variables.ANYKERNEL_PROFILE>
                       ANYKERNEL3_REF: <+pipeline.variables.ANYKERNEL3_REF>
-                      KERNEL_NAME: <+pipeline.variables.KERNEL_NAME>
-                      APT_PACKAGES: <+pipeline.variables.APT_PACKAGES>
+                      BUILD_CUSTOMIZATION: <+pipeline.variables.BUILD_CUSTOMIZATION>
                       PUBLISH_RELEASE: <+pipeline.variables.PUBLISH_RELEASE>
                       RUN_URL: <+pipeline.executionUrl>
                     command: |
@@ -158,6 +158,14 @@ pipeline:
                       git -C "$CI_DIR" rev-parse HEAD
 
                       cd "$CI_DIR"
+                      readarray -t customization < <(python3 - "$BUILD_CUSTOMIZATION" <<'PY_CUSTOM'
+                      import json, sys
+                      v=json.loads(sys.argv[1] or "{}")
+                      print(v.get("kernel_name", ""))
+                      print(v.get("apt_packages", ""))
+                      PY_CUSTOM
+                      )
+                      export KERNEL_NAME="${customization[0]:-}" APT_PACKAGES="${customization[1]:-}"
                       chmod +x scripts/*.sh
                       bash scripts/install_deps.sh
 

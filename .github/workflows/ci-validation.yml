@@ -158,6 +158,26 @@ jobs:
           set -euo pipefail
           bash tests/artifact_pipeline_test.sh
 
+      - name: Telegram topic delivery and kernel identity contracts
+        run: |
+          set -euo pipefail
+          bash tests/telegram_delivery_test.sh
+          bash tests/kernel_identity_test.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          workflow = Path(".github/workflows/harness-kernel.yml").read_text()
+          names_block = workflow.split("names = [", 2)[-1].split("]", 1)[0]
+          names = re.findall(r'"([A-Z][A-Z0-9_]+)"', names_block)
+          pipeline_text = Path("harness/kernel-pipeline.yaml").read_text()
+          declared = re.findall(r"^    - name: ([A-Z][A-Z0-9_]+)$", pipeline_text, re.M)
+          assert len(names) == 25, len(names)
+          assert len(declared) == 25, len(declared)
+          assert set(names) == set(declared), (set(names) - set(declared), set(declared) - set(names))
+          assert "TG_TOPIC_ID" in names
+          print("PASS Harness runtime bridge: 25 variables, including TG_TOPIC_ID")
+          PY
+
       - name: Workflow run-block shell syntax
         run: |
           set -euo pipefail
