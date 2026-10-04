@@ -12,6 +12,7 @@ CI_LOG_TAG=release-stage
 ASSET_DIR="${ASSET_DIR:-}"
 [[ -n "$ASSET_DIR" && -d "$ASSET_DIR" ]] || ci_die "ASSET_DIR is required and must exist"
 ASSET_PREFIX="${ASSET_PREFIX:-}"
+CLEAN_PREFIX="${CLEAN_PREFIX:-}"
 
 API="${GITHUB_API:-https://api.github.com}"
 AUTH=(
@@ -115,6 +116,24 @@ print(json.load(open(sys.argv[1], encoding='utf-8')).get('upload_url','').split(
 PY
 )"
 [[ -n "$RELEASE_ID" && -n "$UPLOAD_URL" ]] || ci_die "release metadata is incomplete"
+
+# A final handoff can replace earlier per-variant staging assets. This prevents
+# GitHub Actions/Telegram from receiving duplicate copies after assembly.
+if [[ -n "$CLEAN_PREFIX" ]]; then
+  existing_assets="$(curl -fsSL "${AUTH[@]}" "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100")"
+  while IFS=$'\t' read -r asset_id asset_name; do
+    [[ -n "$asset_id" ]] || continue
+    [[ "$asset_name" == "$CLEAN_PREFIX"* ]] || continue
+    echo "[release-stage] removing superseded asset $asset_name"
+    curl -fsSL --retry 4 --retry-delay 2 -X DELETE "${AUTH[@]}" \
+      "$API/repos/${GH_REPOSITORY}/releases/assets/${asset_id}" >/dev/null
+  done < <(python3 - "$existing_assets" <<'PY_ASSETS'
+import json,sys
+for a in json.loads(sys.argv[1]):
+    print(f"{a.get('id','')}\t{a.get('name','')}")
+PY_ASSETS
+)
+fi
 
 shopt -s nullglob
 assets=("$ASSET_DIR"/*.zip "$ASSET_DIR"/*.tar.gz "$ASSET_DIR"/*.md "$ASSET_DIR"/*.txt "$ASSET_DIR"/*.gz)

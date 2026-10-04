@@ -56,9 +56,9 @@ prepare_seed() {
 
 prepare_seed
 
-# Harness uses one per-execution staging release only when artifact staging is
-# explicitly enabled. This prevents PUBLISH_RELEASE=false runs from creating
-# orphaned draft releases.
+# Harness uses one durable per-execution staging release whenever artifact staging
+# is enabled. This is independent of public release publication so failures and
+# partial matrix results remain recoverable by GitHub Actions.
 if is_true "${CI_ARTIFACT_STAGE:-false}"; then
   if [[ -n "${HARNESS_EXECUTION_ID:-}" && -z "${CI_ARTIFACT_RELEASE_TAG:-}" ]]; then
     export CI_ARTIFACT_RELEASE_TAG="harness-${HARNESS_EXECUTION_ID}"

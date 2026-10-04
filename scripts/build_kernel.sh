@@ -207,6 +207,16 @@ write_failure_reports() {
   if [[ -f "$full_log" ]]; then
     gzip -c "$full_log" > "$compressed" 2>/dev/null || true
   fi
+
+  # Mirror failure diagnostics into ARTIFACTS so Harness persistence and the
+  # GitHub Actions handoff can retrieve failed-build evidence exactly like a
+  # successful package. The build itself remains failed.
+  mkdir -p "$ARTIFACTS"
+  cp -f "$summary" "$ARTIFACTS/failure-summary.txt" 2>/dev/null || true
+  [[ -f "$compressed" ]] && cp -f "$compressed" "$ARTIFACTS/failure-build.log.gz" 2>/dev/null || true
+  printf 'status=FAILED\nprofile=%s\ndevice=%s\nvariant=%s\nreason=%s\n' \
+    "${BUILD_PROFILE:-unknown}" "${DEVICE:-unknown}" "${ROOT_VARIANT:-unknown}" "$reason" \
+    > "$ARTIFACTS/build-result.txt" 2>/dev/null || true
 }
 
 fail() {
@@ -216,10 +226,11 @@ fail() {
   local duration=$(( $(date +%s) - START ))
   echo "[build] FAILED: $reason" | tee -a "$BUILD_LOG" >&2
   write_failure_reports "$reason"
+  # Persist failure artifacts immediately. This must not depend on the final
+  # matrix status or release-publication flag.
+  stage_artifacts "$ARTIFACTS" || true
   echo "===== FAILURE DIAGNOSTICS =====" | tee -a "$BUILD_LOG" >&2
   cat "$WORK/failure-summary.txt" 2>/dev/null | tee -a "$BUILD_LOG" >&2 || true
-  stage_artifacts "$WORK"
-
   local diag
   diag="$(grep -nEi '(fatal error:|error:|undefined reference|no rule to make target|recipe for target.*failed|killed|out of memory|oom|cannot find|not found|permission denied|make(\[[0-9]+\])?: \\*\*\*)' "$WORK/failure-summary.txt" 2>/dev/null | tail -n 8 | sed -E 's/^[0-9]+://g' | tr '\n' ' ' | cut -c1-900 || true)"
   [[ -n "$diag" ]] || diag="${reason}"
@@ -230,9 +241,11 @@ fail() {
 🚨 <code>$(printf '%s' "$diag" | python3 -c 'import html,sys; print(html.escape(sys.stdin.read()))')</code>
 ⏱ $(fmt_dur "$duration")
 🔗 <a href=\"$RUN_URL\">CI log</a>" || true
-  tg_file "$WORK/failure-summary.txt" "🚨 Failure diagnostics — ${BUILD_PROFILE_LABEL} — $DEVICE $(variant_label "$ROOT_VARIANT")" || true
-  if [[ -f "$WORK/failure-build.log.gz" ]]; then
-    tg_file "$WORK/failure-build.log.gz" "📦 Full build log (gzip) — ${BUILD_PROFILE_LABEL} — $DEVICE $(variant_label "$ROOT_VARIANT")" || true
+  if is_true "${TG_SEND_FAILURE_ARTIFACTS:-true}"; then
+    tg_file "$WORK/failure-summary.txt" "🚨 Failure diagnostics — ${BUILD_PROFILE_LABEL} — $DEVICE $(variant_label "$ROOT_VARIANT")" || true
+    if [[ -f "$WORK/failure-build.log.gz" ]]; then
+      tg_file "$WORK/failure-build.log.gz" "📦 Full build log (gzip) — ${BUILD_PROFILE_LABEL} — $DEVICE $(variant_label "$ROOT_VARIANT")" || true
+    fi
   fi
   exit 1
 }

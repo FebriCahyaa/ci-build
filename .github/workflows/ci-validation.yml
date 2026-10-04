@@ -163,6 +163,7 @@ jobs:
           set -euo pipefail
           bash tests/telegram_delivery_test.sh
           bash tests/kernel_identity_test.sh
+          bash tests/harness_artifact_handoff_test.sh
           python3 - <<'PY'
           from pathlib import Path
           import re

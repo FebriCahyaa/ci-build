@@ -308,12 +308,12 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p release/assets
-          bash scripts/assemble_release_assets.sh \
-            SOURCE_ROOT="$PWD/release/artifacts" \
-            ASSET_DIR="$PWD/release/assets" \
-            CHANGELOG_OUT="$PWD/release/CHANGELOG.md" \
-            BUILD_PROFILE="$BUILD_PROFILE" \
-            MATRIX_SUMMARY="$PWD/release/artifacts/matrix-summary.txt"
+          SOURCE_ROOT="$PWD/release/artifacts" \
+          ASSET_DIR="$PWD/release/assets" \
+          CHANGELOG_OUT="$PWD/release/CHANGELOG.md" \
+          BUILD_PROFILE="$BUILD_PROFILE" \
+          MATRIX_SUMMARY="$PWD/release/artifacts/matrix-summary.txt" \
+          bash scripts/assemble_release_assets.sh
           package_count="$(find release/assets -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) | wc -l | tr -d ' ')"
           if (( package_count == 0 )); then
             echo '::error::No successful kernel/AnyKernel package was produced; release cannot be published.'

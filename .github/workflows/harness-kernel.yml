@@ -321,8 +321,35 @@ jobs:
           echo "Requested BUILD_PROFILE=$HARNESS_REQUESTED_BUILD_PROFILE"
           python3 scripts/harness_monitor.py
 
+      - name: Materialize Harness artifacts into GitHub Actions
+        if: always() && steps.trigger.outputs.plan_execution_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.trigger.outputs.release_tag }}
+          OUT_DIR: ${{ runner.temp }}/harness-artifacts
+          MAX_ATTEMPTS: "36"
+          SLEEP_SECONDS: "5"
+        run: |
+          set -euo pipefail
+          bash scripts/fetch_harness_staging_assets.sh
+          printf 'Harness artifact handoff contents:\n'
+          find "$OUT_DIR" -maxdepth 1 -type f -printf '%f\n' | sort
+
+      - name: Upload Harness artifacts to GitHub Actions
+        if: always() && steps.trigger.outputs.plan_execution_id != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-${{ inputs.build_profile }}-${{ steps.trigger.outputs.plan_execution_id }}
+          path: |
+            ${{ runner.temp }}/harness-artifacts/**
+            harness-monitor.json
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14
+
       - name: Relay Harness result to Telegram
-        if: always() && steps.trigger.outputs.plan_execution_id != '' && inputs.publish_release
+        if: always() && steps.trigger.outputs.plan_execution_id != ''
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
@@ -332,7 +359,7 @@ jobs:
           GH_REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ steps.trigger.outputs.release_tag }}
           BUILD_PROFILE: ${{ inputs.build_profile }}
-          TG_SKIP_ASSET_UPLOAD: "true"
+          TG_SKIP_ASSET_UPLOAD: "false"
           HARNESS_MONITOR_FILE: harness-monitor.json
         run: bash scripts/send_release_to_telegram.sh
 

@@ -113,8 +113,11 @@ pipeline:
                       TG_CHAT_ID: <+secrets.getValue("tg_chat_id")>
                       TG_TOPIC_ID: <+pipeline.variables.TG_TOPIC_ID>
                       TG_REQUIRE_TOPIC: "true"
-                      TG_SEND_ARTIFACTS: "true"
-                      CI_ARTIFACT_STAGE: <+pipeline.variables.PUBLISH_RELEASE>
+                      # Harness is the persistence/staging layer. The GitHub Actions relay
+                      # materializes these files into a native Actions artifact and Telegram.
+                      TG_SEND_ARTIFACTS: "false"
+                      TG_SEND_FAILURE_ARTIFACTS: "false"
+                      CI_ARTIFACT_STAGE: "true"
                       CI_ARTIFACT_RELEASE_TAG: harness-<+pipeline.executionId>
                       CI_GITHUB_STATUS_ENABLED: "false"
                       BUILD_PROFILE: <+pipeline.variables.BUILD_PROFILE>
@@ -167,6 +170,69 @@ pipeline:
                       )
                       export KERNEL_NAME="${customization[0]:-}" APT_PACKAGES="${customization[1]:-}"
                       chmod +x scripts/*.sh
+
+                      # The handoff must survive both successful builds and unexpected
+                      # setup/compile failures. Keep all finalization inside the EXIT trap.
+                      HANDOFF_DONE=false
+                      finalize_handoff() {
+                        local rc="$1"
+                        [[ "$HANDOFF_DONE" == true ]] && return 0
+                        HANDOFF_DONE=true
+                        set +e
+
+                        mkdir -p "$PWD/work" "$PWD/release/assets"
+                        printf 'status=%s\nprofile=%s\nexecution_id=%s\nexit_code=%s\n' \
+                          "$([[ "$rc" == 0 ]] && echo SUCCEEDED || echo FAILED)" \
+                          "$BUILD_PROFILE" "$HARNESS_EXECUTION_ID" "$rc" > "$PWD/work/harness-result.txt"
+
+                        if [[ -f scripts/assemble_release_assets.sh ]]; then
+                          SOURCE_ROOT="$PWD/work" \
+                          ASSET_DIR="$PWD/release/assets" \
+                          CHANGELOG_OUT="$PWD/release/CHANGELOG.md" \
+                          BUILD_PROFILE="$BUILD_PROFILE" \
+                          MATRIX_SUMMARY="$PWD/work/matrix-summary.txt" \
+                          bash scripts/assemble_release_assets.sh || \
+                            echo "[harness] release assembly failed; preserving per-variant staged artifacts" >&2
+                        fi
+
+                        # Always create/update the per-execution staging release. This is
+                        # the durable handoff read by GitHub Actions after the Harness run.
+                        if [[ -f scripts/stage_ci_release_assets.sh ]]; then
+                          GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" \
+                            RELEASE_TAG="harness-${HARNESS_EXECUTION_ID}" \
+                            ASSET_DIR="$PWD/release/assets" \
+                            ASSET_PREFIX="handoff" \
+                            CLEAN_PREFIX="staging-" \
+                            bash scripts/stage_ci_release_assets.sh || \
+                            echo "[harness] staging release update failed" >&2
+                        fi
+
+                        if [[ "$rc" == 0 && "${PUBLISH_RELEASE,,}" == "true" ]]; then
+                          package_count="$(find "$PWD/release/assets" -maxdepth 1 -type f \
+                            \( -name '*.tar.gz' -o -name '*.zip' \) | wc -l | tr -d ' ')"
+                          if (( package_count > 0 )); then
+                            GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" \
+                              RELEASE_TAG="harness-${HARNESS_EXECUTION_ID}" \
+                              RELEASE_NAME="Zairenkai ${BUILD_PROFILE}" \
+                              RELEASE_BODY_FILE="$PWD/release/CHANGELOG.md" \
+                              RELEASE_DRAFT=false RELEASE_PRERELEASE=false \
+                              RELEASE_CLEAN_STAGING=true \
+                              ASSET_DIR="$PWD/release/assets" \
+                              bash scripts/publish_ci_release.sh || \
+                              echo "[harness] public release publication failed; staging handoff remains the fallback" >&2
+                          else
+                            echo "[harness] no installable package exists; retaining diagnostic staging release" >&2
+                          fi
+                        fi
+
+                        printf '%s\n' \
+                          "matrix_summary=$PWD/work/matrix-summary.txt" \
+                          "matrix_exit=$rc" \
+                          "handoff_release=harness-${HARNESS_EXECUTION_ID}" \
+                          > "$PWD/harness-output.env"
+                      }
+                      trap 'rc=$?; trap - EXIT; finalize_handoff "$rc"; exit "$rc"' EXIT
+
                       bash scripts/install_deps.sh
 
                       eval "$(BUILD_PROFILE="$BUILD_PROFILE" bash scripts/resolve_build_profile.sh)"
@@ -181,7 +247,7 @@ pipeline:
                       export ARTIFACT_DIR="$PWD/work"
                       export MATRIX_WORK_DIR="$PWD/work"
 
-                      # Keep the matrix result so release finalization still runs when
+                      # Keep the matrix result so final persistence still runs when
                       # one variant fails after another variant has succeeded.
                       matrix_rc=0
                       if bash scripts/build_variants.sh; then
@@ -191,28 +257,4 @@ pipeline:
                         echo "[harness] build matrix returned $matrix_rc; continuing to finalize persisted artifacts"
                       fi
 
-                      if [[ "${PUBLISH_RELEASE,,}" == "true" ]]; then
-                        RELEASE_DIR="$PWD/release"
-                        ASSET_DIR="$RELEASE_DIR/assets"
-                        mkdir -p "$ASSET_DIR"
-                        bash scripts/assemble_release_assets.sh \
-                          SOURCE_ROOT="$PWD/work" \
-                          ASSET_DIR="$ASSET_DIR" \
-                          CHANGELOG_OUT="$RELEASE_DIR/CHANGELOG.md" \
-                          BUILD_PROFILE="$BUILD_PROFILE" \
-                          MATRIX_SUMMARY="$PWD/work/matrix-summary.txt"
-
-                        package_count="$(find "$ASSET_DIR" -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) | wc -l | tr -d ' ')"
-                        if (( package_count > 0 )); then
-                          RELEASE_TAG="harness-${HARNESS_EXECUTION_ID}"
-                          GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" \
-                            RELEASE_TAG="$RELEASE_TAG" RELEASE_NAME="Zairenkai ${BUILD_PROFILE}" \
-                            RELEASE_BODY_FILE="$RELEASE_DIR/CHANGELOG.md" RELEASE_DRAFT=false RELEASE_PRERELEASE=false \
-                            RELEASE_CLEAN_STAGING=true ASSET_DIR="$ASSET_DIR" bash scripts/publish_ci_release.sh
-                        else
-                          echo "[harness] no successful package exists; keeping any staging release as diagnostic-only"
-                        fi
-                      fi
-
-                      printf '%s\n' "matrix_summary=$PWD/work/matrix-summary.txt" "matrix_exit=$matrix_rc" > "$PWD/harness-output.env"
                       exit "$matrix_rc"
