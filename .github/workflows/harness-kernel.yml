@@ -143,13 +143,7 @@ jobs:
       - name: Checkout CI repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
-
-      - name: Initialize and repair root-manager submodules
-        run: |
-          set -euo pipefail
-          bash scripts/bootstrap_root_manager_submodules.sh
-          git submodule status --recursive
+          submodules: false
 
       - name: Harness preflight
         run: |
@@ -208,7 +202,7 @@ jobs:
           UPSTREAM_PROFILE: ${{ inputs.upstream_profile }}
           LTO_PLUS: ${{ inputs.lto_plus }}
           KSU_REF: ${{ inputs.ksu_ref }}
-          ROOT_MANAGER_SOURCE_MODE: submodule
+          ROOT_MANAGER_SOURCE_MODE: auto
           PACKAGE_ANYKERNEL: ${{ inputs.package_anykernel }}
           ROM_FAMILY: ${{ inputs.rom_family }}
           ANYKERNEL_PROFILE: ${{ inputs.anykernel_profile }}

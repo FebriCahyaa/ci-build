@@ -36,9 +36,41 @@ add_or_init(){
     git submodule update --init "$path"
   fi
 }
-add_or_init third_party/root-managers/kernelsu https://github.com/tiann/KernelSU.git main
-add_or_init third_party/root-managers/kernelsu-next https://github.com/KernelSU-Next/KernelSU-Next.git dev
-add_or_init third_party/root-managers/resukisu https://github.com/ReSukiSU/ReSukiSU.git main
-add_or_init third_party/root-managers/sukisu-ultra https://github.com/SukiSU-Ultra/SukiSU-Ultra.git main
-git submodule sync --recursive; git submodule update --init --recursive
-echo "Root-manager submodules initialized. Use: bash scripts/sync_root_managers.sh remote"
+PROVIDERS="${ROOT_MANAGER_PROVIDERS:-${1:-all}}"
+
+add_provider() {
+  case "$1" in
+    kernelsu)
+      add_or_init third_party/root-managers/kernelsu https://github.com/tiann/KernelSU.git main
+      ;;
+    kernelsu-next|ksu-next)
+      add_or_init third_party/root-managers/kernelsu-next https://github.com/KernelSU-Next/KernelSU-Next.git dev
+      ;;
+    resukisu)
+      add_or_init third_party/root-managers/resukisu https://github.com/ReSukiSU/ReSukiSU.git main
+      ;;
+    sukisu-ultra|sukisu_ultra)
+      add_or_init third_party/root-managers/sukisu-ultra https://github.com/SukiSU-Ultra/SukiSU-Ultra.git main
+      ;;
+    *)
+      echo "ERROR: unknown root-manager provider: $1" >&2
+      exit 2
+      ;;
+  esac
+}
+
+if [[ "$PROVIDERS" == "all" ]]; then
+  add_provider kernelsu
+  add_provider kernelsu-next
+  add_provider resukisu
+  add_provider sukisu-ultra
+else
+  IFS=', ' read -r -a provider_list <<< "$PROVIDERS"
+  for provider in "${provider_list[@]}"; do
+    [[ -z "$provider" ]] && continue
+    add_provider "$provider"
+  done
+fi
+
+echo "Root-manager submodules initialized: $PROVIDERS"
+echo "Use: bash scripts/sync_root_managers.sh remote"
