@@ -12,3 +12,14 @@ Verified current upstream commits on 2026-10-04:
 - KernelSU-Next `9ba1a51e46d0e4a88ba502a80eda1351a6ce1cd8`
 - ReSukiSU `8770c7e324a22895703c4916b8a16520e0b81c79`
 - SukiSU Ultra `7fbbb1f12e2410b69c8ebf958be84f165b8d0c93`
+
+## Submodule integrity
+
+`.gitmodules` declares the upstream locations, but Git requires a `160000` gitlink in the ci-build index for each provider. If the repository was imported from a ZIP or another format that dropped gitlinks, repair the checkout with:
+
+```bash
+bash scripts/bootstrap_root_manager_submodules.sh
+git ls-files --stage -- third_party/root-managers
+```
+
+The bootstrap helper is idempotent. It creates missing gitlinks from the canonical upstream URLs, initializes the provider worktrees, and refuses to overwrite a tracked non-submodule path. After running it locally, commit the four gitlinks so normal `git clone --recurse-submodules` and GitHub Actions checkout can initialize them without the repair step.

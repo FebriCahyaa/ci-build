@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$ROOT"
 MODE="${1:-status}"
+bash scripts/bootstrap_root_manager_submodules.sh
 git submodule sync --recursive; git submodule update --init --recursive
 case "$MODE" in
   status) git submodule status --recursive ;;

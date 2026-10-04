@@ -152,6 +152,7 @@ pipeline:
                       CI_DIR="$PWD/ci-build"
                       rm -rf "$CI_DIR"
                       git clone --depth=1 --recurse-submodules https://github.com/FebriCahyaa/ci-build.git "$CI_DIR"
+                      bash "$CI_DIR/scripts/bootstrap_root_manager_submodules.sh"
                       git -C "$CI_DIR" submodule sync --recursive
                       git -C "$CI_DIR" submodule update --init --recursive
 
@@ -165,6 +166,7 @@ pipeline:
                       git -C "$CI_DIR" rev-parse HEAD
 
                       cd "$CI_DIR"
+                      export ROOT_MANAGER_SOURCE_MODE="submodule"
                       readarray -t customization < <(python3 - "$BUILD_CUSTOMIZATION" <<'PY_CUSTOM'
                       import json, sys
                       v=json.loads(sys.argv[1] or "{}")

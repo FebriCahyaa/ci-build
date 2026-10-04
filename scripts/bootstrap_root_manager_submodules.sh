@@ -1,21 +1,40 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$ROOT"
-[[ -d .git ]] || { echo "ERROR: run inside the actual ci-build Git repository" >&2; exit 2; }
+git rev-parse --git-dir >/dev/null 2>&1 || { echo "ERROR: run inside the actual ci-build Git repository" >&2; exit 2; }
+is_gitlink(){
+  local path="$1"
+  git ls-files --stage -- "$path" | awk '$1 == "160000" {found=1} END {exit found ? 0 : 1}'
+}
+
 add_or_init(){
   local path="$1" url="$2" branch="$3"
+
   if [[ -e "$path" ]] && ! git -C "$path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    # Never delete a non-submodule working tree silently. The caller must clean
-    # an accidental vendored copy before bootstrap can create the gitlink.
-    if ! git ls-files --stage -- "$path" | awk '$1 == "160000" {ok=1} END {exit ok ? 0 : 1}'; then
-      echo "ERROR: $path exists but is not a Git submodule; refusing to overwrite it" >&2
+    echo "ERROR: $path exists but is not a usable Git worktree; refusing to overwrite it" >&2
+    exit 2
+  fi
+
+  # .gitmodules alone is not enough. Git only treats a path as a real
+  # submodule when the superproject index contains a 160000 gitlink entry.
+  # Older ci-build snapshots may contain .gitmodules but have lost these
+  # gitlinks (for example after exporting/importing a ZIP). Repair them here
+  # so CI and local bootstrap both converge on the canonical submodule layout.
+  if ! is_gitlink "$path"; then
+    if [[ -n "$(git ls-files -- "$path")" ]]; then
+      echo "ERROR: $path is tracked but is not a gitlink; refusing to rewrite it" >&2
       exit 2
     fi
-  fi
-  if git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}' | grep -Fxq "$path"; then
+    if [[ -e "$path" ]]; then
+      echo "ERROR: $path exists but is not a registered submodule; refusing to overwrite it" >&2
+      exit 2
+    fi
+    echo "Repairing missing submodule gitlink: $path" >&2
+    git submodule add -b "$branch" "$url" "$path"
+  else
     git submodule sync -- "$path" >/dev/null 2>&1 || true
-    if git config --file .git/config --get "submodule.$path.url" >/dev/null 2>&1; then git submodule update --init "$path"; else git submodule add -b "$branch" "$url" "$path"; fi
-  else git submodule add -b "$branch" "$url" "$path"; fi
+    git submodule update --init "$path"
+  fi
 }
 add_or_init third_party/root-managers/kernelsu https://github.com/tiann/KernelSU.git main
 add_or_init third_party/root-managers/kernelsu-next https://github.com/KernelSU-Next/KernelSU-Next.git dev

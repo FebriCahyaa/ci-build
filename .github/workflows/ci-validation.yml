@@ -15,9 +15,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      - name: Initialize root-manager submodules
-        run: git submodule update --init --recursive
+      - name: Initialize and repair root-manager submodules
+        run: |
+          set -euo pipefail
+          bash scripts/bootstrap_root_manager_submodules.sh
+          git submodule status --recursive
+          bash tests/root_manager_gitlink_test.sh
 
       - name: Install validation dependencies
         run: |
