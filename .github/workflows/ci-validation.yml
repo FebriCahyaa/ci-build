@@ -31,7 +31,7 @@ jobs:
           bash -n "${shell_files[@]}"
           shellcheck -S error scripts/lib/common.sh scripts/build_variants.sh scripts/build_kernel.sh \
             scripts/build_anykernel.sh scripts/root_manager_apply.sh scripts/resolve_build_profile.sh \
-            scripts/select_anykernel_profile.sh scripts/generate_changelog.sh scripts/publish_ci_release.sh \
+            scripts/select_anykernel_profile.sh scripts/generate_changelog.sh scripts/publish_ci_release.sh scripts/stage_ci_release_assets.sh \
             anykernel/build.sh anykernel/ci-patch.sh
 
       - name: Workflow and Harness input limits

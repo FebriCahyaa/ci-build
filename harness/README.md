@@ -14,6 +14,12 @@ PUBLISH_RELEASE = false | true
 
 The remaining variables are optional build overrides and are intentionally aligned with the GitHub Actions bridge.
 
+### Progressive artifact persistence and failure diagnostics
+
+Each completed variant is staged immediately into a per-execution draft GitHub Release named `harness-<executionId>`. This happens before the next variant starts, so artifacts from successful variants remain downloadable even if a later variant fails. When `PUBLISH_RELEASE=true`, the same draft release is finalized only after the complete build succeeds.
+
+On failure, the builder writes both `failure-summary.txt` (extracted diagnostics plus the last 300 log lines) and `failure-build.log.gz` (the full build log) and stages them into the same draft release. The GitHub bridge monitor reads the staged failure summary for the final Telegram error message.
+
 The pipeline:
 
 ```text

@@ -873,22 +873,91 @@ def github_release_state() -> tuple[str, str]:
     except Exception:
         return "", ""
 
-    assets = {
-        str(asset.get("name", "")).strip()
+    # While the Harness build is running we intentionally keep this release
+    # in draft state. Draft staging is persistence, not completion. Never let
+    # a per-variant success/failure asset terminate the monitor early.
+    if bool(release.get("draft")):
+        return "", ""
+
+    release_assets = [
+        asset
         for asset in release.get("assets", [])
         if isinstance(asset, dict)
-    }
+    ]
+    assets = {str(asset.get("name", "")).strip(): asset for asset in release_assets}
 
     if "build-result.txt" in assets:
         return "SUCCEEDED", ""
 
-    if "failure-summary.txt" in assets:
-        return "FAILED", "Harness build failed; see GitHub Release failure-summary.txt."
+    failure_asset = assets.get("failure-summary.txt")
+    if failure_asset:
+        asset_id = str(failure_asset.get("id") or "").strip()
+        if asset_id:
+            asset_url = f"{GITHUB_API}/repos/{urllib.parse.quote(GH_REPOSITORY, safe='/')}/releases/assets/{asset_id}"
+            headers = {
+                "Accept": "application/octet-stream",
+            }
+            if GITHUB_TOKEN:
+                headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+            try:
+                req = urllib.request.Request(asset_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    body = resp.read(12000).decode("utf-8", "replace")
+                # Keep the most useful diagnostics and avoid flooding Telegram.
+                body = body.strip()
+                if body:
+                    return "FAILED", body[-3500:]
+            except Exception:
+                pass
+        return "FAILED", "Harness build failed; failure-summary.txt is available in the CI staging release."
 
     return "", ""
 
 
 
+
+
+def github_failure_diagnostics() -> str:
+    """Read the most recent staged failure summary from the per-execution draft release."""
+    if not GH_REPOSITORY:
+        return ""
+
+    url = (
+        f"{GITHUB_API}/repos/{urllib.parse.quote(GH_REPOSITORY, safe='/')}"
+        f"/releases/tags/{urllib.parse.quote(RELEASE_TAG, safe='')}"
+    )
+    headers = {"Accept": "application/vnd.github+json"}
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            release = json.load(resp)
+    except Exception:
+        return ""
+
+    candidates = [
+        asset for asset in release.get("assets", [])
+        if isinstance(asset, dict) and str(asset.get("name", "")).endswith("-failure-summary.txt")
+    ]
+    if not candidates:
+        return ""
+    asset = candidates[-1]
+    asset_id = str(asset.get("id") or "").strip()
+    if not asset_id:
+        return ""
+
+    asset_url = f"{GITHUB_API}/repos/{urllib.parse.quote(GH_REPOSITORY, safe='/')}/releases/assets/{asset_id}"
+    headers = {"Accept": "application/octet-stream"}
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+    try:
+        req = urllib.request.Request(asset_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read(20000).decode("utf-8", "replace").strip()
+        return body[-3500:] if body else ""
+    except Exception:
+        return ""
 
 
 def github_progress_state() -> tuple[int | None, str, str]:
@@ -1378,6 +1447,10 @@ def main() -> int:
             )
 
             if state in TERMINAL:
+                if state in {"FAILED", "FAILURE", "ERROR", "ERRORED", "ABORTED", "CANCELED"}:
+                    staged_error = github_failure_diagnostics()
+                    if staged_error:
+                        err = staged_error
                 final = {
                     "plan_execution_id": PLAN, "status": state,
                     "stage": stage, "step": step, "error": err,

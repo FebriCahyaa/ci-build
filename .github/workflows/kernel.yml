@@ -263,6 +263,7 @@ jobs:
           KERNEL_NAME: ${{ inputs.kernel_name }}
           APT_PACKAGES: ${{ inputs.apt_packages }}
           INSTALL_SHELLCHECK: "false"
+          TG_SEND_ARTIFACTS: "true"
         run: |
           set -euo pipefail
           bash scripts/build_kernel.sh

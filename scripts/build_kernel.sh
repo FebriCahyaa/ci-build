@@ -109,6 +109,8 @@ CI_BUILD_SHA="${CI_BUILD_SHA:-$(git -C "$CI_ROOT" rev-parse HEAD 2>/dev/null || 
 HARNESS_EXECUTION_ID="${HARNESS_EXECUTION_ID:-}"
 GH_TOKEN="${GH_TOKEN:-}"
 GH_REPOSITORY="${GH_REPOSITORY:-}"
+CI_ARTIFACT_STAGE="${CI_ARTIFACT_STAGE:-false}"
+CI_ARTIFACT_RELEASE_TAG="${CI_ARTIFACT_RELEASE_TAG:-}"
 PROGRESS_SCRIPT="$SCRIPT_DIR/progress_beacon.sh"
 
 rm -rf "$ARTIFACTS"
@@ -136,6 +138,23 @@ progress_update() {
 }
 VARIANT_TAG="${VARIANT_PROGRESS_TAG:-}"
 
+stage_artifacts() {
+  local dir="$1"
+  if ! is_true "$CI_ARTIFACT_STAGE"; then
+    return 0
+  fi
+  if [[ -z "$GH_TOKEN" || -z "$GH_REPOSITORY" || -z "$CI_ARTIFACT_RELEASE_TAG" ]]; then
+    echo "[release-stage] skipped: GitHub release staging credentials/tag unavailable" >> "$BUILD_LOG"
+    return 0
+  fi
+  GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" RELEASE_TAG="$CI_ARTIFACT_RELEASE_TAG" \
+    ASSET_DIR="$dir" \
+    ASSET_PREFIX="staging-${BUILD_PROFILE}-${ROOT_VARIANT}" \
+    CI_RELEASE_STATE_DIR="${CI_RELEASE_STATE_DIR:-$WORK/zairenkai-release-state}" \
+    bash "$SCRIPT_DIR/stage_ci_release_assets.sh" >> "$BUILD_LOG" 2>&1 || \
+    echo "[release-stage] warning: immediate artifact staging failed for $(basename "$dir")" | tee -a "$BUILD_LOG" >&2
+}
+
 run_live() {
   local label="$1"
   shift
@@ -153,19 +172,59 @@ run_helper() {
 info() { printf '%s=%s\n' "$1" "$2" >> "$INFO"; }
 
 FAIL_HANDLED=false
+write_failure_reports() {
+  local reason="$1"
+  local summary="$WORK/failure-summary.txt"
+  local full_log="$WORK/failure-build.log"
+  local compressed="$WORK/failure-build.log.gz"
+  {
+    printf 'Zairenkai kernel build failure\n'
+    printf 'profile=%s\n' "${BUILD_PROFILE:-unknown}"
+    printf 'device=%s\n' "${DEVICE:-unknown}"
+    printf 'kernel_family=%s\n' "${KERNEL_FAMILY:-unknown}"
+    printf 'variant=%s\n' "${ROOT_VARIANT:-unknown}"
+    printf 'kernel_repo=%s\n' "${KERNEL_REPO:-unknown}"
+    printf 'kernel_ref=%s\n' "${KERNEL_BRANCH:-unknown}"
+    printf 'reason=%s\n' "$reason"
+    printf 'exit_context=see full build log\n\n'
+    echo '=== Extracted diagnostics ==='
+    if ! grep -nEi '(fatal error:|error:|undefined reference|no rule to make target|recipe for target.*failed|killed|out of memory|oom|segmentation fault|cannot find|not found|permission denied|make(\[[0-9]+\])?: \\*\*\*|error [0-9]+)' "$BUILD_LOG" | tail -n 120; then
+      echo '(no canonical compiler/make diagnostic matched)'
+    fi
+    echo
+    echo '=== Last 300 log lines ==='
+    tail -n 300 "$BUILD_LOG" || true
+  } > "$summary" 2>/dev/null || true
+  cp -f "$BUILD_LOG" "$full_log" 2>/dev/null || true
+  if [[ -f "$full_log" ]]; then
+    gzip -c "$full_log" > "$compressed" 2>/dev/null || true
+  fi
+}
+
 fail() {
   local reason="$1"
   [[ "$FAIL_HANDLED" == true ]] && exit 1
   FAIL_HANDLED=true
   local duration=$(( $(date +%s) - START ))
   echo "[build] FAILED: $reason" | tee -a "$BUILD_LOG" >&2
-  tail -n 300 "$BUILD_LOG" > "$WORK/error_tail.log" 2>/dev/null || true
+  write_failure_reports "$reason"
+  echo "===== FAILURE DIAGNOSTICS =====" | tee -a "$BUILD_LOG" >&2
+  cat "$WORK/failure-summary.txt" 2>/dev/null | tee -a "$BUILD_LOG" >&2 || true
+  stage_artifacts "$WORK"
+
+  local diag
+  diag="$(grep -nEi '(fatal error:|error:|undefined reference|no rule to make target|recipe for target.*failed|killed|out of memory|oom|cannot find|not found|permission denied|make(\[[0-9]+\])?: \\*\*\*)' "$WORK/failure-summary.txt" 2>/dev/null | tail -n 8 | sed -E 's/^[0-9]+://g' | tr '\n' ' ' | cut -c1-900 || true)"
+  [[ -n "$diag" ]] || diag="${reason}"
   tg_edit "${MID:-}" "❌ <b>Kernel build gagal</b>
-📱 $DEVICE | 🔐 $(variant_label "$ROOT_VARIANT")
+📱 <code>$DEVICE</code> | 🔐 <code>$(variant_label "$ROOT_VARIANT")</code>
 🧩 Tahap: <code>$reason</code>
+🚨 <code>$(printf '%s' "$diag" | python3 -c 'import html,sys; print(html.escape(sys.stdin.read()))')</code>
 ⏱ $(fmt_dur "$duration")
 🔗 <a href=\"$RUN_URL\">CI log</a>"
-  tg_file "$WORK/error_tail.log" "📄 Last 300 build log lines — $DEVICE $(variant_label "$ROOT_VARIANT")"
+  tg_file "$WORK/failure-summary.txt" "🚨 Failure diagnostics — $DEVICE $(variant_label "$ROOT_VARIANT")"
+  if [[ -f "$WORK/failure-build.log.gz" ]]; then
+    tg_file "$WORK/failure-build.log.gz" "📦 Full build log (gzip) — $DEVICE $(variant_label "$ROOT_VARIANT")"
+  fi
   exit 1
 }
 trap 'fail "unexpected error at line $LINENO"' ERR
@@ -464,7 +523,7 @@ rm -f "$WORK/.stop-compile-telemetry"
 
 if (( COMPILE_RC != 0 )); then
   progress_update 45 "compile" "kernel compilation failed" failure
-  fail "compile"
+  fail "compile: kernel compilation returned exit ${COMPILE_RC}"
 fi
 progress_update 90 "compile" "kernel compilation complete"
 
@@ -525,6 +584,12 @@ if is_true "$PACKAGE_ANYKERNEL"; then
   info anykernel_sha256 "$ANYKERNEL_SHA256"
 fi
 
+# Persist the completed variant immediately so later matrix failures do not
+# discard artifacts already produced by this execution.
+printf 'status=SUCCEEDED\nprofile=%s\ndevice=%s\nvariant=%s\nkernel=%s\n' \
+  "$BUILD_PROFILE" "$DEVICE" "$ROOT_VARIANT" "${KERNEL_RELEASE:-$KMM}" > "$ARTIFACTS/build-result.txt"
+stage_artifacts "$ARTIFACTS"
+
 DURATION=$(( $(date +%s) - START ))
 progress_update 100 "done" "$VARIANT_LABEL ready" success
 tg_edit "$MID" "✅ <b>Kernel build selesai</b>
@@ -533,8 +598,13 @@ tg_edit "$MID" "✅ <b>Kernel build selesai</b>
 📦 <code>$(basename "${ANYKERNEL_ZIP:-$ARCHIVE}")</code>
 ⏱ $(fmt_dur "$DURATION")
 🔗 <a href=\"$RUN_URL\">CI log</a>"
-if is_true "${TG_SEND_ARTIFACTS:-false}" && [[ -n "$ANYKERNEL_ZIP" ]]; then
-  tg_file "$ANYKERNEL_ZIP" "📦 <code>$(basename "$ANYKERNEL_ZIP")</code>"
+if is_true "${TG_SEND_ARTIFACTS:-false}"; then
+  if [[ -n "$ANYKERNEL_ZIP" && -f "$ANYKERNEL_ZIP" ]]; then
+    tg_file "$ANYKERNEL_ZIP" "📦 <code>$(basename "$ANYKERNEL_ZIP")</code>"
+  fi
+  if [[ -f "$ARCHIVE" ]]; then
+    tg_file "$ARCHIVE" "🧩 <code>$(basename "$ARCHIVE")</code>"
+  fi
 fi
 
 echo "[build] OK $VARIANT_LABEL kernel=${KERNEL_RELEASE:-$KMM} zip=${ANYKERNEL_ZIP:-none} ($(fmt_dur "$DURATION"))" | tee -a "$BUILD_LOG"

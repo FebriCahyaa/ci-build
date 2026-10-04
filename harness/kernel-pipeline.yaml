@@ -133,6 +133,8 @@ pipeline:
                       KERNEL_NAME: <+pipeline.variables.KERNEL_NAME>
                       APT_PACKAGES: <+pipeline.variables.APT_PACKAGES>
                       RUN_URL: <+pipeline.executionUrl>
+                      CI_ARTIFACT_STAGE: "true"
+                      CI_ARTIFACT_RELEASE_TAG: harness-<+pipeline.executionId>
                     command: |
                       set -Eeuo pipefail
                       export DEBIAN_FRONTEND=noninteractive
@@ -179,7 +181,7 @@ pipeline:
                         GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" \
                           RELEASE_TAG="$RELEASE_TAG" RELEASE_NAME="Zairenkai ${BUILD_PROFILE}" \
                           RELEASE_BODY_FILE="$RELEASE_DIR/CHANGELOG.md" RELEASE_DRAFT=false RELEASE_PRERELEASE=false \
-                          ASSET_DIR="$ASSET_DIR" bash scripts/publish_ci_release.sh
+                          RELEASE_CLEAN_STAGING=true ASSET_DIR="$ASSET_DIR" bash scripts/publish_ci_release.sh
                       fi
 
                       printf '%s\n' "matrix_summary=$PWD/work/matrix-summary.txt" > "$PWD/harness-output.env"
