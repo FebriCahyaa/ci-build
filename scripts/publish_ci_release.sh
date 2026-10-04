@@ -51,7 +51,7 @@ fi
 
 TAG_ENC="$(urlencode "$RELEASE_TAG")"
 RELEASE_JSON="$(mktemp)"
-trap 'rm -f "$RELEASE_JSON"' EXIT
+trap 'rm -f "$RELEASE_JSON" "${ALL_RELEASES_JSON:-}" "${ASSETS_JSON:-}"' EXIT
 
 # Create or update the release. Distinguish a real 404 from transient API/network
 # errors so a rate-limit or outage can never accidentally create a duplicate tag.
@@ -79,11 +79,12 @@ PY
   404)
     # GET /releases/tags/{tag} intentionally hides drafts. Reconcile a legacy
     # draft with the releases list before attempting to create a new release.
-    all_releases="$(curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
-      "$API/repos/${GH_REPOSITORY}/releases?per_page=100")"
-    existing_id="$(python3 - "$all_releases" "$RELEASE_TAG" <<'PY_EXISTING'
+    ALL_RELEASES_JSON="$(mktemp)"
+    curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+      "$API/repos/${GH_REPOSITORY}/releases?per_page=100" > "$ALL_RELEASES_JSON"
+    existing_id="$(python3 - "$ALL_RELEASES_JSON" "$RELEASE_TAG" <<'PY_EXISTING'
 import json,sys
-for item in json.loads(sys.argv[1]):
+for item in json.load(open(sys.argv[1], encoding='utf-8')):
     if item.get('tag_name') == sys.argv[2]:
         print(item.get('id',''))
         break
@@ -107,11 +108,12 @@ PY_EXISTING
       fi
       if [[ "$create_code" == 422 ]]; then
         # Another actor won the create race; reconcile through the release list.
-        all_releases="$(curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
-          "$API/repos/${GH_REPOSITORY}/releases?per_page=100")"
-        existing_id="$(python3 - "$all_releases" "$RELEASE_TAG" <<'PY_EXISTING2'
+        ALL_RELEASES_JSON="$(mktemp)"
+        curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+          "$API/repos/${GH_REPOSITORY}/releases?per_page=100" > "$ALL_RELEASES_JSON"
+        existing_id="$(python3 - "$ALL_RELEASES_JSON" "$RELEASE_TAG" <<'PY_EXISTING2'
 import json,sys
-for item in json.loads(sys.argv[1]):
+for item in json.load(open(sys.argv[1], encoding='utf-8')):
     if item.get('tag_name') == sys.argv[2]:
         print(item.get('id',''))
         break
@@ -147,7 +149,9 @@ PY
 [[ -n "$UPLOAD_URL" ]] || { echo "ERROR: release upload URL missing" >&2; exit 1; }
 
 # Remove same-named assets before uploading refreshed artifacts.
-ASSETS_JSON="$(curl -fsSL "${AUTH[@]}" "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100")"
+ASSETS_JSON="$(mktemp)"
+curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+  "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" > "$ASSETS_JSON"
 while IFS=$'\t' read -r asset_id asset_name; do
   [[ -n "$asset_id" ]] || continue
   for file in "${ASSETS[@]}"; do
@@ -157,7 +161,7 @@ while IFS=$'\t' read -r asset_id asset_name; do
   done
 done < <(python3 - "$ASSETS_JSON" <<'PY'
 import json,sys
-for a in json.loads(sys.argv[1]):
+for a in json.load(open(sys.argv[1], encoding='utf-8')):
     print(f"{a['id']}\t{a['name']}")
 PY
 )

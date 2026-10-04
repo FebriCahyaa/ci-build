@@ -1,16 +1,16 @@
 diff --git a/fs/namespace.c b/fs/namespace.c
-index b2575f4..e6dba6d 100644
 --- a/fs/namespace.c
 +++ b/fs/namespace.c
-@@ -17,6 +17,46 @@ static inline bool may_mandlock(void)
+@@ -1700,6 +1700,45 @@ static inline bool may_mandlock(void)
+ 	pr_warn("VFS: \"mand\" mount option not supported");
+ 	return false;
  }
  #endif
  
 +/*
-+ * KernelSU-Next uses path_umount(), which was introduced upstream in Linux
-+ * 5.9. Keep the host 4.19 tree self-contained by backporting the small VFS
-+ * wrapper used by newer KernelSU-Next releases. The actual unmount operation
-+ * remains delegated to this kernel's existing do_umount() implementation.
++ * KernelSU-Next v3.4.0 calls path_umount() from the 4.19 integration path.
++ * Linux 4.19 does not expose that wrapper, so backport the small upstream
++ * VFS helper while keeping the native do_umount() implementation unchanged.
 + */
 +static int can_umount(const struct path *path, int flags)
 +{
@@ -24,7 +24,7 @@ index b2575f4..e6dba6d 100644
 +		return -EINVAL;
 +	if (!check_mnt(mnt))
 +		return -EINVAL;
-+	if (mnt->mnt.mnt_flags & MNT_LOCKED) /* Check optimistically */
++	if (mnt->mnt.mnt_flags & MNT_LOCKED)
 +		return -EINVAL;
 +	if (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN))
 +		return -EPERM;
@@ -40,12 +40,14 @@ index b2575f4..e6dba6d 100644
 +	if (!ret)
 +		ret = do_umount(mnt, flags);
 +
-+	/* Do not call path_put(): it would clear mnt_expiry_mark. */
++	/* Keep mnt_expiry_mark semantics identical to the upstream wrapper. */
 +	dput(path->dentry);
 +	mntput_no_expire(mnt);
 +	return ret;
 +}
 +
- int ksys_umount(char __user *name, int flags)
- {
- 	return 0;
+ /*
+  * Now umount can handle mount points as well as block devices.
+  * This is important for filesystems which use unnamed block devices.
+  *
+  * We now support a flag for forced unmount like the other 'big iron'

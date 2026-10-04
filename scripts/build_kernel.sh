@@ -181,6 +181,17 @@ run_helper() {
   return "${PIPESTATUS[0]}"
 }
 
+# Initialize Telegram before any source-patch/root-manager work. Early failures
+# must have an existing message to edit and a place to attach diagnostics.
+VARIANT_LABEL="$(variant_label "$ROOT_VARIANT")"
+PROJECT_MAINTAINER="${MAINTAINER:-Febrian Rahmad Cahya}"
+MID="$(tg_msg "🚀 <b>Zairenkai Kernel Build</b>
+🧭 Target: <code>$BUILD_PROFILE_LABEL</code>
+📱 Device: <code>$DEVICE</code> | 🔐 <code>$VARIANT_LABEL</code>
+🧩 Phase: <code>preparing source and root-manager integration</code>
+🌿 Branch: <code>$KERNEL_BRANCH</code>
+🔗 <a href="$RUN_URL">CI log</a>")" || MID=""
+
 info() { printf '%s=%s\n' "$1" "$2" >> "$INFO"; }
 
 FAIL_HANDLED=false
@@ -456,9 +467,9 @@ kernel_ge "$KMM" 5 4 || MAKE_CMD+=(HOSTCC="gcc -fcommon")
 read -r -a EXTRA_ARGS <<< "$EXTRA_MAKE_ARGS"
 MAKE_CMD+=("${EXTRA_ARGS[@]}")
 
-VARIANT_LABEL="$(variant_label "$ROOT_VARIANT")"
 PROJECT_MAINTAINER="${MAINTAINER:-Febrian Rahmad Cahya}"
-MID="$(tg_msg "🚀 <b>Zairenkai Kernel Build</b>
+if [[ -n "${MID:-}" ]]; then
+  tg_edit "$MID" "🚀 <b>Zairenkai Kernel Build</b>
 🧭 Target: <code>$BUILD_PROFILE_LABEL</code>
 📱 Device: <code>$DEVICE</code> | 🔐 <code>$VARIANT_LABEL</code>
 🐧 Kernel: <code>$DETECTED_KERNEL_FULL_VERSION</code> (<code>$DETECTED_ARCH</code>)
@@ -467,7 +478,8 @@ MID="$(tg_msg "🚀 <b>Zairenkai Kernel Build</b>
 🧩 Fragment: <code>${DETECTED_FRAGMENT:-none}</code>
 🛠 Toolchain: <code>$RESOLVED_TOOLCHAIN $RESOLVED_TOOLCHAIN_VERSION</code>
 🧵 Jobs: <code>$JOBS</code>
-🔗 <a href=\"$RUN_URL\">CI log</a>")" || MID=""
+🔗 <a href="$RUN_URL">CI log</a>" || true
+fi
 
 for kv in \
   "device=$DEVICE" "arch=$DETECTED_ARCH" "kernel_version=$KMM" "kernel_full_version=$DETECTED_KERNEL_FULL_VERSION" \

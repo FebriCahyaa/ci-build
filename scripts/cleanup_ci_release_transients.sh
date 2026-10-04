@@ -22,7 +22,7 @@ PY
 
 TAG_ENC="$(urlencode "$RELEASE_TAG")"
 JSON="$(mktemp)"
-trap 'rm -f "$JSON"' EXIT
+trap 'rm -f "$JSON" "${ASSETS_JSON:-}"' EXIT
 curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
   "$API/repos/${GH_REPOSITORY}/releases/tags/${TAG_ENC}" > "$JSON"
 RELEASE_ID="$(python3 - "$JSON" <<'PY'
@@ -38,8 +38,9 @@ if [[ -z "$RELEASE_ID" ]]; then
   echo "[release-cleanup] release is still draft/prerelease; preserving handoff assets"
   exit 0
 fi
-ASSETS="$(curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
-  "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100")"
+ASSETS_JSON="$(mktemp)"
+curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+  "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" > "$ASSETS_JSON"
 
 removed=0
 while IFS=$'\t' read -r asset_id asset_name; do
@@ -54,9 +55,9 @@ while IFS=$'\t' read -r asset_id asset_name; do
   curl -fsSL --retry 4 --retry-delay 2 -X DELETE "${AUTH[@]}" \
     "$API/repos/${GH_REPOSITORY}/releases/assets/${asset_id}" >/dev/null
   removed=$((removed + 1))
-done < <(python3 - "$ASSETS" <<'PY'
+done < <(python3 - "$ASSETS_JSON" <<'PY'
 import json,sys
-for a in json.loads(sys.argv[1]):
+for a in json.load(open(sys.argv[1], encoding='utf-8')):
     print(f"{a.get('id','')}\t{a.get('name','')}")
 PY
 )

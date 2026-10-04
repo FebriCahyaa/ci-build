@@ -118,7 +118,7 @@ pipeline:
                       # Harness is the persistence/staging layer. The GitHub Actions relay
                       # materializes these files into a native Actions artifact and Telegram.
                       TG_SEND_ARTIFACTS: "false"
-                      TG_SEND_FAILURE_ARTIFACTS: "false"
+                      TG_SEND_FAILURE_ARTIFACTS: "true"
                       CI_ARTIFACT_STAGE: "true"
                       CI_ARTIFACT_RELEASE_TAG: harness-<+pipeline.executionId>
                       CI_GITHUB_STATUS_ENABLED: "false"
@@ -276,5 +276,6 @@ pipeline:
                     image: plugins/artifact-metadata-publisher
                     settings:
                       file_urls: Zairenkai CI handoff:::https://github.com/FebriCahyaa/ci-build/releases/tag/harness-<+pipeline.executionId>
+                      artifact_file: harness-artifact.txt
                   when:
                     stageStatus: All

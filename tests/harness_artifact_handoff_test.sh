@@ -10,7 +10,7 @@ STAGE="$ROOT/scripts/stage_ci_release_assets.sh"
 # Harness must stage artifacts regardless of public release publication and must
 # not send bulky build files directly to Telegram from the ephemeral runner.
 grep -q 'TG_SEND_ARTIFACTS: "false"' "$PIPE"
-grep -q 'TG_SEND_FAILURE_ARTIFACTS: "false"' "$PIPE"
+grep -q 'TG_SEND_FAILURE_ARTIFACTS: "true"' "$PIPE"
 grep -q 'CI_ARTIFACT_STAGE: "true"' "$PIPE"
 grep -q 'trap .*finalize_handoff' "$PIPE"
 grep -q 'handoff_release=harness-' "$PIPE"
@@ -18,6 +18,7 @@ grep -q 'bash scripts/stage_ci_release_assets.sh' "$PIPE"
 grep -q 'type: Plugin' "$PIPE"
 grep -q 'publish_harness_artifact_handoff' "$PIPE"
 grep -q 'plugins/artifact-metadata-publisher' "$PIPE"
+grep -q 'artifact_file: harness-artifact.txt' "$PIPE"
 grep -q 'stageStatus: All' "$PIPE"
 grep -q 'CLEAN_PREFIX="staging-"' "$PIPE"
 # Finalization must execute assemble_release_assets with environment assignments.
@@ -39,11 +40,14 @@ grep -q 'TG_SKIP_ASSET_UPLOAD: "false"' "$WF"
 grep -q 'READY_ASSET_NAME' "$FETCH"
 grep -q 'handoff-HANDOFF-READY.txt' "$STAGE"
 ! grep -q 'bash scripts/send_release_to_telegram.sh' "$PIPE"
+grep -q 'send_harness_failure_to_telegram.sh' "$WF"
+grep -q 'Telegram Harness trigger failure fallback' "$WF"
 grep -q 'cleanup_ci_release_transients.sh' "$WF"
 
 # Failure reports are copied into the persistent artifact directory before fail() exits.
 grep -q 'cp -f "\$summary" "\$ARTIFACTS/failure-summary.txt"' "$BUILD"
 grep -q 'cp -f "\$compressed" "\$ARTIFACTS/failure-build.log.gz"' "$BUILD"
+grep -q 'MID="\$(tg_msg' "$BUILD"
 grep -q 'stage_artifacts "\$ARTIFACTS"' "$BUILD"
 
 bash -n "$FETCH"

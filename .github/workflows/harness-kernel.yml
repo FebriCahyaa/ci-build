@@ -156,7 +156,7 @@ jobs:
           set -euo pipefail
           chmod +x scripts/*.sh
           python3 -m py_compile scripts/harness_monitor.py
-          bash -n scripts/build_variants.sh scripts/build_kernel.sh scripts/apply_nongki_4_4.sh scripts/apply_susfs.sh scripts/assemble_release_assets.sh scripts/publish_ci_release.sh scripts/stage_ci_release_assets.sh scripts/fetch_harness_staging_assets.sh scripts/cleanup_ci_release_transients.sh scripts/send_release_to_telegram.sh
+          bash -n scripts/build_variants.sh scripts/build_kernel.sh scripts/apply_nongki_4_4.sh scripts/apply_susfs.sh scripts/assemble_release_assets.sh scripts/publish_ci_release.sh scripts/stage_ci_release_assets.sh scripts/fetch_harness_staging_assets.sh scripts/cleanup_ci_release_transients.sh scripts/send_release_to_telegram.sh scripts/send_harness_failure_to_telegram.sh
           test -f profiles/targets/${{ inputs.build_profile }}.conf
           test -f anykernel/anykernel.sh
           git rev-parse HEAD
@@ -301,6 +301,39 @@ jobs:
           echo "plan_execution_id=$PLAN_ID" >> "$GITHUB_OUTPUT"
           echo "release_tag=harness-$PLAN_ID" >> "$GITHUB_OUTPUT"
           echo "Harness plan execution: $PLAN_ID"
+      - name: Telegram Harness trigger failure fallback
+        if: always() && steps.trigger.outputs.plan_execution_id == ''
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_RELEASE_TOPIC_ID: ${{ secrets.TG_RELEASE_TOPIC_ID }}
+          BUILD_PROFILE: ${{ inputs.build_profile }}
+          HARNESS_RUN_URL: https://app.harness.io/ng/account/${{ secrets.HARNESS_ACCOUNT_ID }}/module/ci/orgs/default/projects/ci_build/pipelines/Universal_Kernel_Build
+        run: |
+          set +e
+          python3 - <<'PY_TRIGGER_FALLBACK'
+          import html
+          import os
+          import urllib.parse
+          import urllib.request
+          
+          bot=os.environ.get('TG_BOT_TOKEN','')
+          chat=os.environ.get('TG_CHAT_ID','')
+          topic=os.environ.get('TG_RELEASE_TOPIC_ID','')
+          if not (bot and chat and topic):
+              raise SystemExit(0)
+          profile=html.escape(os.environ.get('BUILD_PROFILE','unknown'))
+          url=os.environ.get('HARNESS_RUN_URL','')
+          text=f'❌ <b>Zairenkai Harness trigger gagal</b>\n🎯 Target: <code>{profile}</code>\n🚨 <code>Execution ID tidak diterima dari Harness.</code>'
+          if url:
+              text += f'\n🔗 <a href="{html.escape(url, quote=True)}">Harness pipeline</a>'
+          data=urllib.parse.urlencode({'chat_id':chat,'message_thread_id':topic,'parse_mode':'HTML','disable_web_page_preview':'true','text':text}).encode()
+          req=urllib.request.Request(f'https://api.telegram.org/bot{bot}/sendMessage', data=data, method='POST')
+          try:
+              urllib.request.urlopen(req, timeout=15).read()
+          except Exception as exc:
+              print(f'[telegram-fallback] trigger failure notification failed: {exc}')
+          PY_TRIGGER_FALLBACK
       - name: Live monitor Harness execution
         if: steps.trigger.outputs.plan_execution_id != ''
         env:
@@ -360,6 +393,17 @@ jobs:
           if-no-files-found: warn
           compression-level: 0
           retention-days: 14
+
+      - name: Telegram Harness failure fallback
+        if: always() && steps.trigger.outputs.plan_execution_id != ''
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_RELEASE_TOPIC_ID: ${{ secrets.TG_RELEASE_TOPIC_ID }}
+          BUILD_PROFILE: ${{ inputs.build_profile }}
+          HARNESS_MONITOR_FILE: harness-monitor.json
+          HARNESS_RUN_URL: https://app.harness.io/ng/account/${{ secrets.HARNESS_ACCOUNT_ID }}/module/ci/orgs/default/projects/ci_build/pipelines/Universal_Kernel_Build/executions/${{ steps.trigger.outputs.plan_execution_id }}/pipeline
+        run: bash scripts/send_harness_failure_to_telegram.sh
 
       - name: Relay published Harness release to Telegram release topic
         if: always() && steps.trigger.outputs.plan_execution_id != '' && inputs.publish_release

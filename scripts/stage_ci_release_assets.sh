@@ -76,16 +76,8 @@ PYBODY
 )"
 
   # Migrate a release created by the previous draft-based implementation.
-  existing_releases="$(curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
-    "$API/repos/${GH_REPOSITORY}/releases?per_page=100")"
-  existing_id="$(python3 - "$existing_releases" "$RELEASE_TAG" <<'PY_EXISTING'
-import json, sys
-for item in json.loads(sys.argv[1]):
-    if item.get('tag_name') == sys.argv[2]:
-        print(item.get('id',''))
-        break
-PY_EXISTING
-)"
+  existing_id="$(curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+    "$API/repos/${GH_REPOSITORY}/releases?per_page=100" | python3 -c 'import json,sys; tag=sys.argv[1]; data=json.load(sys.stdin); print(next((x.get("id","") for x in data if x.get("tag_name") == tag), ""))' "$RELEASE_TAG")"
   if [[ -n "$existing_id" ]]; then
     echo "[release-stage] migrating existing draft handoff $RELEASE_TAG to published prerelease"
     set +e
@@ -119,16 +111,8 @@ PY_EXISTING
   # Another runner may have won the create race, or an older draft may have
   # become visible through the list endpoint. Reconcile by exact tag.
   if [[ "$response" == 422 ]]; then
-    existing_releases="$(curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
-      "$API/repos/${GH_REPOSITORY}/releases?per_page=100")"
-    existing_id="$(python3 - "$existing_releases" "$RELEASE_TAG" <<'PY_EXISTING2'
-import json, sys
-for item in json.loads(sys.argv[1]):
-    if item.get('tag_name') == sys.argv[2]:
-        print(item.get('id',''))
-        break
-PY_EXISTING2
-)"
+    existing_id="$(curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+      "$API/repos/${GH_REPOSITORY}/releases?per_page=100" | python3 -c 'import json,sys; tag=sys.argv[1]; data=json.load(sys.stdin); print(next((x.get("id","") for x in data if x.get("tag_name") == tag), ""))' "$RELEASE_TAG")"
     if [[ -n "$existing_id" ]]; then
       curl -fsSL --retry 4 --retry-delay 2 -X PATCH "${AUTH[@]}" \
         -H 'Content-Type: application/json' \
@@ -161,16 +145,18 @@ PY
 # A final handoff can replace earlier per-variant staging assets. This prevents
 # GitHub Actions/Telegram from receiving duplicate copies after assembly.
 if [[ -n "$CLEAN_PREFIX" ]]; then
-  existing_assets="$(curl -fsSL "${AUTH[@]}" "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100")"
+  EXISTING_ASSETS_JSON="$STATE_DIR/zairenkai-release-assets-clean.json"
+  curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+    "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" > "$EXISTING_ASSETS_JSON"
   while IFS=$'\t' read -r asset_id asset_name; do
     [[ -n "$asset_id" ]] || continue
     [[ "$asset_name" == "$CLEAN_PREFIX"* ]] || continue
     echo "[release-stage] removing superseded asset $asset_name"
     curl -fsSL --retry 4 --retry-delay 2 -X DELETE "${AUTH[@]}" \
       "$API/repos/${GH_REPOSITORY}/releases/assets/${asset_id}" >/dev/null
-  done < <(python3 - "$existing_assets" <<'PY_ASSETS'
+  done < <(python3 - "$EXISTING_ASSETS_JSON" <<'PY_ASSETS'
 import json,sys
-for a in json.loads(sys.argv[1]):
+for a in json.load(open(sys.argv[1], encoding='utf-8')):
     print(f"{a.get('id','')}\t{a.get('name','')}")
 PY_ASSETS
 )
@@ -202,10 +188,11 @@ for file in "${assets[@]}"; do
   encoded="$(urlencode "$name")"
 
   # Remove a previous same-named asset before replacement.
-  assets_json="$(curl -fsSL "${AUTH[@]}" "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100")"
-  asset_id="$(python3 - "$assets_json" "$name" <<'PY'
-import json, sys
-for item in json.loads(sys.argv[1]):
+  ASSETS_JSON="$STATE_DIR/zairenkai-release-assets-current.json"
+  curl -fsSL "${AUTH[@]}" "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" > "$ASSETS_JSON"
+  asset_id="$(python3 - "$ASSETS_JSON" "$name" <<'PY'
+import json,sys
+for item in json.load(open(sys.argv[1], encoding='utf-8')):
     if item.get('name') == sys.argv[2]:
         print(item.get('id',''))
         break
@@ -231,11 +218,12 @@ if [[ "$ASSET_PREFIX" == "handoff" ]]; then
   READY_FILE="$STATE_DIR/$READY_NAME"
   printf 'release_tag=%s\nstatus=READY\nasset_count=%s\n' \
     "$RELEASE_TAG" "${#assets[@]}" > "$READY_FILE"
-  assets_json="$(curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
-    "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100")"
-  ready_id="$(python3 - "$assets_json" "$READY_NAME" <<'PY_READY_ID'
+  ASSETS_JSON="$STATE_DIR/zairenkai-release-assets-ready.json"
+  curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+    "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" > "$ASSETS_JSON"
+  ready_id="$(python3 - "$ASSETS_JSON" "$READY_NAME" <<'PY_READY_ID'
 import json,sys
-for item in json.loads(sys.argv[1]):
+for item in json.load(open(sys.argv[1], encoding='utf-8')):
     if item.get('name') == sys.argv[2]:
         print(item.get('id',''))
         break
