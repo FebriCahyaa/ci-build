@@ -5,7 +5,7 @@ Upstream: https://github.com/KernelSU-Next/KernelSU-Next (submodule branch `dev`
 | Kernel | Ref | Notes |
 |---|---|---|
 | 4.4 | `v1.1.1` | Compiles unmodified on the Nexus lavender tree (kprobes hook mode). |
-| 4.19 | `v3.4.0` (`1a879d6a`) | `provider-series.conf`: file-wrapper VFS compat; `host-series.conf`: `path_umount()` backport. |
+| 4.19 | `v3.4.0` (`1a879d6a`) | `provider-series.conf`: file-wrapper VFS + seccomp-cache compatibility; `host-series.conf`: `path_umount()` backport. |
 | 5.10 GKI | `v3.4.0` | No patches. |
 
 The v3.x code base does not compile on Linux 4.4 (LSM hlist API, sched headers,

@@ -1,0 +1,11 @@
+diff --git a/kernel/infra/seccomp_cache.c b/kernel/infra/seccomp_cache.c
+--- a/kernel/infra/seccomp_cache.c
++++ b/kernel/infra/seccomp_cache.c
+@@ -10,2 +10,7 @@
+
++/* Linux 4.19 does not expose the KSU seccomp syscall bound. */
++#ifndef SECCOMP_ARCH_NATIVE_NR
++#define SECCOMP_ARCH_NATIVE_NR NR_syscalls
++#endif
++
+ struct action_cache {
