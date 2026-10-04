@@ -53,10 +53,14 @@ if [[ "${VERIFY_REMOTE_PATCHES:-false}" == "true" ]]; then
   git -C "$tmp/kernel" sparse-checkout set --no-cone \
     /fs/exec.c /fs/open.c /fs/stat.c /kernel/reboot.c \
     /security/selinux/selinuxfs.c /arch/Kconfig
-  for patch in "$RDIR"/*.patch; do
+  while IFS= read -r patch_name; do
+    [[ -z "$patch_name" ]] && continue
+    [[ "$patch_name" == \#* ]] && continue
+    patch="$RDIR/$patch_name"
+    [[ -f "$patch" ]] || { echo "FAIL: series patch missing: $patch_name" >&2; fail=1; continue; }
     git -C "$tmp/kernel" apply --check --whitespace=nowarn "$patch"
-    echo "PASS: remote apply check $(basename "$patch")"
-  done
+    echo "PASS: remote apply check $patch_name"
+  done < <(sed '/^[[:space:]]*#/d;/^[[:space:]]*$/d' "$SERIES")
   git clone --quiet --depth=1 --branch v1.1.1 --filter=blob:none \
     https://github.com/KernelSU-Next/KernelSU-Next.git "$tmp/ksu-next"
   grep -qE 'config KPROBES' "$tmp/kernel/arch/Kconfig" || { echo 'FAIL: target KPROBES Kconfig missing' >&2; fail=1; }
