@@ -6,7 +6,6 @@ set +u
 TG_BOT_TOKEN="${TG_BOT_TOKEN:-}"
 TG_CHAT_ID="${TG_CHAT_ID:-}"
 TG_TOPIC_ID="${TG_TOPIC_ID:-}"
-TG_RELEASE_TOPIC_ID="${TG_RELEASE_TOPIC_ID:-}"
 TG_REQUIRE_TOPIC="${TG_REQUIRE_TOPIC:-false}"
 TG_MESSAGE_ID="${TG_MESSAGE_ID:-}"
 TG_START_TIME="${TG_START_TIME:-$(date +%s)}"
@@ -33,13 +32,12 @@ except Exception: sys.exit(1)' <<<"${1:-}"
 
 tg_msg() {
   [[ "$TG_ENABLED" == true ]] || return 0
-  if [[ "$TG_REQUIRE_TOPIC" == true && -z "$TG_TOPIC_ID" && -z "$TG_RELEASE_TOPIC_ID" ]]; then
-    echo "[telegram] refusing to send: no Telegram topic configured" >&2
+  if [[ "$TG_REQUIRE_TOPIC" == true && -z "$TG_TOPIC_ID" ]]; then
+    echo "[telegram] refusing to send: no Telegram build topic configured" >&2
     return 1
   fi
   local message="${1:-}" response="" attempt delay=1
   local topic="${TG_TOPIC_ID:-}"
-  if [[ -z "$topic" ]]; then topic="${TG_RELEASE_TOPIC_ID:-}"; fi
 
   _tg_send_message() {
     local current_topic="$1"
@@ -77,18 +75,6 @@ PYTGPLAIN
       plain_args+=(--data-urlencode "text=$plain")
       response="$(curl -sS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" \
         -X POST "$API/sendMessage" "${plain_args[@]}" 2>/dev/null || true)"
-      if tg_api_ok "$response"; then
-        python3 -c 'import json,sys; print(json.load(sys.stdin).get("result",{}).get("message_id",""))' <<<"$response"
-        return 0
-      fi
-    fi
-
-    # A stale/missing build topic must never suppress the notification. The
-    # release topic is a known-good secondary destination.
-    if [[ -n "$TG_RELEASE_TOPIC_ID" && "$TG_RELEASE_TOPIC_ID" != "$topic" ]]; then
-      echo "[telegram] primary topic delivery failed; retrying release topic" >&2
-      topic="$TG_RELEASE_TOPIC_ID"
-      response="$(_tg_send_message "$topic" true)"
       if tg_api_ok "$response"; then
         python3 -c 'import json,sys; print(json.load(sys.stdin).get("result",{}).get("message_id",""))' <<<"$response"
         return 0
@@ -134,30 +120,17 @@ PYTGPLAINEDIT
 
 tg_send_document_once() {
   local file="$1" caption="$2" response="" attempt delay=1
-  if [[ "$TG_REQUIRE_TOPIC" == true && -z "$TG_TOPIC_ID" && -z "$TG_RELEASE_TOPIC_ID" ]]; then
-    echo "[telegram] refusing document upload: no Telegram topic is configured" >&2
+  if [[ "$TG_REQUIRE_TOPIC" == true && -z "$TG_TOPIC_ID" ]]; then
+    echo "[telegram] refusing document upload: no Telegram build topic configured" >&2
     return 1
   fi
   local topic="${TG_TOPIC_ID:-}"
-  if [[ -z "$topic" ]]; then topic="${TG_RELEASE_TOPIC_ID:-}"; fi
   local args=(-F "chat_id=$TG_CHAT_ID")
   [[ -n "$topic" ]] && args+=(-F "message_thread_id=$topic")
   args+=(-F "document=@$file" -F "parse_mode=HTML" -F "caption=$caption")
   for ((attempt=1; attempt<=TG_MAX_RETRIES; attempt++)); do
     response="$(curl -sS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time 180 -X POST "$API/sendDocument" "${args[@]}" 2>/dev/null || true)"
     if tg_api_ok "$response"; then return 0; fi
-    if [[ -n "$TG_RELEASE_TOPIC_ID" && "$TG_RELEASE_TOPIC_ID" != "$topic" ]]; then
-      echo "[telegram] primary topic document delivery failed; retrying release topic" >&2
-      local fallback_args=(
-        -F "chat_id=$TG_CHAT_ID"
-        -F "message_thread_id=$TG_RELEASE_TOPIC_ID"
-        -F "document=@$file"
-        -F "parse_mode=HTML"
-        -F "caption=$caption"
-      )
-      response="$(curl -sS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time 180         -X POST "$API/sendDocument" "${fallback_args[@]}" 2>/dev/null || true)"
-      if tg_api_ok "$response"; then return 0; fi
-    fi
     echo "[telegram] sendDocument failed (attempt $attempt/$TG_MAX_RETRIES): $(printf '%s' "$response" | head -c 500)" >&2
     (( attempt < TG_MAX_RETRIES )) && { sleep "$delay"; delay=$((delay * 2)); }
   done

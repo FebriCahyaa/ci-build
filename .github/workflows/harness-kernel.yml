@@ -314,7 +314,7 @@ jobs:
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          TG_RELEASE_TOPIC_ID: ${{ secrets.TG_RELEASE_TOPIC_ID }}
+          TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
           BUILD_PROFILE: ${{ inputs.build_profile }}
           HARNESS_RUN_URL: https://app.harness.io/ng/account/${{ secrets.HARNESS_ACCOUNT_ID }}/module/ci/orgs/default/projects/ci_build/pipelines/Universal_Kernel_Build
         run: |
@@ -327,7 +327,7 @@ jobs:
           
           bot=os.environ.get('TG_BOT_TOKEN','')
           chat=os.environ.get('TG_CHAT_ID','')
-          topic=os.environ.get('TG_RELEASE_TOPIC_ID','')
+          topic=os.environ.get('TG_TOPIC_ID','')
           if not (bot and chat and topic):
               raise SystemExit(0)
           profile=html.escape(os.environ.get('BUILD_PROFILE','unknown'))
@@ -407,7 +407,7 @@ jobs:
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          TG_RELEASE_TOPIC_ID: ${{ secrets.TG_RELEASE_TOPIC_ID }}
+          TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
           BUILD_PROFILE: ${{ inputs.build_profile }}
           HARNESS_MONITOR_FILE: harness-monitor.json
           HARNESS_RUN_URL: https://app.harness.io/ng/account/${{ secrets.HARNESS_ACCOUNT_ID }}/module/ci/orgs/default/projects/ci_build/pipelines/Universal_Kernel_Build/executions/${{ steps.trigger.outputs.plan_execution_id }}/pipeline

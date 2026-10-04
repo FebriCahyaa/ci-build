@@ -20,16 +20,16 @@ cat > "$TMP/monitor.json" <<'JSON'
 }
 JSON
 CURL_CAPTURE="$TMP/calls" PATH="$TMP/bin:$PATH" \
-  TG_BOT_TOKEN=test TG_CHAT_ID=-100123 TG_RELEASE_TOPIC_ID=7654 \
+  TG_BOT_TOKEN=test TG_CHAT_ID=-100123 TG_TOPIC_ID=13 \
   BUILD_PROFILE=lavender-4.19 HARNESS_MONITOR_FILE="$TMP/monitor.json" \
   HARNESS_RUN_URL=https://example.invalid/harness \
   bash "$ROOT/scripts/send_harness_failure_to_telegram.sh"
 grep -q 'sendMessage' "$TMP/calls"
-grep -q -- 'message_thread_id=7654' "$TMP/calls"
+grep -q -- 'message_thread_id=13' "$TMP/calls"
 grep -q 'source patch series failed' "$TMP/calls"
 
 CURL_CAPTURE="$TMP/calls-missing" PATH="$TMP/bin:$PATH" \
-  TG_BOT_TOKEN=test TG_CHAT_ID=-100123 TG_RELEASE_TOPIC_ID=7654 \
+  TG_BOT_TOKEN=test TG_CHAT_ID=-100123 TG_TOPIC_ID=13 \
   BUILD_PROFILE=lavender-4.19 HARNESS_MONITOR_FILE="$TMP/no-monitor.json" \
   bash "$ROOT/scripts/send_harness_failure_to_telegram.sh"
 grep -q 'sendMessage' "$TMP/calls-missing"
@@ -39,7 +39,7 @@ cat > "$TMP/success.json" <<'JSON'
 JSON
 : > "$TMP/calls-success"
 CURL_CAPTURE="$TMP/calls-success" PATH="$TMP/bin:$PATH" \
-  TG_BOT_TOKEN=test TG_CHAT_ID=-100123 TG_RELEASE_TOPIC_ID=7654 \
+  TG_BOT_TOKEN=test TG_CHAT_ID=-100123 TG_TOPIC_ID=13 \
   BUILD_PROFILE=lavender-4.19 HARNESS_MONITOR_FILE="$TMP/success.json" \
   bash "$ROOT/scripts/send_harness_failure_to_telegram.sh"
 ! test -s "$TMP/calls-success"

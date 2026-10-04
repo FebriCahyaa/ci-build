@@ -55,8 +55,9 @@ diff --git a/kernel/infra/file_wrapper.c b/kernel/infra/file_wrapper.c
  
  static int ksu_wrapper_fadvise(struct file *fp, loff_t off1, loff_t off2,
                                 int flags)
-@@ -390,7 +417,9 @@
+@@ -389,8 +416,10 @@
      p->ops.read = fp->f_op->read ? ksu_wrapper_read : NULL;
++    p->ops.write = fp->f_op->write ? ksu_wrapper_write : NULL;
      p->ops.read_iter = fp->f_op->read_iter ? ksu_wrapper_read_iter : NULL;
      p->ops.write_iter = fp->f_op->write_iter ? ksu_wrapper_write_iter : NULL;
 +#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)

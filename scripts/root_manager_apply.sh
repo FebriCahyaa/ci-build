@@ -149,6 +149,10 @@ esac
 [[ -d "$KSU_DIR/kernel" ]] || fail "provider has no kernel/ directory"
 PROVIDER_COMMIT="$(git -C "$KSU_DIR" rev-parse HEAD)"
 PROVIDER_VERSION="$(git -C "$KSU_DIR" describe --tags --always 2>/dev/null || git -C "$KSU_DIR" rev-parse --short HEAD)"
+if [[ "$PROVIDER" == "kernelsu-next" && "$PROVIDER_REF" == "v3.4.0" ]]; then
+  [[ "$PROVIDER_COMMIT" == "1a879d6a866f80b1fa1c1009a2ffa747873cbb5e" ]] ||
+    fail "KernelSU-Next v3.4.0 resolved to unexpected commit $PROVIDER_COMMIT"
+fi
 
 # Provider-specific compatibility patches live in ci-build, not in the
 # upstream submodule. Apply them only to the isolated provider checkout so the

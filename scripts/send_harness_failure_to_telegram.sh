@@ -4,7 +4,7 @@ set -Eeuo pipefail
 
 : "${TG_BOT_TOKEN:?TG_BOT_TOKEN is required}"
 : "${TG_CHAT_ID:?TG_CHAT_ID is required}"
-: "${TG_RELEASE_TOPIC_ID:?TG_RELEASE_TOPIC_ID is required}"
+: "${TG_TOPIC_ID:?TG_TOPIC_ID is required}"
 
 MONITOR="${HARNESS_MONITOR_FILE:-harness-monitor.json}"
 PROFILE="${BUILD_PROFILE:-unknown}"
@@ -26,7 +26,7 @@ PYESC0
   [[ -n "$RUN_URL" ]] && text+="\n🔗 <a href=\"$ESCAPED_RUN_URL\">Harness CI log</a>"
   curl -fsS --retry 4 --retry-delay 2 -X POST "$API/sendMessage" \
     --data-urlencode "chat_id=$TG_CHAT_ID" \
-    --data-urlencode "message_thread_id=$TG_RELEASE_TOPIC_ID" \
+    --data-urlencode "message_thread_id=$TG_TOPIC_ID" \
     --data-urlencode "parse_mode=HTML" \
     --data-urlencode "disable_web_page_preview=true" \
     --data-urlencode "text=$text" >/dev/null
@@ -72,7 +72,7 @@ text+="📌 Status: <code>$(html_escape "$status")</code>\n"
 API="https://api.telegram.org/bot${TG_BOT_TOKEN}"
 curl -fsS --retry 4 --retry-delay 2 -X POST "$API/sendMessage" \
   --data-urlencode "chat_id=$TG_CHAT_ID" \
-  --data-urlencode "message_thread_id=$TG_RELEASE_TOPIC_ID" \
+  --data-urlencode "message_thread_id=$TG_TOPIC_ID" \
   --data-urlencode "parse_mode=HTML" \
   --data-urlencode "disable_web_page_preview=true" \
   --data-urlencode "text=$text" >/dev/null

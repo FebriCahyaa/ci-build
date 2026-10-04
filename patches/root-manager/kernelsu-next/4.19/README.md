@@ -4,8 +4,8 @@ KernelSU-Next v3.4.0 is used for Linux 4.19+. This directory contains only
 provider-side compatibility patches for legacy VFS layouts.
 
 `0002-file-wrapper-linux-4.19-compat.patch` is generated against the exact
-KernelSU-Next v3.4.0 `kernel/infra/file_wrapper.c` revision used by the provider
-and adapts it to Linux 4.19:
+KernelSU-Next v3.4.0 (`1a879d6a866f80b1fa1c1009a2ffa747873cbb5e`) `kernel/infra/file_wrapper.c`
+revision used by the provider and adapts it to Linux 4.19:
 
 - `iopoll` is fenced to kernels `>= 5.1`.
 - `remap_file_range` / `REMAP_FILE_DEDUP` is fenced to kernels `>= 4.20`.

@@ -71,6 +71,6 @@ PY
 
 grep -q 'lines = \["pipeline:", "  identifier: Universal_Kernel_Build", "  variables:"\]' "$WF"
 grep -q '^  variables:$' "$PIPE"
-[[ "$(grep -c 'TG_RELEASE_TOPIC_ID:' "$PIPE")" -eq 1 ]]
+[[ "$(grep -c 'TG_RELEASE_TOPIC_ID:' "$PIPE")" -eq 0 ]]
 
 echo 'PASS Harness runtime trigger regression contract'

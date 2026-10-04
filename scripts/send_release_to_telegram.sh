@@ -42,6 +42,13 @@ v=json.load(open(sys.argv[1],encoding="utf-8")); print(v.get("status","UNKNOWN")
 PY
 )
   STATUS="${values[0]:-$STATUS}"; ERROR="${values[1]:-}"
+  case "${STATUS^^}" in
+    SUCCESS|SUCCEEDED) ;;
+    *)
+      echo "[telegram-release] skipping release relay for failed Harness build; failure is owned by TG_TOPIC_ID" >&2
+      exit 0
+      ;;
+  esac
 fi
 TAG_ENC="$(urlencode "$RELEASE_TAG")"; RELEASE_JSON="$WORK/release.json"; release_found=false
 for attempt in $(seq 1 36); do
@@ -80,7 +87,6 @@ RELEASE_URL="${relmeta[0]:-}"; ASSET_COUNT="${relmeta[1]:-0}"; VARIANTS="${relme
 TG_MSG="🚀 <b>Zairenkai Kernel Release ${STATUS}</b>\n🎯 Target: <code>$(html_escape "$BUILD_PROFILE_LABEL")</code>\n🧩 Variants: <b>$(html_escape "$VARIANTS")</b>\n📦 Assets: <b>${ASSET_COUNT}</b>\n🏷 Tag: <code>$(html_escape "$RELEASE_TAG")</code>"
 [[ -n "$RELEASE_URL" ]] && TG_MSG+="\n🔗 <a href=\"$(html_escape "$RELEASE_URL")\">Open GitHub Release</a>"
 tg_release_text "$TG_MSG"
-[[ -n "$ERROR" ]] && tg_release_text "⚠️ <b>Release monitor</b>\n<code>$(html_escape "$(printf '%s' "$ERROR" | cut -c1-1200)")</code>" || true
 if [[ "${TG_SKIP_ASSET_UPLOAD:-false}" != true ]]; then
   python3 - "$RELEASE_JSON" "$WORK" <<'PY'
 import json,sys,os
