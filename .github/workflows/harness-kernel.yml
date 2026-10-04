@@ -240,7 +240,7 @@ jobs:
               "kernel_name": os.environ.get("KERNEL_NAME_INPUT", ""),
               "apt_packages": os.environ.get("APT_PACKAGES_INPUT", ""),
           }, separators=(",", ":"), ensure_ascii=False)
-          lines = ["pipeline:", "  variables:"]
+          lines = ["pipeline:", "  identifier: Universal_Kernel_Build", "  variables:"]
           for name in names:
               lines.extend([
                   f"    - name: {name}",
@@ -251,6 +251,10 @@ jobs:
           runtime_yaml = "\n".join(lines) + "\n"
           with open("harness-inputs.yaml", "w", encoding="utf-8") as fh:
               fh.write(runtime_yaml)
+
+          first_lines = runtime_yaml.splitlines()
+          if first_lines[:2] != ["pipeline:", "  identifier: Universal_Kernel_Build"]:
+              raise SystemExit("generated Harness runtime input is missing pipeline.identifier")
 
           print("=== Harness Runtime Input Names ===")
           print("\n".join(names))
@@ -270,6 +274,10 @@ jobs:
           set -euo pipefail
 
           endpoint="https://app.harness.io/pipeline/api/pipeline/execute/${PIPELINE_ID}?accountIdentifier=${HARNESS_ACCOUNT}&orgIdentifier=${HARNESS_ORG}&projectIdentifier=${HARNESS_PROJECT}&moduleType=CI"
+
+          grep -q '^pipeline:$' harness-inputs.yaml
+          grep -q '^  identifier: Universal_Kernel_Build$' harness-inputs.yaml
+          grep -q '^  variables:$' harness-inputs.yaml
 
           echo "Executing Harness pipeline with runtime input YAML:"
           sed -n '1,8p' harness-inputs.yaml

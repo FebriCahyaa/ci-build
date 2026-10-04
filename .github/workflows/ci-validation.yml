@@ -294,6 +294,11 @@ jobs:
           bash tests/nongki_4_4_policy_test.sh
           bash tests/root_manager_submodule_test.sh
 
+      - name: Harness runtime input execution contract
+        run: |
+          set -euo pipefail
+          bash tests/harness_runtime_input_test.sh
+
       - name: Harness variable contract
         run: |
           set -euo pipefail

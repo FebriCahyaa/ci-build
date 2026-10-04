@@ -1,7 +1,7 @@
 diff --git a/fs/namespace.c b/fs/namespace.c
 --- a/fs/namespace.c
 +++ b/fs/namespace.c
-@@ -1700,6 +1700,45 @@ static inline bool may_mandlock(void)
+@@ -1700,10 +1700,49 @@ static inline bool may_mandlock(void)
  	pr_warn("VFS: \"mand\" mount option not supported");
  	return false;
  }

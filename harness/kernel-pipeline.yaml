@@ -113,7 +113,6 @@ pipeline:
                       TG_CHAT_ID: <+secrets.getValue("tg_chat_id")>
                       TG_TOPIC_ID: <+pipeline.variables.TG_TOPIC_ID>
                       TG_RELEASE_TOPIC_ID: <+secrets.getValue("tg_release_topic_id")>
-                      TG_RELEASE_TOPIC_ID: <+secrets.getValue("tg_release_topic_id")>
                       TG_RELEASE_REQUIRE_TOPIC: "true"
                       TG_REQUIRE_TOPIC: "true"
                       # Harness is the persistence/staging layer. The GitHub Actions relay

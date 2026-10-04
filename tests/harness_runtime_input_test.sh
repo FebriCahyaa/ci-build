@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+WF="$ROOT/.github/workflows/harness-kernel.yml"
+PIPE="$ROOT/harness/kernel-pipeline.yaml"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -49,4 +52,25 @@ for name in names:
 Path(sys.argv[1]).write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
 
-ruby -ryaml -e 'd=YAML.load_file(ARGV[0]); abort "missing pipeline.identifier" unless d.dig("pipeline","identifier")=="Universal_Kernel_Build"; vars=d.dig("pipeline","variables"); abort "variables not list" unless vars.is_a?(Array); names=vars.map{|x| x["name"]}; abort "wrong variable count #{names.size}" unless names.size==25; abort "duplicate variable" unless names.uniq.size==names.size; puts "PASS: Harness Runtime Input YAML shape, identifier, and 25-variable contract"' "$TMP/harness-inputs.yaml"
+python3 - "$TMP/harness-inputs.yaml" <<'PY'
+import sys
+from pathlib import Path
+p=Path(sys.argv[1])
+lines=p.read_text(encoding='utf-8').splitlines()
+assert lines[:3] == ['pipeline:', '  identifier: Universal_Kernel_Build', '  variables:']
+names=[]
+for i,line in enumerate(lines):
+    if line.startswith('    - name: '):
+        names.append(line.split(': ',1)[1])
+        assert lines[i+1] == '      type: String'
+        assert lines[i+2].startswith('      value: ')
+assert len(names) == 25, len(names)
+assert len(names) == len(set(names))
+print('PASS Harness Runtime Input YAML shape: identifier + 25 variables')
+PY
+
+grep -q 'lines = \["pipeline:", "  identifier: Universal_Kernel_Build", "  variables:"\]' "$WF"
+grep -q '^  variables:$' "$PIPE"
+[[ "$(grep -c 'TG_RELEASE_TOPIC_ID:' "$PIPE")" -eq 1 ]]
+
+echo 'PASS Harness runtime trigger regression contract'
