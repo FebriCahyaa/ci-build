@@ -9,7 +9,18 @@ check_series() {
   local source="$ROOT/third_party/root-managers/$provider"
   local tmp
   test -f "$dir/series.conf" || { echo "FAIL: missing $dir/series.conf" >&2; fail=1; return; }
-  git -C "$source" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "SKIP: $provider submodule is not initialized"; return; }
+
+  # CI intentionally checks out the superproject without recursive
+  # submodules. Never run git -C against a missing provider worktree.
+  if [[ ! -d "$source" ]]; then
+    echo "SKIP: $provider submodule worktree is not present"
+    return 0
+  fi
+  if ! git -C "$source" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "SKIP: $provider submodule is not initialized"
+    return 0
+  fi
+
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
   git clone -q --local --no-hardlinks "$source" "$tmp/provider"

@@ -168,6 +168,9 @@ jobs:
       - name: Root-manager checkout policy
         run: bash tests/root_manager_checkout_policy_test.sh
 
+      - name: Root-manager provider test absent-worktree guard
+        run: bash tests/root_manager_provider_patch_absent_test.sh
+
       - name: Telegram topic delivery and kernel identity contracts
         run: |
           set -euo pipefail
