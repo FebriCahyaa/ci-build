@@ -7,79 +7,79 @@ pipeline:
   variables:
     - name: CI_BUILD_SHA
       type: String
-      value: <+input>.default('')
+      value: ""
     - name: BUILD_PROFILE
       type: String
-      value: <+input>.default(lavender-4.4).selectOneFrom(lavender-4.4,lavender-4.19,garnet-gki)
+      value: lavender-4.4
     - name: ROOT_VARIANTS
       type: String
-      value: <+input>.default(all)
+      value: vanilla,kernelsu-next,resukisu
     - name: KERNEL_REPO_OVERRIDE
       type: String
-      value: <+input>.default('')
+      value: ""
     - name: KERNEL_REF_OVERRIDE
       type: String
-      value: <+input>.default('')
+      value: ""
     - name: DEFCONFIG_OVERRIDE
       type: String
-      value: <+input>.default('')
+      value: ""
     - name: CONFIG_FRAGMENT_OVERRIDE
       type: String
-      value: <+input>.default('')
+      value: ""
     - name: JOBS
       type: String
-      value: <+input>.default(0)
+      value: "0"
     - name: TOOLCHAIN
       type: String
-      value: <+input>.default(auto)
+      value: auto
     - name: TOOLCHAIN_VERSION
       type: String
-      value: <+input>.default(auto)
+      value: auto
     - name: LLVM_IAS
       type: String
-      value: <+input>.default(auto)
+      value: auto
     - name: CLANG_URL
       type: String
-      value: <+input>.default('')
+      value: ""
     - name: GCC_URL
       type: String
-      value: <+input>.default('')
+      value: ""
     - name: EXTRA_MAKE_ARGS
       type: String
-      value: <+input>.default('')
+      value: ""
     - name: PATCH_PROFILE
       type: String
-      value: <+input>.default(auto)
+      value: auto
     - name: UPSTREAM_PROFILE
       type: String
-      value: <+input>.default(auto)
+      value: auto
     - name: LTO_PLUS
       type: String
-      value: <+input>.default(false)
+      value: "false"
     - name: KSU_REF
       type: String
-      value: <+input>.default(auto)
+      value: auto
     - name: PACKAGE_ANYKERNEL
       type: String
-      value: <+input>.default(true)
+      value: "true"
     - name: ROM_FAMILY
       type: String
-      value: <+input>.default(auto)
+      value: auto
     - name: ANYKERNEL_PROFILE
       type: String
-      value: <+input>.default(auto)
+      value: auto
     - name: ANYKERNEL3_REF
       type: String
-      value: <+input>.default(master)
+      value: master
     - name: KERNEL_NAME
       type: String
-      value: <+input>.default('')
+      value: ""
     - name: APT_PACKAGES
       type: String
-      value: <+input>.default('')
+      value: ""
     - name: PUBLISH_RELEASE
       type: String
-      value: <+input>.default(false)
+      value: "false"
 
   stages:
     - stage:
@@ -159,11 +159,6 @@ pipeline:
                       echo "KERNEL_FAMILY=$PROFILE_KERNEL_FAMILY"
                       echo "KERNEL_REPO=$PROFILE_KERNEL_REPO"
                       echo "ROOT_VARIANTS=$ROOT_VARIANTS"
-                      case "$BUILD_PROFILE" in
-                        lavender-4.4|lavender-4.19|garnet-gki) ;;
-                        *) echo "ERROR: invalid BUILD_PROFILE=$BUILD_PROFILE" >&2; exit 1 ;;
-                      esac
-                      echo "TARGET_LOCK=profile:$BUILD_PROFILE variants:$ROOT_VARIANTS"
 
                       # Empty override variables intentionally fall back to the profile registry.
                       export KERNEL_REPO KERNEL_BRANCH DEFCONFIG CONFIG_FRAGMENT

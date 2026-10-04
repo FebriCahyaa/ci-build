@@ -65,6 +65,19 @@ jobs:
             test -n "$PROFILE_KERNEL_REPO"
             test -n "$PROFILE_DEFCONFIG"
             test -f "anykernel/profiles/$PROFILE_ANYKERNEL_PROFILE.conf"
+            case "$profile" in
+              lavender-4.4)
+                test "$PROFILE_DEFCONFIG" = "lavender_defconfig"
+                test "$PROFILE_CONFIG_FRAGMENT" = "none"
+                ;;
+              lavender-4.19)
+                test "$PROFILE_DEFCONFIG" = "vendor/xiaomi/sdm660_defconfig"
+                test "$PROFILE_CONFIG_FRAGMENT" = "vendor/xiaomi/lavender.config"
+                ;;
+              garnet-gki)
+                test "$PROFILE_GKI" = "true"
+                ;;
+            esac
             echo "PASS $profile -> $PROFILE_ANYKERNEL_PROFILE"
           done
           ! grep -RInE 'garnet-(oss|hyperos)' .github anykernel profiles harness scripts
