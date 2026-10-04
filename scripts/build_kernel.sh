@@ -129,12 +129,9 @@ ci_phase() { echo "[CI-PHASE] $1" | tee -a "$BUILD_LOG"; }
 
 progress_update() {
   local pct="$1" phase="$2" detail="$3" state="${4:-pending}"
-  [[ -n "$GH_TOKEN" && -n "$GH_REPOSITORY" && -n "$CI_BUILD_SHA" || -n "$TG_BOT_TOKEN" && -n "$TG_CHAT_ID" && -n "${MID:-}" ]] || return 0
-  TG_BOT_TOKEN="$TG_BOT_TOKEN" TG_CHAT_ID="$TG_CHAT_ID" TG_TOPIC_ID="$TG_TOPIC_ID" TG_MESSAGE_ID="${MID:-}" \
-  TG_START_TIME="$START" \
+  [[ -n "$GH_TOKEN" && -n "$GH_REPOSITORY" && -n "$CI_BUILD_SHA" && -n "$HARNESS_EXECUTION_ID" ]] || return 0
   GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" CI_BUILD_SHA="$CI_BUILD_SHA" \
-  HARNESS_EXECUTION_ID="$HARNESS_EXECUTION_ID" RUN_URL="$RUN_URL" WORK_DIR="$WORK" BUILD_LOG="$BUILD_LOG" \
-  DEVICE="$DEVICE" ROOT_VARIANT="$ROOT_VARIANT" VARIANT_LABEL="${VARIANT_LABEL:-$ROOT_VARIANT}" \
+  HARNESS_EXECUTION_ID="$HARNESS_EXECUTION_ID" RUN_URL="$RUN_URL" WORK_DIR="$WORK" \
     bash "$PROGRESS_SCRIPT" "$pct" "$state" "$phase${VARIANT_TAG:+ [$VARIANT_TAG]}" "$detail" || true
 }
 VARIANT_TAG="${VARIANT_PROGRESS_TAG:-}"
@@ -176,14 +173,6 @@ trap 'fail "unexpected error at line $LINENO"' ERR
 [[ "$JOBS" == "0" || -z "$JOBS" ]] && JOBS="$(nproc 2>/dev/null || echo 2)"
 [[ -n "$KERNEL_BRANCH" ]] || fail "KERNEL_BRANCH is empty"
 [[ -n "$DEVICE" && "$DEVICE" != "generic" ]] || fail "DEVICE is missing or still 'generic'"
-
-# Start one live Telegram dashboard before the potentially long source checkout.
-MID="$(tg_msg "🚀 <b>Zairenkai Kernel Build</b>
-📱 <code>$DEVICE</code> | 🔐 <code>$ROOT_VARIANT</code>
-📌 Profile: <code>${BUILD_PROFILE:-${PROFILE_ID:-auto}}</code>
-📦 Source: <code>$(basename "$KERNEL_REPO" .git)</code>
-🌿 Ref: <code>$KERNEL_BRANCH</code>
-⏳ <b>Starting…</b>")"
 
 # ------------------------------------------------------------
 # Source checkout (KERNEL_SOURCE_SEED = pristine clone shared by variants)
@@ -358,16 +347,15 @@ read -r -a EXTRA_ARGS <<< "$EXTRA_MAKE_ARGS"
 MAKE_CMD+=("${EXTRA_ARGS[@]}")
 
 VARIANT_LABEL="$(variant_label "$ROOT_VARIANT")"
-tg_edit "$MID" "🔨 <b>Zairenkai Kernel Build</b>
-📱 <code>$DEVICE</code> | 🔐 <code>$VARIANT_LABEL</code>
-🐧 <code>$DETECTED_KERNEL_FULL_VERSION</code> (<code>$DETECTED_ARCH</code>)
-🌿 <code>$KERNEL_BRANCH</code>
+MID="$(tg_msg "🚀 <b>Universal Kernel Build</b>
+📱 Device: <code>$DEVICE</code> | 🔐 <code>$VARIANT_LABEL</code>
+🐧 Kernel: <code>$DETECTED_KERNEL_FULL_VERSION</code> (<code>$DETECTED_ARCH</code>)
+🌿 Branch: <code>$KERNEL_BRANCH</code>
 ⚙️ Defconfig: <code>$DETECTED_DEFCONFIG</code>
 🧩 Fragment: <code>${DETECTED_FRAGMENT:-none}</code>
-🛠 <code>$RESOLVED_TOOLCHAIN $RESOLVED_TOOLCHAIN_VERSION</code>
+🛠 Toolchain: <code>$RESOLVED_TOOLCHAIN $RESOLVED_TOOLCHAIN_VERSION</code>
 🧵 Jobs: <code>$JOBS</code>
-📊 <code>24%</code> [<code>████░░░░░░░░░░░░░░░░</code>]
-🔗 <a href=\"$RUN_URL\">CI log</a>"
+🔗 <a href=\"$RUN_URL\">CI log</a>")"
 
 for kv in \
   "device=$DEVICE" "arch=$DETECTED_ARCH" "kernel_version=$KMM" "kernel_full_version=$DETECTED_KERNEL_FULL_VERSION" \
@@ -460,11 +448,7 @@ tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
 COMPILE_TOTAL="$(git -C "$SRC_DIR" ls-files -- '*.c' '*.S' '*.s' 2>/dev/null | wc -l | tr -d ' ')"
 info compile_plan_total "$COMPILE_TOTAL"
 rm -f "$WORK/.stop-compile-telemetry"
-TG_BOT_TOKEN="$TG_BOT_TOKEN" TG_CHAT_ID="$TG_CHAT_ID" TG_TOPIC_ID="$TG_TOPIC_ID" TG_MESSAGE_ID="$MID" \
-TG_START_TIME="$START" GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" CI_BUILD_SHA="$CI_BUILD_SHA" \
-HARNESS_EXECUTION_ID="$HARNESS_EXECUTION_ID" RUN_URL="$RUN_URL" DEVICE="$DEVICE" ROOT_VARIANT="$ROOT_VARIANT" \
-VARIANT_LABEL="$VARIANT_LABEL" BUILD_LOG="$BUILD_LOG" \
-  bash "$SCRIPT_DIR/compile_progress.sh" "$BUILD_LOG" "$COMPILE_TOTAL" "$WORK" "$PROGRESS_SCRIPT" &
+bash "$SCRIPT_DIR/compile_progress.sh" "$BUILD_LOG" "$COMPILE_TOTAL" "$WORK" "$PROGRESS_SCRIPT" &
 COMPILE_TELEMETRY_PID=$!
 
 # `if` keeps the ERR trap from firing so the telemetry cleanup below always runs.

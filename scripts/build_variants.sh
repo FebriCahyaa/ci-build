@@ -59,6 +59,7 @@ prepare_seed
 SUMMARY="$MATRIX_WORK_DIR/matrix-summary.txt"
 : > "$SUMMARY"
 FAILURES=0
+MATRIX_FAIL_FAST_INFRA="${MATRIX_FAIL_FAST_INFRA:-true}"
 
 for variant in "${VARIANTS[@]}"; do
   ci_log "============================================================"
@@ -104,6 +105,17 @@ for variant in "${VARIANTS[@]}"; do
   fi
   elapsed=$(( $(date +%s) - started ))
   printf '%s\t%s\t%s\t%s\n' "$variant" "$state" "$rc" "$elapsed" | tee -a "$SUMMARY"
+
+  # These failures happen before meaningful variant-specific compilation and
+  # therefore affect every variant from the same source/profile. Do not waste
+  # time repeating the same infrastructure failure three times.
+  if [[ "$state" == FAIL && "$MATRIX_FAIL_FAST_INFRA" == true ]]; then
+    build_log="$VARIANT_WORK/build.log"
+    if [[ -f "$build_log" ]] && grep -qE '\[build\] FAILED: (toolchain resolution|auto-detect|defconfig|config fragment merge|config fragment olddefconfig|olddefconfig after config patches)' "$build_log"; then
+      ci_log "shared infrastructure failure detected for $variant; stopping remaining variants"
+      break
+    fi
+  fi
 done
 
 if (( FAILURES > 0 )); then

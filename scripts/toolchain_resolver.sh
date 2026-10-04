@@ -23,6 +23,7 @@ TC_ROOT="$WORK_DIR/toolchain"
 BUILD_CONFIG_CLANG_BIN=""
 BUILD_CONFIG_CLANG_REV=""
 BUILD_CONFIG_BRANCH=""
+BUILD_CONFIG_CROSS=""
 
 while IFS= read -r f; do
   [[ -f "$f" ]] || continue
@@ -31,8 +32,9 @@ while IFS= read -r f; do
       CLANG_PREBUILT_BIN=*) BUILD_CONFIG_CLANG_BIN="${line#*=}"; BUILD_CONFIG_CLANG_BIN="${BUILD_CONFIG_CLANG_BIN//\"/}" ;;
       CLANG_VERSION=*) BUILD_CONFIG_CLANG_REV="${line#*=}"; BUILD_CONFIG_CLANG_REV="${BUILD_CONFIG_CLANG_REV//\"/}" ;;
       BRANCH=*) [[ -z "$BUILD_CONFIG_BRANCH" ]] && BUILD_CONFIG_BRANCH="${line#*=}" ;;
+      CROSS_COMPILE=*) [[ -z "$BUILD_CONFIG_CROSS" ]] && BUILD_CONFIG_CROSS="${line#*=}"; BUILD_CONFIG_CROSS="${BUILD_CONFIG_CROSS//\"/}" ;;
     esac
-  done < <(grep -E '^(CLANG_PREBUILT_BIN|CLANG_VERSION|BRANCH)=' "$f" 2>/dev/null || true)
+  done < <(grep -E '^(CLANG_PREBUILT_BIN|CLANG_VERSION|BRANCH|CROSS_COMPILE)=' "$f" 2>/dev/null || true)
 done < <(find "$KERNEL_DIR" -maxdepth 1 -type f -name 'build.config*' | sort)
 
 KERNEL_MAJOR="$(awk '/^VERSION[[:space:]]*=/{print $3; exit}' "$KERNEL_DIR/Makefile" 2>/dev/null || echo 0)"
@@ -149,6 +151,8 @@ case "$family" in
     ref="${AOSP_CLANG_REF:-auto}"
     if [[ "$ref" == auto ]]; then
       case "$rev" in
+        clang-r365631c) ref=android11-release ;;
+        clang-r365631c1*) ref=android12-release ;;
         clang-r416183b|clang-r416183b1*) ref=android12-release ;;
         clang-r450784e*) ref=android13-release ;;
         clang-r468909*) ref=main ;;
@@ -166,6 +170,13 @@ case "$family" in
 
     declare -a AOSP_URLS=()
     case "$rev" in
+      clang-r365631c)
+        # clang-r365631c is an Android 11-era prebuilt. Android T does not
+        # contain this revision, so never fall back to android13-release.
+        AOSP_URLS+=("https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-release/clang-r365631c.tar.gz")
+        AOSP_URLS+=("https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android11-qpr3-release/clang-r365631c.tar.gz")
+        AOSP_URLS+=("https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-gsi/clang-r365631c.tar.gz")
+        ;;
       clang-r416183b)
         AOSP_URLS+=("https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz")
         AOSP_URLS+=("https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r416183b.tar.gz")
@@ -196,7 +207,7 @@ case "$family" in
     [[ -n "$BIN" ]] || { echo "ERROR: AOSP clang binary not found" >&2; exit 1; }
     TOOLCHAIN_BIN="$(dirname "$BIN")"
     export PATH="$TOOLCHAIN_BIN:$PATH"
-    CROSS_DEFAULT=""
+    CROSS_DEFAULT=$(arch_cross "$ARCH")
     CLANG_TRIPLE_VALUE=$(arch_cross "$ARCH")
     LLVM_VALUE=1
     LLVM_IAS_VALUE=1
@@ -303,4 +314,5 @@ printf 'RESOLVED_LLVM=%q\n' "$LLVM_VALUE"
 printf 'RESOLVED_LLVM_IAS=%q\n' "$LLVM_IAS_VALUE"
 printf 'RESOLVED_BUILD_CONFIG_CLANG_BIN=%q\n' "$BUILD_CONFIG_CLANG_BIN"
 printf 'RESOLVED_BUILD_CONFIG_BRANCH=%q\n' "$BUILD_CONFIG_BRANCH"
+printf 'RESOLVED_BUILD_CONFIG_CROSS=%q\n' "$BUILD_CONFIG_CROSS"
 >&2 echo "[toolchain] family=$family version=${ver:-${BUILD_CONFIG_CLANG_REV:-system}} clang=${CLANG_PATH:-none} cross=$CROSS_DEFAULT"

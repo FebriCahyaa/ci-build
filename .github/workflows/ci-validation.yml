@@ -81,6 +81,11 @@ jobs:
           rm -rf "$tmp"
           echo 'PASS toolchain resolver output contract'
 
+      - name: Harness monitor terminal-state fail-safe
+        run: |
+          set -euo pipefail
+          python3 tests/harness_monitor_test.py
+
       - name: AnyKernel selector contract
         run: |
           set -euo pipefail

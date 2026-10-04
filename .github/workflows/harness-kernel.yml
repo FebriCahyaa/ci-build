@@ -244,6 +244,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
           HARNESS_POLL_SECONDS: "3"
+          HARNESS_UNKNOWN_IDLE_GRACE_SECONDS: "45"
           TG_UI_INTERVAL: "1"
           HARNESS_API_TIMEOUT: "10"
           HARNESS_GRAPH_FALLBACK_EVERY: "3"

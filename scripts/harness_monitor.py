@@ -36,6 +36,7 @@ TG_MAX_RETRIES = max(1, int(os.environ.get("TG_MAX_RETRIES", "3")))
 API_TIMEOUT = max(4, int(os.environ.get("HARNESS_API_TIMEOUT", "10")))
 GRAPH_FALLBACK_EVERY = max(2, int(os.environ.get("HARNESS_GRAPH_FALLBACK_EVERY", "3")))
 RELEASE_CHECK_EVERY = max(3, int(os.environ.get("HARNESS_RELEASE_CHECK_EVERY", "6")))
+UNKNOWN_IDLE_GRACE_SECONDS = max(15, int(os.environ.get("HARNESS_UNKNOWN_IDLE_GRACE_SECONDS", "45")))
 EXPECTED_STAGE_NAME = os.environ.get("HARNESS_EXPECTED_STAGE_NAME", "Kernel Build")
 EXPECTED_STEP_NAME = os.environ.get("HARNESS_EXPECTED_STEP_NAME", "Build Universal Kernel")
 CI_BUILD_SHA = os.environ.get("CI_BUILD_SHA", "")
@@ -1229,6 +1230,8 @@ def main() -> int:
 
     final: dict[str, object] = {}
     api_failures = 0
+    unknown_idle_since: float | None = None
+    observed_active_execution = False
     last_done = last_total = last_active = 0
     last_tree = ""
     telemetry_pct: int | None = None
@@ -1262,7 +1265,8 @@ def main() -> int:
             has_real_step = any(
                 item[4] == "step" and not _is_infra_name(item[2]) for item in raw_nodes
             )
-            if (not raw_nodes or (active_stage_present and not has_real_step)) and (
+            pre_state = norm(status_of(details)) or "UNKNOWN"
+            if (not raw_nodes or (active_stage_present and not has_real_step) or pre_state == "UNKNOWN") and (
                 api_frame == 1 or api_frame % GRAPH_FALLBACK_EVERY == 0
             ):
                 try:
@@ -1287,6 +1291,19 @@ def main() -> int:
 
             status = status_of(details)
             raw_nodes = infer_active_children(raw_nodes)
+            preliminary_nodes = [n for n in raw_nodes if n[4] == "step" and not _is_infra_name(n[2])]
+            preliminary_active = any(norm(n[3]) in RUNNING_STATES for n in raw_nodes)
+            if preliminary_active or norm(status) in RUNNING_STATES:
+                observed_active_execution = True
+
+            # Some Harness API responses leave the top-level state UNKNOWN even
+            # though an execution node already has the real terminal state.
+            # Prefer that authoritative node state before falling back to the
+            # overall pipeline status.
+            node_derived = aggregate_status([n[3] for n in raw_nodes]) if raw_nodes else "UNKNOWN"
+            if norm(status) in {"", "UNKNOWN"} and node_derived in TERMINAL | RUNNING_STATES:
+                status = node_derived
+
             stage, step = current_node(raw_nodes, status)
             if not status:
                 active_nodes = [n for n in raw_nodes if norm(n[3]) in RUNNING_STATES]
@@ -1300,6 +1317,23 @@ def main() -> int:
             elapsed = int(time.time() - started)
             done_nodes, total_nodes, active_nodes_count = progress_of(raw_nodes, state)
             tree_text = render_tree(tree)
+
+            # A failed Harness step can be exposed as UNKNOWN by the compact
+            # execution API. Once real work was observed, UNKNOWN + no active
+            # work is not a valid long-running state. Give the API a short grace
+            # window for eventual consistency, then fail closed instead of
+            # polling for the full monitor timeout.
+            if state == "UNKNOWN" and total_nodes > 0 and active_nodes_count == 0:
+                if unknown_idle_since is None:
+                    unknown_idle_since = time.time()
+                elif time.time() - unknown_idle_since >= UNKNOWN_IDLE_GRACE_SECONDS:
+                    state = "FAILED"
+                    err = err or (
+                        "Harness execution returned UNKNOWN with no active build "
+                        f"work for {UNKNOWN_IDLE_GRACE_SECONDS}s; treating execution as failed."
+                    )
+            else:
+                unknown_idle_since = None
 
             tp, td, _ts = github_progress_state()
             if tp is not None:
