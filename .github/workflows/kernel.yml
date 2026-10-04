@@ -337,7 +337,8 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/publish_ci_release.sh
-\n      - name: Relay published kernel release to Telegram release topic
+
+      - name: Relay published kernel release to Telegram release topic
         if: success()
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
