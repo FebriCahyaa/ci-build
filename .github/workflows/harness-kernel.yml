@@ -240,7 +240,11 @@ jobs:
               "kernel_name": os.environ.get("KERNEL_NAME_INPUT", ""),
               "apt_packages": os.environ.get("APT_PACKAGES_INPUT", ""),
           }, separators=(",", ":"), ensure_ascii=False)
-          lines = ["pipeline:", "  variables:"]
+          lines = [
+              "pipeline:",
+              "  identifier: Universal_Kernel_Build",
+              "  variables:",
+          ]
           for name in names:
               lines.extend([
                   f"    - name: {name}",
@@ -252,12 +256,38 @@ jobs:
           with open("harness-inputs.yaml", "w", encoding="utf-8") as fh:
               fh.write(runtime_yaml)
 
+          # Verify the exact request body shape locally before sending it.
+          # Harness expects Runtime Input YAML rooted at pipeline and the
+          # pipeline identifier must be present in the runtime overlay.
+          import subprocess
+          try:
+              import yaml  # type: ignore
+          except ImportError:
+              yaml = None
+          if yaml is not None:
+              parsed = yaml.safe_load(runtime_yaml)
+              assert isinstance(parsed, dict), "runtime input must be a YAML mapping"
+              pipeline = parsed.get("pipeline")
+              assert isinstance(pipeline, dict), "runtime input missing pipeline mapping"
+              assert pipeline.get("identifier") == "Universal_Kernel_Build", "runtime input pipeline identifier mismatch"
+              assert isinstance(pipeline.get("variables"), list), "runtime input variables must be a list"
+          else:
+              # Fall back to Ruby, already present on ubuntu-latest, so this
+              # check never depends on PyYAML being preinstalled.
+              subprocess.run(["ruby", "-e", "require \"yaml\"; YAML.load_file(ARGV[0]);", "harness-inputs.yaml"], check=True)
+          print("PASS: Harness runtime input YAML shape")
+
           print("=== Harness Runtime Input Names ===")
           print("\n".join(names))
           print(f"Runtime input count: {len(names)}")
           if len(names) > 25:
               raise SystemExit("Harness runtime input count exceeds 25")
           PY
+      - name: Validate Harness runtime request
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e 'd=YAML.load_file("harness-inputs.yaml"); abort "missing pipeline.identifier" unless d.dig("pipeline","identifier")=="Universal_Kernel_Build"; abort "missing variables" unless d.dig("pipeline","variables").is_a?(Array); puts "PASS: runtime request is valid Harness Runtime Input YAML"'
+
       - name: Trigger Harness pipeline
         id: trigger
         env:
@@ -306,6 +336,7 @@ jobs:
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
           TG_RELEASE_TOPIC_ID: ${{ secrets.TG_RELEASE_TOPIC_ID }}
           BUILD_PROFILE: ${{ inputs.build_profile }}
           HARNESS_RUN_URL: https://app.harness.io/ng/account/${{ secrets.HARNESS_ACCOUNT_ID }}/module/ci/orgs/default/projects/ci_build/pipelines/Universal_Kernel_Build
@@ -313,26 +344,56 @@ jobs:
           set +e
           python3 - <<'PY_TRIGGER_FALLBACK'
           import html
+          import json
           import os
           import urllib.parse
           import urllib.request
-          
-          bot=os.environ.get('TG_BOT_TOKEN','')
-          chat=os.environ.get('TG_CHAT_ID','')
-          topic=os.environ.get('TG_RELEASE_TOPIC_ID','')
-          if not (bot and chat and topic):
+
+          bot = os.environ.get('TG_BOT_TOKEN', '')
+          chat = os.environ.get('TG_CHAT_ID', '')
+          topics = []
+          for value in (os.environ.get('TG_RELEASE_TOPIC_ID', ''), os.environ.get('TG_TOPIC_ID', '')):
+              if value and value not in topics:
+                  topics.append(value)
+          topics.append('')  # General topic fallback
+          if not (bot and chat):
               raise SystemExit(0)
-          profile=html.escape(os.environ.get('BUILD_PROFILE','unknown'))
-          url=os.environ.get('HARNESS_RUN_URL','')
-          text=f'❌ <b>Zairenkai Harness trigger gagal</b>\n🎯 Target: <code>{profile}</code>\n🚨 <code>Execution ID tidak diterima dari Harness.</code>'
+
+          profile = html.escape(os.environ.get('BUILD_PROFILE', 'unknown'))
+          url = os.environ.get('HARNESS_RUN_URL', '')
+          message = (
+              f'❌ <b>Zairenkai Harness trigger gagal</b>\n'
+              f'🎯 Target: <code>{profile}</code>\n'
+              f'🚨 <code>Execution ID tidak diterima dari Harness.</code>'
+          )
           if url:
-              text += f'\n🔗 <a href="{html.escape(url, quote=True)}">Harness pipeline</a>'
-          data=urllib.parse.urlencode({'chat_id':chat,'message_thread_id':topic,'parse_mode':'HTML','disable_web_page_preview':'true','text':text}).encode()
-          req=urllib.request.Request(f'https://api.telegram.org/bot{bot}/sendMessage', data=data, method='POST')
-          try:
-              urllib.request.urlopen(req, timeout=15).read()
-          except Exception as exc:
-              print(f'[telegram-fallback] trigger failure notification failed: {exc}')
+              message += f'\n🔗 <a href="{html.escape(url, quote=True)}">Harness pipeline</a>'
+
+          for topic in topics:
+              payload = {
+                  'chat_id': chat,
+                  'parse_mode': 'HTML',
+                  'disable_web_page_preview': 'true',
+                  'text': message,
+              }
+              if topic:
+                  payload['message_thread_id'] = topic
+              request = urllib.request.Request(
+                  f'https://api.telegram.org/bot{bot}/sendMessage',
+                  data=urllib.parse.urlencode(payload).encode(),
+                  method='POST',
+              )
+              try:
+                  body = urllib.request.urlopen(request, timeout=15).read().decode('utf-8', 'replace')
+                  result = json.loads(body)
+                  if result.get('ok') is True:
+                      print(f'[telegram-fallback] trigger failure notification sent topic={topic or "general"}')
+                      break
+                  print(f'[telegram-fallback] topic={topic or "general"} rejected: {result.get("description", "unknown Telegram error")}')
+              except Exception as exc:
+                  print(f'[telegram-fallback] topic={topic or "general"} delivery error: {exc}')
+          else:
+              print('[telegram-fallback] ERROR: all Telegram destinations rejected the trigger failure notification')
           PY_TRIGGER_FALLBACK
       - name: Live monitor Harness execution
         if: steps.trigger.outputs.plan_execution_id != ''
@@ -399,6 +460,7 @@ jobs:
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
           TG_RELEASE_TOPIC_ID: ${{ secrets.TG_RELEASE_TOPIC_ID }}
           BUILD_PROFILE: ${{ inputs.build_profile }}
           HARNESS_MONITOR_FILE: harness-monitor.json

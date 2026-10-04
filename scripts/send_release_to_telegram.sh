@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 : "${TG_BOT_TOKEN:?TG_BOT_TOKEN is required}"
 : "${TG_CHAT_ID:?TG_CHAT_ID is required}"
-: "${TG_RELEASE_TOPIC_ID:?TG_RELEASE_TOPIC_ID is required}"
 : "${GITHUB_TOKEN:?GITHUB_TOKEN is required}"
 : "${GH_REPOSITORY:?GH_REPOSITORY is required}"
 : "${RELEASE_TAG:?RELEASE_TAG is required}"
@@ -12,21 +11,66 @@ API_TG="https://api.telegram.org/bot${TG_BOT_TOKEN}"
 BUILD_PROFILE_LABEL="${BUILD_PROFILE:-unknown}"
 WORK="${ASSET_DIR:-${RUNNER_TEMP:-/tmp}/harness-telegram-assets}"
 mkdir -p "$WORK"; trap 'rm -rf "$WORK"' EXIT
-TG_RELEASE_REQUIRE_TOPIC="${TG_RELEASE_REQUIRE_TOPIC:-true}"
+TG_RELEASE_REQUIRE_TOPIC="${TG_RELEASE_REQUIRE_TOPIC:-false}"
 html_escape(){ python3 - "$1" <<'PY'
 import html,sys
 print(html.escape(sys.argv[1]))
 PY
 }
 tg_release_text(){
-  local text="$1"; text="${text//$'\\n'/$'\n'}"
-  [[ "$TG_RELEASE_REQUIRE_TOPIC" != true || -n "${TG_RELEASE_TOPIC_ID:-}" ]] || { echo "[telegram-release] TG_RELEASE_TOPIC_ID is required" >&2; return 1; }
-  curl -fsS -X POST "$API_TG/sendMessage" --data-urlencode "chat_id=$TG_CHAT_ID" --data-urlencode "message_thread_id=$TG_RELEASE_TOPIC_ID" --data-urlencode "parse_mode=HTML" --data-urlencode "text=$text" >/dev/null
+  local text="$1" plain="${2:-false}" response=""
+  local -a topics=()
+  for topic in "${TG_RELEASE_TOPIC_ID:-}" "${TG_TOPIC_ID:-}" ""; do
+    local duplicate=false
+    for existing in "${topics[@]:-}"; do [[ "$existing" == "$topic" ]] && duplicate=true; done
+    [[ "$duplicate" == true ]] && continue
+    topics+=("$topic")
+  done
+  for topic in "${topics[@]}"; do
+    local -a args=(--data-urlencode "chat_id=$TG_CHAT_ID" --data-urlencode "disable_web_page_preview=true")
+    [[ -n "$topic" ]] && args+=(--data-urlencode "message_thread_id=$topic")
+    if [[ "$plain" == true ]]; then
+      args+=(--data-urlencode "text=$(printf '%s' "$text" | sed -E 's/<[^>]+>//g')")
+    else
+      args+=(--data-urlencode "parse_mode=HTML" --data-urlencode "text=$text")
+    fi
+    response="$(curl -sS -X POST "$API_TG/sendMessage" "${args[@]}" 2>/dev/null || true)"
+    if python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True else 1)' <<<"$response" 2>/dev/null; then
+      echo "[telegram-release] message delivered topic=${topic:-general}" >&2
+      return 0
+    fi
+    if [[ "$plain" == false && "$response" == *"parse entities"* ]]; then
+      echo "[telegram-release] HTML rejected; retrying plain text topic=${topic:-general}" >&2
+      tg_release_text "$text" true && return 0
+    fi
+    echo "[telegram-release] message rejected topic=${topic:-general}: $(printf '%s' "$response" | head -c 300)" >&2
+  done
+  return 1
 }
+
 tg_release_file(){
-  local file="$1" caption="$2"; [[ -f "$file" ]] || return 0
-  curl -fsS -F "chat_id=$TG_CHAT_ID" -F "message_thread_id=$TG_RELEASE_TOPIC_ID" -F "document=@$file" -F "parse_mode=HTML" -F "caption=$caption" "$API_TG/sendDocument" >/dev/null
+  local file="$1" caption="$2" response=""
+  [[ -f "$file" ]] || return 0
+  local -a topics=()
+  for topic in "${TG_RELEASE_TOPIC_ID:-}" "${TG_TOPIC_ID:-}" ""; do
+    local duplicate=false
+    for existing in "${topics[@]:-}"; do [[ "$existing" == "$topic" ]] && duplicate=true; done
+    [[ "$duplicate" == true ]] && continue
+    topics+=("$topic")
+  done
+  for topic in "${topics[@]}"; do
+    local -a args=(-F "chat_id=$TG_CHAT_ID" -F "document=@$file" -F "parse_mode=HTML" -F "caption=$caption")
+    [[ -n "$topic" ]] && args+=(-F "message_thread_id=$topic")
+    response="$(curl -sS -X POST "$API_TG/sendDocument" "${args[@]}" 2>/dev/null || true)"
+    if python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True else 1)' <<<"$response" 2>/dev/null; then
+      echo "[telegram-release] document delivered topic=${topic:-general}" >&2
+      return 0
+    fi
+    echo "[telegram-release] document rejected topic=${topic:-general}: $(printf '%s' "$response" | head -c 300)" >&2
+  done
+  return 1
 }
+
 urlencode(){ python3 - "$1" <<'PY'
 import sys,urllib.parse
 print(urllib.parse.quote(sys.argv[1],safe=""))

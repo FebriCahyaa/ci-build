@@ -175,10 +175,13 @@ jobs:
           bash tests/telegram_html_escape_test.sh
           bash tests/telegram_html_fallback_test.sh
           bash tests/kernelsu_next_4_19_compat_test.sh
+          bash tests/kernelsu_next_4_19_file_wrapper_patch_test.sh
+          bash tests/kernelsu_next_4_19_provider_patch_test.sh
           bash tests/root_manager_submodule_test.sh
           bash tests/root_manager_provider_patch_test.sh
           bash tests/kernel_identity_test.sh
           bash tests/harness_artifact_handoff_test.sh
+          bash tests/harness_runtime_input_test.sh
           python3 - <<'PY'
           from pathlib import Path
           import re
