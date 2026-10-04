@@ -148,8 +148,35 @@ jobs:
           test -f profiles/targets/${{ inputs.build_profile }}.conf
           test -f anykernel/anykernel.sh
           git rev-parse HEAD
+          echo "Harness runtime-input contract"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
 
-      - name: Build Harness API payload
+          text = Path("harness/kernel-pipeline.yaml").read_text(encoding="utf-8")
+          names = [
+              "CI_BUILD_SHA", "BUILD_PROFILE", "ROOT_VARIANTS",
+              "KERNEL_REPO_OVERRIDE", "KERNEL_REF_OVERRIDE",
+              "DEFCONFIG_OVERRIDE", "CONFIG_FRAGMENT_OVERRIDE",
+              "JOBS", "TOOLCHAIN", "TOOLCHAIN_VERSION", "LLVM_IAS",
+              "CLANG_URL", "GCC_URL", "EXTRA_MAKE_ARGS",
+              "PATCH_PROFILE", "UPSTREAM_PROFILE", "LTO_PLUS", "KSU_REF",
+              "PACKAGE_ANYKERNEL", "ROM_FAMILY", "ANYKERNEL_PROFILE",
+              "ANYKERNEL3_REF", "KERNEL_NAME", "APT_PACKAGES",
+              "PUBLISH_RELEASE",
+          ]
+          for name in names:
+              m = re.search(
+                  r"- name: " + re.escape(name) +
+                  r"\n\s+type: String\n\s+value: ([^\n]+)",
+                  text,
+              )
+              assert m, f"missing Harness variable: {name}"
+              assert m.group(1).strip() == "<+input>", f"{name} is not a runtime input"
+          print(f"PASS: {len(names)} Harness variables are runtime inputs")
+          PY
+
+      - name: Build Harness Runtime Input YAML
         env:
           CI_BUILD_SHA: ${{ github.sha }}
           BUILD_PROFILE: ${{ inputs.build_profile }}
@@ -176,28 +203,42 @@ jobs:
           KERNEL_NAME: ${{ inputs.kernel_name }}
           APT_PACKAGES: ${{ inputs.apt_packages }}
           PUBLISH_RELEASE: ${{ inputs.publish_release }}
-          HARNESS_PIPELINE_ID: Universal_Kernel_Build
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, os
-          names = [
-              "CI_BUILD_SHA","BUILD_PROFILE","ROOT_VARIANTS","KERNEL_REPO_OVERRIDE","KERNEL_REF_OVERRIDE",
-              "DEFCONFIG_OVERRIDE","CONFIG_FRAGMENT_OVERRIDE","JOBS","TOOLCHAIN","TOOLCHAIN_VERSION","LLVM_IAS",
-              "CLANG_URL","GCC_URL","EXTRA_MAKE_ARGS","PATCH_PROFILE","UPSTREAM_PROFILE","LTO_PLUS","KSU_REF",
-              "PACKAGE_ANYKERNEL","ROM_FAMILY","ANYKERNEL_PROFILE","ANYKERNEL3_REF","KERNEL_NAME","APT_PACKAGES","PUBLISH_RELEASE"
-          ]
-          values = {n: os.environ.get(n, "") for n in names}
-          payload = {"pipeline": {"identifier": os.environ["HARNESS_PIPELINE_ID"], "variables": [
-              {"name": n, "type": "String", "value": values[n]} for n in names
-          ]}}
-          if len(names) > 25:
-              raise SystemExit(f"Harness variable count {len(names)} exceeds limit 25")
-          with open("harness-payload.json", "w", encoding="utf-8") as f:
-              json.dump(payload, f, separators=(",", ":"))
-          print(f"Harness variable count: {len(names)}")
-          PY
+          import json
+          import os
 
+          names = [
+              "CI_BUILD_SHA", "BUILD_PROFILE", "ROOT_VARIANTS",
+              "KERNEL_REPO_OVERRIDE", "KERNEL_REF_OVERRIDE",
+              "DEFCONFIG_OVERRIDE", "CONFIG_FRAGMENT_OVERRIDE",
+              "JOBS", "TOOLCHAIN", "TOOLCHAIN_VERSION", "LLVM_IAS",
+              "CLANG_URL", "GCC_URL", "EXTRA_MAKE_ARGS",
+              "PATCH_PROFILE", "UPSTREAM_PROFILE", "LTO_PLUS", "KSU_REF",
+              "PACKAGE_ANYKERNEL", "ROM_FAMILY", "ANYKERNEL_PROFILE",
+              "ANYKERNEL3_REF", "KERNEL_NAME", "APT_PACKAGES",
+              "PUBLISH_RELEASE",
+          ]
+
+          lines = ["pipeline:", "  variables:"]
+          for name in names:
+              lines.extend([
+                  f"    - name: {name}",
+                  "      type: String",
+                  "      value: " + json.dumps(os.environ.get(name, ""), ensure_ascii=False),
+              ])
+
+          runtime_yaml = "\n".join(lines) + "\n"
+          with open("harness-inputs.yaml", "w", encoding="utf-8") as fh:
+              fh.write(runtime_yaml)
+
+          print("=== Harness Runtime Input YAML ===")
+          print(runtime_yaml)
+          print(f"Runtime input count: {len(names)}")
+          if len(names) > 25:
+              raise SystemExit("Harness runtime input count exceeds 25")
+          PY
       - name: Trigger Harness pipeline
         id: trigger
         env:
@@ -206,25 +247,41 @@ jobs:
           HARNESS_ORG: default
           HARNESS_PROJECT: ci_build
           PIPELINE_ID: Universal_Kernel_Build
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
         run: |
           set -euo pipefail
-          endpoint="https://app.harness.io/pipeline/api/pipeline/execute/${PIPELINE_ID}?accountIdentifier=${HARNESS_ACCOUNT}&orgIdentifier=${HARNESS_ORG}&projectIdentifier=${HARNESS_PROJECT}"
-          http_code="$(curl -sS --retry 2 --retry-delay 2 -X POST "$endpoint" \
-            -H "x-api-key: ${HARNESS_API_KEY}" -H "Content-Type: application/json" \
-            --data-binary @harness-payload.json -o harness-response.json -w '%{http_code}')"
+
+          endpoint="https://app.harness.io/pipeline/api/pipeline/execute/${PIPELINE_ID}?accountIdentifier=${HARNESS_ACCOUNT}&orgIdentifier=${HARNESS_ORG}&projectIdentifier=${HARNESS_PROJECT}&moduleType=CI"
+
+          echo "Executing Harness pipeline with runtime input YAML:"
+          sed -n '1,8p' harness-inputs.yaml
+
+          http_code="$(curl -sS --retry 2 --retry-delay 2 \
+            -X POST "$endpoint" \
+            -H "x-api-key: ${HARNESS_API_KEY}" \
+            -H "Content-Type: application/yaml" \
+            --data-binary @harness-inputs.yaml \
+            -o harness-response.json \
+            -w '%{http_code}')"
+
           if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error::Harness execution request failed with HTTP $http_code"
             cat harness-response.json >&2 || true
             exit 1
           fi
-          PLAN_ID="$(python3 -c 'import json; d=json.load(open("harness-response.json",encoding="utf-8")); print(((d.get("data") or {}).get("planExecution") or {}).get("uuid") or ((d.get("data") or {}).get("planExecution") or {}).get("planExecutionId") or d.get("planExecutionId") or d.get("executionId") or "")')"
-          [[ -n "$PLAN_ID" ]] || { cat harness-response.json >&2; exit 1; }
+
+          cat harness-response.json
+
+          PLAN_ID="$(python3 -c 'import json; d=json.load(open("harness-response.json",encoding="utf-8")); pe=(d.get("data") or {}).get("planExecution") or {}; print(pe.get("uuid") or pe.get("planExecutionId") or d.get("planExecutionId") or d.get("executionId") or (d.get("execution_details") or {}).get("execution_id") or "")')"
+
+          [[ -n "$PLAN_ID" ]] || {
+            echo "::error::Harness response did not contain an execution id"
+            cat harness-response.json >&2
+            exit 1
+          }
+
           echo "plan_execution_id=$PLAN_ID" >> "$GITHUB_OUTPUT"
           echo "release_tag=harness-$PLAN_ID" >> "$GITHUB_OUTPUT"
           echo "Harness plan execution: $PLAN_ID"
-
       - name: Live monitor Harness execution
         if: steps.trigger.outputs.plan_execution_id != ''
         env:
@@ -233,6 +290,7 @@ jobs:
           HARNESS_ORG: default
           HARNESS_PROJECT: ci_build
           HARNESS_PIPELINE: Universal_Kernel_Build
+          HARNESS_REQUESTED_BUILD_PROFILE: ${{ inputs.build_profile }}
           HARNESS_PLAN_EXECUTION_ID: ${{ steps.trigger.outputs.plan_execution_id }}
           CI_BUILD_SHA: ${{ github.sha }}
           HARNESS_EXECUTION_URL: https://app.harness.io/ng/account/${{ secrets.HARNESS_ACCOUNT_ID }}/module/ci/orgs/default/projects/ci_build/pipelines/Universal_Kernel_Build/executions/${{ steps.trigger.outputs.plan_execution_id }}/pipeline
@@ -252,7 +310,10 @@ jobs:
           HARNESS_EXPECTED_STEP_NAME: "Build Universal Kernel Matrix"
           TG_HTTP_TIMEOUT: "8"
           HARNESS_MAX_SECONDS: "8100"
-        run: python3 scripts/harness_monitor.py
+        run: |
+          set -euo pipefail
+          echo "Requested BUILD_PROFILE=$HARNESS_REQUESTED_BUILD_PROFILE"
+          python3 scripts/harness_monitor.py
 
       - name: Relay Harness result to Telegram
         if: always() && steps.trigger.outputs.plan_execution_id != '' && inputs.publish_release

@@ -7,79 +7,79 @@ pipeline:
   variables:
     - name: CI_BUILD_SHA
       type: String
-      value: ""
+      value: <+input>
     - name: BUILD_PROFILE
       type: String
-      value: lavender-4.4
+      value: <+input>
     - name: ROOT_VARIANTS
       type: String
-      value: vanilla,kernelsu-next,resukisu
+      value: <+input>
     - name: KERNEL_REPO_OVERRIDE
       type: String
-      value: ""
+      value: <+input>
     - name: KERNEL_REF_OVERRIDE
       type: String
-      value: ""
+      value: <+input>
     - name: DEFCONFIG_OVERRIDE
       type: String
-      value: ""
+      value: <+input>
     - name: CONFIG_FRAGMENT_OVERRIDE
       type: String
-      value: ""
+      value: <+input>
     - name: JOBS
       type: String
-      value: "0"
+      value: <+input>
     - name: TOOLCHAIN
       type: String
-      value: auto
+      value: <+input>
     - name: TOOLCHAIN_VERSION
       type: String
-      value: auto
+      value: <+input>
     - name: LLVM_IAS
       type: String
-      value: auto
+      value: <+input>
     - name: CLANG_URL
       type: String
-      value: ""
+      value: <+input>
     - name: GCC_URL
       type: String
-      value: ""
+      value: <+input>
     - name: EXTRA_MAKE_ARGS
       type: String
-      value: ""
+      value: <+input>
     - name: PATCH_PROFILE
       type: String
-      value: auto
+      value: <+input>
     - name: UPSTREAM_PROFILE
       type: String
-      value: auto
+      value: <+input>
     - name: LTO_PLUS
       type: String
-      value: "false"
+      value: <+input>
     - name: KSU_REF
       type: String
-      value: auto
+      value: <+input>
     - name: PACKAGE_ANYKERNEL
       type: String
-      value: "true"
+      value: <+input>
     - name: ROM_FAMILY
       type: String
-      value: auto
+      value: <+input>
     - name: ANYKERNEL_PROFILE
       type: String
-      value: auto
+      value: <+input>
     - name: ANYKERNEL3_REF
       type: String
-      value: master
+      value: <+input>
     - name: KERNEL_NAME
       type: String
-      value: ""
+      value: <+input>
     - name: APT_PACKAGES
       type: String
-      value: ""
+      value: <+input>
     - name: PUBLISH_RELEASE
       type: String
-      value: "false"
+      value: <+input>
 
   stages:
     - stage:
@@ -139,6 +139,7 @@ pipeline:
                       ANYKERNEL3_REF: <+pipeline.variables.ANYKERNEL3_REF>
                       KERNEL_NAME: <+pipeline.variables.KERNEL_NAME>
                       APT_PACKAGES: <+pipeline.variables.APT_PACKAGES>
+                      PUBLISH_RELEASE: <+pipeline.variables.PUBLISH_RELEASE>
                       RUN_URL: <+pipeline.executionUrl>
                     command: |
                       set -Eeuo pipefail
