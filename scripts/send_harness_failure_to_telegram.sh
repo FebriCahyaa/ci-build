@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 : "${TG_BOT_TOKEN:?TG_BOT_TOKEN is required}"
 : "${TG_CHAT_ID:?TG_CHAT_ID is required}"
+: "${TG_RELEASE_TOPIC_ID:?TG_RELEASE_TOPIC_ID is required}"
 
 MONITOR="${HARNESS_MONITOR_FILE:-harness-monitor.json}"
 PROFILE="${BUILD_PROFILE:-unknown}"
@@ -23,26 +24,13 @@ PYESC0
 )"
   text="❌ <b>Zairenkai Harness Kernel Build gagal</b>\n🎯 Target: <code>${escaped_profile}</code>\n🚨 <code>harness-monitor.json tidak tersedia; cek GitHub Actions run untuk detail.</code>"
   [[ -n "$RUN_URL" ]] && text+="\n🔗 <a href=\"$ESCAPED_RUN_URL\">Harness CI log</a>"
-  send_missing() {
-    local topic="${1:-}"
-    local -a args=(--data-urlencode "chat_id=$TG_CHAT_ID" --data-urlencode "parse_mode=HTML" --data-urlencode "disable_web_page_preview=true" --data-urlencode "text=$text")
-    [[ -n "$topic" ]] && args+=(--data-urlencode "message_thread_id=$topic")
-    curl -fsS --retry 4 --retry-delay 2 -X POST "$API/sendMessage" "${args[@]}" > /tmp/tg_failure_response.json 2>/dev/null || return 1
-    python3 - <<'PY2'
-import json,sys
-try:
-    d=json.load(open('/tmp/tg_failure_response.json', encoding='utf-8'))
-except Exception:
-    sys.exit(1)
-sys.exit(0 if d.get('ok') is True else 1)
-PY2
-  }
-  if send_missing "${TG_RELEASE_TOPIC_ID:-}" || send_missing ""; then
-    echo "[telegram-fallback] sent missing-monitor failure notification" >&2
-  else
-    echo "[telegram-fallback] ERROR: unable to deliver missing-monitor failure notification" >&2
-    exit 1
-  fi
+  curl -fsS --retry 4 --retry-delay 2 -X POST "$API/sendMessage" \
+    --data-urlencode "chat_id=$TG_CHAT_ID" \
+    --data-urlencode "message_thread_id=$TG_RELEASE_TOPIC_ID" \
+    --data-urlencode "parse_mode=HTML" \
+    --data-urlencode "disable_web_page_preview=true" \
+    --data-urlencode "text=$text" >/dev/null
+  echo "[telegram-fallback] sent missing-monitor failure notification" >&2
   exit 0
 fi
 
@@ -82,33 +70,11 @@ text+="📌 Status: <code>$(html_escape "$status")</code>\n"
 [[ -n "$RUN_URL" ]] && text+="🔗 <a href=\"$ESCAPED_RUN_URL\">Harness CI log</a>"
 
 API="https://api.telegram.org/bot${TG_BOT_TOKEN}"
+curl -fsS --retry 4 --retry-delay 2 -X POST "$API/sendMessage" \
+  --data-urlencode "chat_id=$TG_CHAT_ID" \
+  --data-urlencode "message_thread_id=$TG_RELEASE_TOPIC_ID" \
+  --data-urlencode "parse_mode=HTML" \
+  --data-urlencode "disable_web_page_preview=true" \
+  --data-urlencode "text=$text" >/dev/null
 
-send_failure() {
-  local topic="${1:-}" plain="${2:-false}"
-  local -a args=(--data-urlencode "chat_id=$TG_CHAT_ID" --data-urlencode "disable_web_page_preview=true")
-  [[ -n "$topic" ]] && args+=(--data-urlencode "message_thread_id=$topic")
-  if [[ "$plain" == true ]]; then
-    args+=(--data-urlencode "text=$(printf '%s' "$text" | sed -E 's/<[^>]+>//g')")
-  else
-    args+=(--data-urlencode "parse_mode=HTML" --data-urlencode "text=$text")
-  fi
-  curl -fsS --retry 4 --retry-delay 2 -X POST "$API/sendMessage" "${args[@]}" > /tmp/tg_failure_response.json 2>/dev/null || return 1
-  python3 - <<'PY'
-import json
-import sys
-try:
-    d=json.load(open('/tmp/tg_failure_response.json', encoding='utf-8'))
-except Exception:
-    sys.exit(1)
-sys.exit(0 if d.get('ok') is True else 1)
-PY
-}
-
-if send_failure "${TG_RELEASE_TOPIC_ID:-}" false || \
-   send_failure "${TG_RELEASE_TOPIC_ID:-}" true || \
-   send_failure "" true; then
-  echo "[telegram-fallback] sent Harness failure notification for $PROFILE status=$status"
-else
-  echo "[telegram-fallback] ERROR: unable to deliver Harness failure notification" >&2
-  exit 1
-fi
+echo "[telegram-fallback] sent Harness failure notification for $PROFILE status=$status"

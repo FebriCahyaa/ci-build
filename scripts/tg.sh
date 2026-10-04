@@ -83,8 +83,8 @@ PYTGPLAIN
       fi
     fi
 
-    # A stale/missing build topic must never suppress the notification.
-    # Try the dedicated release topic and finally General (no thread id).
+    # A stale/missing build topic must never suppress the notification. The
+    # release topic is a known-good secondary destination.
     if [[ -n "$TG_RELEASE_TOPIC_ID" && "$TG_RELEASE_TOPIC_ID" != "$topic" ]]; then
       echo "[telegram] primary topic delivery failed; retrying release topic" >&2
       topic="$TG_RELEASE_TOPIC_ID"
@@ -93,13 +93,6 @@ PYTGPLAIN
         python3 -c 'import json,sys; print(json.load(sys.stdin).get("result",{}).get("message_id",""))' <<<"$response"
         return 0
       fi
-    fi
-
-    echo "[telegram] topic delivery failed; retrying General topic" >&2
-    response="$(_tg_send_message "" true)"
-    if tg_api_ok "$response"; then
-      python3 -c 'import json,sys; print(json.load(sys.stdin).get("result",{}).get("message_id",""))' <<<"$response"
-      return 0
     fi
 
     echo "[telegram] sendMessage failed (attempt $attempt/$TG_MAX_RETRIES): $(printf '%s' "$response" | head -c 500)" >&2
