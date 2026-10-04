@@ -238,6 +238,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPOSITORY: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CI_GITHUB_STATUS_ENABLED: "false"
           BUILD_PROFILE: ${{ inputs.build_profile }}
           ROOT_VARIANT: ${{ matrix.variant }}
           VARIANTS: ${{ inputs.variants }}

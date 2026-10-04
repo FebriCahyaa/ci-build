@@ -99,6 +99,11 @@ jobs:
           set -euo pipefail
           python3 tests/harness_monitor_test.py
 
+      - name: Commit status progress policy
+        run: |
+          set -euo pipefail
+          bash tests/progress_status_policy_test.sh
+
       - name: AnyKernel selector contract
         run: |
           set -euo pipefail

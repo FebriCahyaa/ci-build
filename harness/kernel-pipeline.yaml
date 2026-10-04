@@ -108,6 +108,13 @@ pipeline:
                       GH_REPOSITORY: FebriCahyaa/ci-build
                       HARNESS_EXECUTION_ID: <+pipeline.executionId>
                       HARNESS_PIPELINE_ID: Universal_Kernel_Build
+                      TG_BOT_TOKEN: <+secrets.getValue("tg_bot_token")>
+                      TG_CHAT_ID: <+secrets.getValue("tg_chat_id")>
+                      TG_TOPIC_ID: <+secrets.getValue("tg_topic_id")>
+                      TG_SEND_ARTIFACTS: "false"
+                      CI_ARTIFACT_STAGE: "true"
+                      CI_ARTIFACT_RELEASE_TAG: harness-<+pipeline.executionId>
+                      CI_GITHUB_STATUS_ENABLED: "false"
                       CI_BUILD_SHA: <+pipeline.variables.CI_BUILD_SHA>
                       BUILD_PROFILE: <+pipeline.variables.BUILD_PROFILE>
                       ROOT_VARIANTS: <+pipeline.variables.ROOT_VARIANTS>
@@ -133,8 +140,6 @@ pipeline:
                       KERNEL_NAME: <+pipeline.variables.KERNEL_NAME>
                       APT_PACKAGES: <+pipeline.variables.APT_PACKAGES>
                       RUN_URL: <+pipeline.executionUrl>
-                      CI_ARTIFACT_STAGE: "true"
-                      CI_ARTIFACT_RELEASE_TAG: harness-<+pipeline.executionId>
                     command: |
                       set -Eeuo pipefail
                       export DEBIAN_FRONTEND=noninteractive

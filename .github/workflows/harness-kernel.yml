@@ -238,9 +238,8 @@ jobs:
           HARNESS_EXECUTION_URL: https://app.harness.io/ng/account/${{ secrets.HARNESS_ACCOUNT_ID }}/module/ci/orgs/default/projects/ci_build/pipelines/Universal_Kernel_Build/executions/${{ steps.trigger.outputs.plan_execution_id }}/pipeline
           DEVICE: ${{ inputs.build_profile == 'garnet-gki' && 'garnet' || 'lavender' }}
           KERNEL_BRANCH: ${{ inputs.build_profile }}
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
+          # Live build progress is emitted directly by the Harness build step.
+          # Keep the lifecycle monitor Telegram-free to avoid duplicate dashboards.
           GITHUB_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
           HARNESS_POLL_SECONDS: "3"

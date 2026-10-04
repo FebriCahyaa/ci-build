@@ -131,9 +131,12 @@ ci_phase() { echo "[CI-PHASE] $1" | tee -a "$BUILD_LOG"; }
 
 progress_update() {
   local pct="$1" phase="$2" detail="$3" state="${4:-pending}"
-  [[ -n "$GH_TOKEN" && -n "$GH_REPOSITORY" && -n "$CI_BUILD_SHA" && -n "$HARNESS_EXECUTION_ID" ]] || return 0
-  GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" CI_BUILD_SHA="$CI_BUILD_SHA" \
-  HARNESS_EXECUTION_ID="$HARNESS_EXECUTION_ID" RUN_URL="$RUN_URL" WORK_DIR="$WORK" \
+  [[ -n "${TG_BOT_TOKEN:-}" && -n "${TG_CHAT_ID:-}" && -n "${TG_MESSAGE_ID:-}" ]] || \
+    { [[ "${CI_GITHUB_STATUS_ENABLED:-false}" == "true" && -n "$GH_TOKEN" && -n "$GH_REPOSITORY" && -n "$CI_BUILD_SHA" ]] || return 0; }
+  TG_BOT_TOKEN="$TG_BOT_TOKEN" TG_CHAT_ID="$TG_CHAT_ID" TG_TOPIC_ID="$TG_TOPIC_ID" TG_MESSAGE_ID="$TG_MESSAGE_ID" \
+  TG_START_TIME="$START" GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" CI_BUILD_SHA="$CI_BUILD_SHA" \
+  CI_GITHUB_STATUS_ENABLED="${CI_GITHUB_STATUS_ENABLED:-false}" HARNESS_EXECUTION_ID="$HARNESS_EXECUTION_ID" \
+  RUN_URL="$RUN_URL" WORK_DIR="$WORK" BUILD_LOG="$BUILD_LOG" DEVICE="$DEVICE" ROOT_VARIANT="$ROOT_VARIANT" \
     bash "$PROGRESS_SCRIPT" "$pct" "$state" "$phase${VARIANT_TAG:+ [$VARIANT_TAG]}" "$detail" || true
 }
 VARIANT_TAG="${VARIANT_PROGRESS_TAG:-}"
@@ -192,8 +195,8 @@ write_failure_reports() {
       echo '(no canonical compiler/make diagnostic matched)'
     fi
     echo
-    echo '=== Last 300 log lines ==='
-    tail -n 300 "$BUILD_LOG" || true
+    echo '=== Last 500 log lines ==='
+    tail -n 500 "$BUILD_LOG" || true
   } > "$summary" 2>/dev/null || true
   cp -f "$BUILD_LOG" "$full_log" 2>/dev/null || true
   if [[ -f "$full_log" ]]; then
@@ -507,7 +510,11 @@ tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
 COMPILE_TOTAL="$(git -C "$SRC_DIR" ls-files -- '*.c' '*.S' '*.s' 2>/dev/null | wc -l | tr -d ' ')"
 info compile_plan_total "$COMPILE_TOTAL"
 rm -f "$WORK/.stop-compile-telemetry"
-bash "$SCRIPT_DIR/compile_progress.sh" "$BUILD_LOG" "$COMPILE_TOTAL" "$WORK" "$PROGRESS_SCRIPT" &
+TG_BOT_TOKEN="$TG_BOT_TOKEN" TG_CHAT_ID="$TG_CHAT_ID" TG_TOPIC_ID="$TG_TOPIC_ID" TG_MESSAGE_ID="$MID" \
+TG_START_TIME="$START" GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" CI_BUILD_SHA="$CI_BUILD_SHA" \
+CI_GITHUB_STATUS_ENABLED="${CI_GITHUB_STATUS_ENABLED:-false}" RUN_URL="$RUN_URL" \
+DEVICE="$DEVICE" ROOT_VARIANT="$ROOT_VARIANT" VARIANT_LABEL="$VARIANT_LABEL" BUILD_LOG="$BUILD_LOG" \
+  bash "$SCRIPT_DIR/compile_progress.sh" "$BUILD_LOG" "$COMPILE_TOTAL" "$WORK" "$PROGRESS_SCRIPT" &
 COMPILE_TELEMETRY_PID=$!
 
 # `if` keeps the ERR trap from firing so the telemetry cleanup below always runs.

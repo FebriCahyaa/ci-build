@@ -16,7 +16,8 @@ if [[ -n "${TG_BOT_TOKEN:-}" && -n "${TG_CHAT_ID:-}" && -n "${TG_MESSAGE_ID:-}" 
     tg_progress_update "$PERCENT" "$STATE" "$PHASE" "$DETAIL" "$BUILD_LOG" || true
 fi
 
-if [[ -n "${GH_TOKEN:-}" && -n "${GH_REPOSITORY:-}" && -n "${CI_BUILD_SHA:-}" ]]; then
+# GitHub commit-status progress is opt-in. Telegram is the primary live UI.
+if [[ "${CI_GITHUB_STATUS_ENABLED:-false}" == "true" && -n "${GH_TOKEN:-}" && -n "${GH_REPOSITORY:-}" && -n "${CI_BUILD_SHA:-}" ]]; then
   CONTEXT="${CI_PROGRESS_CONTEXT:-zairenkai/${HARNESS_EXECUTION_ID:-github-${GITHUB_RUN_ID:-local}}}"
   TARGET_URL="${RUN_URL:-}"
   STATE_FILE="${CI_STATUS_STATE_FILE:-${WORK_DIR:-/tmp}/.ci-status-last}"

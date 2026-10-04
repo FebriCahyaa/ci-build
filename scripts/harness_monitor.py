@@ -961,6 +961,10 @@ def github_failure_diagnostics() -> str:
 
 
 def github_progress_state() -> tuple[int | None, str, str]:
+    # Commit-status progress is disabled by default. GitHub statuses are not
+    # a durable live transport and interrupted jobs can leave `pending` checks.
+    if os.environ.get("CI_GITHUB_STATUS_ENABLED", "false").lower() != "true":
+        return None, "", ""
     if not GH_REPOSITORY or not CI_BUILD_SHA:
         return None, "", ""
     path = (
