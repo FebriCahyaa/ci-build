@@ -1,30 +1,35 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+fail(){ echo "FAIL: $*" >&2; exit 1; }
 
-# Static CI checkout deliberately has no recursive root-manager worktrees.
-# Simulate that layout and verify the provider test exits cleanly without
-# invoking git -C on a nonexistent path.
-mkdir -p "$ROOT/third_party/root-managers"
+# GitHub Actions uses a non-recursive checkout. The provider worktree
+# directories therefore do not exist at all.
+rm -rf \
+  "$ROOT/third_party/root-managers/kernelsu-next" \
+  "$ROOT/third_party/root-managers/sukisu-ultra"
 
-out="$TMP/output"
-if bash "$ROOT/tests/root_manager_provider_patch_test.sh" >"$out" 2>&1; then
-  :
-else
-  rc=$?
-  echo "FAIL: provider patch test returned $rc without submodule worktrees" >&2
+out="$(mktemp)"
+trap 'rm -f "$out"' EXIT
+
+set +e
+bash "$ROOT/tests/root_manager_provider_patch_test.sh" >"$out" 2>&1
+rc=$?
+set -e
+
+if [[ "$rc" -ne 0 ]]; then
   cat "$out" >&2
-  exit 1
+  fail "provider patch test returned $rc without provider worktrees"
 fi
 
-if grep -qE '^fatal: .*third_party/root-managers/.+ does not exist$' "$out"; then
-  echo "FAIL: provider patch test emitted fatal missing-worktree error" >&2
+if grep -qE '^fatal: .*third_party/root-managers/(kernelsu-next|sukisu-ultra)' "$out"; then
   cat "$out" >&2
-  exit 1
+  fail "provider patch test emitted a fatal git error for an absent provider"
 fi
 
-grep -q 'SKIP: kernelsu-next submodule worktree is not present' "$out"
-grep -q 'SKIP: sukisu-ultra submodule worktree is not present' "$out"
-echo 'PASS: provider patch tests skip absent submodule worktrees without fatal git errors'
+grep -q 'SKIP: kernelsu-next submodule worktree is not present' "$out" ||
+  fail "missing kernelsu-next absent-worktree skip"
+grep -q 'SKIP: sukisu-ultra submodule worktree is not present' "$out" ||
+  fail "missing sukisu-ultra absent-worktree skip"
+
+echo 'PASS: provider patch test safely skips absent root-manager worktrees'
