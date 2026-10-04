@@ -285,8 +285,13 @@ jobs:
             'CI_BUILD_SHA','BUILD_PROFILE','ROOT_VARIANTS','KERNEL_REPO_OVERRIDE','KERNEL_REF_OVERRIDE',
             'DEFCONFIG_OVERRIDE','CONFIG_FRAGMENT_OVERRIDE','JOBS','TOOLCHAIN','TOOLCHAIN_VERSION','LLVM_IAS',
             'CLANG_URL','GCC_URL','EXTRA_MAKE_ARGS','PATCH_PROFILE','UPSTREAM_PROFILE','LTO_PLUS','KSU_REF',
-            'PACKAGE_ANYKERNEL','ROM_FAMILY','ANYKERNEL_PROFILE','ANYKERNEL3_REF','KERNEL_NAME','APT_PACKAGES','PUBLISH_RELEASE'
+            'PACKAGE_ANYKERNEL','ROM_FAMILY','ANYKERNEL_PROFILE','ANYKERNEL3_REF','BUILD_CUSTOMIZATION',
+            'PUBLISH_RELEASE','TG_TOPIC_ID'
           }
           assert len(pnames) == 25
-          print('PASS Harness pipeline variable contract: 25')
+          workflow_text = open('.github/workflows/harness-kernel.yml', encoding='utf-8').read()
+          assert 'BUILD_CUSTOMIZATION' in workflow_text
+          assert '"kernel_name":' in workflow_text
+          assert '"apt_packages":' in workflow_text
+          print('PASS Harness pipeline variable contract: 25 (BUILD_CUSTOMIZATION + TG_TOPIC_ID)')
           PY
