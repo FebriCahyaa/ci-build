@@ -2,6 +2,9 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+CI_LOG_TAG=susfs
 
 SOURCE_DIR="${SOURCE_DIR:-}"
 WORK_DIR="${WORK_DIR:-}"
@@ -10,10 +13,21 @@ ROOT_MANAGER="${ROOT_MANAGER:-none}"
 ENABLE_SUSFS="${ENABLE_SUSFS:-false}"
 SUSFS_REF="${SUSFS_REF:-001e69919c6271f690fd00b17e4c721c9e599152}"
 
-fail() { echo "[susfs] ERROR: $*" >&2; exit 1; }
-log() { echo "[susfs] $*" >&2; }
+fail() { ci_die "$*"; }
+log() { ci_log "$*"; }
 
-[[ "$ENABLE_SUSFS" == "true" || "$ENABLE_SUSFS" == "1" ]] || exit 0
+# SUSFS_VERSION/SUSFS_SOURCE contain spaces and '/'; the env file must be quoted.
+write_susfs_env() {
+  write_env "$WORK_DIR/susfs.env" \
+    "ENABLE_SUSFS=true" \
+    "SUSFS_REPO=$SUSFS_REPO" \
+    "SUSFS_REF=$SUSFS_REF" \
+    "SUSFS_COMMIT=$SUSFS_COMMIT" \
+    "SUSFS_VERSION=$SUSFS_VERSION" \
+    "SUSFS_SOURCE=$SUSFS_SOURCE"
+}
+
+is_true "$ENABLE_SUSFS" || exit 0
 [[ -d "$SOURCE_DIR/.git" ]] || fail "SOURCE_DIR is not a git working tree"
 [[ -n "$WORK_DIR" ]] || fail "WORK_DIR is required"
 
@@ -83,14 +97,7 @@ if [[ "$MM" == "4.4" ]]; then
   SUSFS_COMMIT="$NON_GKI_COMMIT"
   SUSFS_VERSION="v2.3.0 / NonGKI 4.4"
   SUSFS_SOURCE="Lokitla/NonGKI_Kernel_Build_2nd:susfs_patch_to_4.4.patch"
-  cat > "$WORK_DIR/susfs.env" <<EOF
-ENABLE_SUSFS=true
-SUSFS_REPO=$SUSFS_REPO
-SUSFS_REF=$SUSFS_REF
-SUSFS_COMMIT=$SUSFS_COMMIT
-SUSFS_VERSION=$SUSFS_VERSION
-SUSFS_SOURCE=$SUSFS_SOURCE
-EOF
+  write_susfs_env
   log "source=$SUSFS_SOURCE"
   log "ref=$SUSFS_REF"
   log "commit=$SUSFS_COMMIT"
@@ -100,15 +107,11 @@ fi
 
 SUSFS_REPO="https://gitlab.com/simonpunk/susfs4ksu.git"
 SUSFS_DIR="$WORK_DIR/susfs4ksu"
-rm -rf "$SUSFS_DIR"
-
-git init "$SUSFS_DIR" >/dev/null
-git -C "$SUSFS_DIR" remote add origin "$SUSFS_REPO"
-git -C "$SUSFS_DIR" fetch --depth=1 origin "$SUSFS_REF" || fail "fetch SUSFS ref $SUSFS_REF"
-git -C "$SUSFS_DIR" checkout --detach FETCH_HEAD >/dev/null
+git_fetch_ref "$SUSFS_REPO" "$SUSFS_REF" "$SUSFS_DIR" || fail "fetch SUSFS ref $SUSFS_REF"
 
 SUSFS_COMMIT="$(git -C "$SUSFS_DIR" rev-parse HEAD)"
-SUSFS_VERSION="$(grep -RhsE '^#define[[:space:]]+SUSFS_VERSION|Bump version to' "$SUSFS_DIR/include" "$SUSFS_DIR/kernel_patches" 2>/dev/null | head -n1 || true)"
+SUSFS_VERSION="$(grep -RhsE '^#define[[:space:]]+SUSFS_VERSION' "$SUSFS_DIR/include" "$SUSFS_DIR/kernel_patches" 2>/dev/null |
+  head -n1 | sed -E 's/^#define[[:space:]]+SUSFS_VERSION[[:space:]]+//; s/"//g' || true)"
 [[ -n "$SUSFS_VERSION" ]] || SUSFS_VERSION="1.5.5 / kernel-4.19"
 
 if [[ "$PROVIDER" == "resukisu" && "$MM" == "4.19" ]]; then
@@ -166,14 +169,7 @@ else
   SUSFS_SOURCE="simonpunk/susfs4ksu"
 fi
 
-cat > "$WORK_DIR/susfs.env" <<EOF
-ENABLE_SUSFS=true
-SUSFS_REPO=$SUSFS_REPO
-SUSFS_REF=$SUSFS_REF
-SUSFS_COMMIT=$SUSFS_COMMIT
-SUSFS_VERSION=$SUSFS_VERSION
-SUSFS_SOURCE=$SUSFS_SOURCE
-EOF
+write_susfs_env
 
 log "source=$SUSFS_SOURCE"
 log "ref=$SUSFS_REF"

@@ -102,7 +102,7 @@ pipeline:
                         bc bison build-essential ccache curl flex \
                         g++-multilib gcc-multilib git git-lfs gnupg gperf \
                         imagemagick lib32readline-dev lib32z1-dev libelf-dev \
-                        liblz4-tool libsdl1.2-dev libssl-dev libxml2 \
+                        lz4 libsdl1.2-dev libssl-dev libxml2 \
                         libxml2-utils lzop pngcrush rsync schedtool \
                         squashfs-tools xsltproc zip zlib1g-dev python3 \
                         ca-certificates jq unzip rclone
@@ -114,5 +114,4 @@ pipeline:
                         chmod +x /usr/local/bin/repo
                       fi
 
-                      chmod +x ./scripts/build_rom.sh
-                      ./scripts/build_rom.sh
+                      bash scripts/build_rom.sh

@@ -4,7 +4,6 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 KERNEL_NAME_FILE="${KERNEL_NAME_FILE:-$REPO_ROOT/kernel-name}"
-KERNEL_LOCALVERSION_FILE="${KERNEL_LOCALVERSION_FILE:-$REPO_ROOT/localversion-cip}"
 KERNEL_BUILD_SUFFIX_FILE="${KERNEL_BUILD_SUFFIX_FILE:-$REPO_ROOT/localversion-st}"
 CONFIG_FILE="${CONFIG_FILE:-}"
 KERNEL_NAME="${KERNEL_NAME:-}"
@@ -18,7 +17,7 @@ Usage:
 Behavior:
   empty/auto name -> read from kernel-name in the CI repository
   the resolved name and localversion-st build suffix are written to CONFIG_LOCALVERSION
-  source localversion files are cleared because Linux appends them before CONFIG_LOCALVERSION
+  kernel-source localversion files are cleared separately by sync_localversion_files.sh
   blank/missing kernel-name -> no-op
   name without leading '-' -> '-'<name>
 EOF
@@ -77,7 +76,6 @@ case "$KERNEL_NAME" in
     ;;
 esac
 
-export KERNEL_NAME KERNEL_LOCALVERSION_FILE KERNEL_BUILD_SUFFIX_FILE
 
 # The 4.4 setlocalversion script appends localversion* files before CONFIG_LOCALVERSION.
 # Put the project name and build suffix together in .config to guarantee their order.
@@ -96,7 +94,6 @@ if [[ -f "$KERNEL_BUILD_SUFFIX_FILE" ]]; then
     }
   fi
 fi
-: > "$KERNEL_LOCALVERSION_FILE"
 
 python3 - "$CONFIG_FILE" "$KERNEL_NAME$BUILD_SUFFIX" <<'PY'
 from pathlib import Path
@@ -115,5 +112,4 @@ else:
 
 path.write_text(text, encoding="utf-8")
 print(f"[kernel-name] CONFIG_LOCALVERSION={line.split('=',1)[1]}")
-print("[kernel-name] source localversion files are cleared to prevent duplicate/out-of-order suffixes")
 PY

@@ -8,8 +8,8 @@
 #   ROOT_VARIANT=vanilla|kernelsu|kernelsu-next|resukisu|sukisu-ultra   (preferred over ENABLE_KSU/KSU_PROVIDER)
 #   KSU_REF ENABLE_SUSFS SUSFS_REF KSU_REPO KSU_HOOK_MODE
 #   NONGKI_4_4_HOOKS NONGKI_4_4_MODE
-#   TOOLCHAIN TOOLCHAIN_VERSION LLVM LLVM_IAS CROSS_COMPILE CROSS_COMPILE_ARM32 CLANG_URL GCC_URL
-#   PATCH_PROFILE UPSTREAM_PROFILE LTO_PLUS SCHEDULER_PROFILE KERNEL_NAME EXTRA_MAKE_ARGS
+#   TOOLCHAIN TOOLCHAIN_VERSION TOOLCHAIN_URL LLVM LLVM_IAS CROSS_COMPILE CROSS_COMPILE_ARM32 CLANG_URL GCC_URL
+#   PATCH_PROFILE UPSTREAM_PROFILE LTO_PLUS TWEAKS SCHEDULER_PROFILE KERNEL_NAME EXTRA_MAKE_ARGS
 #   PACKAGE_ANYKERNEL ANYKERNEL_PROFILE ANYKERNEL3_REPO ANYKERNEL3_REF
 #   USE_CCACHE CCACHE_DIR TOOLCHAIN_CACHE_DIR KERNEL_SOURCE_SEED WORK_DIR
 set -Eeuo pipefail
@@ -21,12 +21,12 @@ CI_LOG_TAG=build
 
 # Resolve a canonical target profile once; explicit environment overrides remain authoritative.
 if [[ -n "${BUILD_PROFILE:-}" ]]; then
-  eval "$(BUILD_PROFILE="$BUILD_PROFILE" DEVICE="${DEVICE:-generic}" KERNEL_FAMILY="${KERNEL_FAMILY:-}" "$SCRIPT_DIR/resolve_build_profile.sh")"
+  load_profile "$BUILD_PROFILE" "${DEVICE:-generic}" "${KERNEL_FAMILY:-}"
 elif [[ -z "${PROFILE_ID:-}" ]]; then
   # Auto-select when DEVICE/FAMILY identify one canonical target.
   if [[ -n "${DEVICE:-}" && "${DEVICE:-generic}" != generic ]]; then
     BUILD_PROFILE="auto"
-    eval "$(BUILD_PROFILE=auto DEVICE="$DEVICE" KERNEL_FAMILY="${KERNEL_FAMILY:-}" "$SCRIPT_DIR/resolve_build_profile.sh")"
+    load_profile auto "$DEVICE" "${KERNEL_FAMILY:-}"
   fi
 fi
 BUILD_PROFILE_LABEL="${PROFILE_ID:-${BUILD_PROFILE:-unknown}}"
@@ -61,6 +61,7 @@ SCHEDULER_PROFILE="${SCHEDULER_PROFILE:-${PROFILE_SCHEDULER_PROFILE:-auto}}"
 PATCH_PROFILE="${PATCH_PROFILE:-${PROFILE_PATCH_PROFILE:-auto}}"
 UPSTREAM_PROFILE="${UPSTREAM_PROFILE:-${PROFILE_UPSTREAM_PROFILE:-auto}}"
 LTO_PLUS="${LTO_PLUS:-${PROFILE_LTO_PLUS:-false}}"
+TWEAKS="${TWEAKS:-${PROFILE_TWEAKS:-none}}"
 KERNEL_NAME="${KERNEL_NAME:-}"
 # PATCH_PROFILE=southwest-ng also labels the scheduler profile (keeps workflow inputs <= 25).
 if [[ "$PATCH_PROFILE" == "southwest-ng" && "$SCHEDULER_PROFILE" == "auto" ]]; then
@@ -87,6 +88,8 @@ SUSFS_REF="${SUSFS_REF:-001e69919c6271f690fd00b17e4c721c9e599152}"
 
 PACKAGE_ANYKERNEL="${PACKAGE_ANYKERNEL:-${PROFILE_PACKAGE_ANYKERNEL:-true}}"
 ANYKERNEL_PROFILE="${ANYKERNEL_PROFILE:-${PROFILE_ANYKERNEL_PROFILE:-auto}}"
+# "auto" means the target registry choice when a profile is loaded.
+[[ "$ANYKERNEL_PROFILE" == auto && -n "${PROFILE_ANYKERNEL_PROFILE:-}" ]] && ANYKERNEL_PROFILE="$PROFILE_ANYKERNEL_PROFILE"
 ANYKERNEL3_REPO="${ANYKERNEL3_REPO:-local}"
 ANYKERNEL3_REF="${ANYKERNEL3_REF:-${PROFILE_ANYKERNEL3_REF:-master}}"
 USE_CCACHE="${USE_CCACHE:-true}"
@@ -127,9 +130,6 @@ mkdir -p "$WORK" "$ARTIFACTS"
 : > "$BUILD_LOG"
 export CI_HEARTBEAT_SECONDS="${CI_HEARTBEAT_SECONDS:-15}"
 
-# Harness workspaces can lose executable bits; every helper is invoked via bash anyway.
-chmod +x "$SCRIPT_DIR"/*.sh 2>/dev/null || true
-
 # Kbuild identity (KBUILD_BUILD_USER/HOST) and kernel name.
 source "$SCRIPT_DIR/kbuild_identity.sh"
 if [[ -z "$KERNEL_NAME" || "$KERNEL_NAME" == "auto" ]]; then
@@ -138,11 +138,25 @@ fi
 
 ci_phase() { echo "[CI-PHASE] $1" | tee -a "$BUILD_LOG"; }
 
+# ------------------------------------------------------------
+# Progress state + Telegram live dashboard
+#
+# Build steps only record progress in $PROGRESS_STATE (JSON). When Telegram is
+# configured, scripts/tg_dashboard.py owns the build message and redraws it at
+# a steady, rate-limit-aware cadence; without it, progress_beacon.sh falls back
+# to direct throttled edits.
+# ------------------------------------------------------------
+PROGRESS_STATE="$WORK/.ci-progress.json"
+export CI_PROGRESS_STATE_JSON="$PROGRESS_STATE"
+rm -f "$PROGRESS_STATE"
+DASHBOARD_PID=""
+export TG_DASHBOARD_ACTIVE=false
+
+state_set() { python3 "$SCRIPT_DIR/progress_state.py" "$PROGRESS_STATE" "$@" 2>/dev/null || true; }
+
 progress_update() {
   local pct="$1" phase="$2" detail="$3" state="${4:-pending}"
-  [[ -n "${TG_BOT_TOKEN:-}" && -n "${TG_CHAT_ID:-}" && -n "${TG_MESSAGE_ID:-}" ]] || \
-    { [[ "${CI_GITHUB_STATUS_ENABLED:-false}" == "true" && -n "$GH_TOKEN" && -n "$GH_REPOSITORY" && -n "$CI_BUILD_SHA" ]] || return 0; }
-  TG_BOT_TOKEN="$TG_BOT_TOKEN" TG_CHAT_ID="$TG_CHAT_ID" TG_TOPIC_ID="$TG_TOPIC_ID" TG_REQUIRE_TOPIC="${TG_REQUIRE_TOPIC:-false}" TG_MESSAGE_ID="$TG_MESSAGE_ID" \
+  TG_BOT_TOKEN="$TG_BOT_TOKEN" TG_CHAT_ID="$TG_CHAT_ID" TG_TOPIC_ID="$TG_TOPIC_ID" TG_REQUIRE_TOPIC="${TG_REQUIRE_TOPIC:-false}" TG_MESSAGE_ID="${MID:-}" \
   TG_START_TIME="$START" GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" CI_BUILD_SHA="$CI_BUILD_SHA" \
   CI_GITHUB_STATUS_ENABLED="${CI_GITHUB_STATUS_ENABLED:-false}" HARNESS_EXECUTION_ID="$HARNESS_EXECUTION_ID" \
   RUN_URL="$RUN_URL" WORK_DIR="$WORK" BUILD_LOG="$BUILD_LOG" BUILD_PROFILE="$BUILD_PROFILE_LABEL" DEVICE="$DEVICE" ROOT_VARIANT="$ROOT_VARIANT" \
@@ -185,13 +199,49 @@ run_helper() {
 # must have an existing message to edit and a place to attach diagnostics.
 VARIANT_LABEL="$(variant_label "$ROOT_VARIANT")"
 TG_RUN_URL_HTML="$(tg_escape_html "${RUN_URL:-}")"
+TG_BRANCH_HTML="$(tg_escape_html "$KERNEL_BRANCH")"
 PROJECT_MAINTAINER="${MAINTAINER:-Febrian Rahmad Cahya}"
 MID="$(tg_msg "🚀 <b>Zairenkai Kernel Build</b>
 🧭 Target: <code>$BUILD_PROFILE_LABEL</code>
 📱 Device: <code>$DEVICE</code> | 🔐 <code>$VARIANT_LABEL</code>
 🧩 Phase: <code>preparing source and root-manager integration</code>
-🌿 Branch: <code>$KERNEL_BRANCH</code>
-🔗 <a href="$TG_RUN_URL_HTML">CI log</a>")" || MID=""
+🌿 Branch: <code>$TG_BRANCH_HTML</code>
+🔗 <a href=\"$TG_RUN_URL_HTML\">CI log</a>")" || MID=""
+
+start_dashboard() {
+  [[ -n "${MID:-}" ]] && is_true "${TG_DASHBOARD:-true}" && command -v python3 >/dev/null 2>&1 || return 0
+  state_set pct=1 state=pending phase=source "detail=preparing source and root-manager integration"
+  TG_MESSAGE_ID="$MID" BUILD_PROFILE="$BUILD_PROFILE_LABEL" DEVICE="$DEVICE" VARIANT_LABEL="$VARIANT_LABEL" \
+  RUN_URL="$RUN_URL" KERNEL_BRANCH="$KERNEL_BRANCH" \
+    python3 "$SCRIPT_DIR/tg_dashboard.py" "$PROGRESS_STATE" "$BUILD_LOG" >>"$WORK/tg-dashboard.log" 2>&1 &
+  DASHBOARD_PID=$!
+  TG_DASHBOARD_ACTIVE=true
+}
+
+# dashboard_finish <success|failure> <phase> <detail> [error-excerpt]: render the
+# final frame and wait (bounded) for the renderer to exit, so no later edit races it.
+dashboard_finish() {
+  [[ -n "$DASHBOARD_PID" ]] || return 1
+  local final="$1" phase="$2" detail="$3" excerpt="${4:-}" waited=0
+  # On failure keep the stage that was running (drives the checklist) and put
+  # the failure reason into the detail line.
+  if [[ "$final" == failure ]]; then
+    detail="$phase · $detail"
+    phase="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("phase","build"))' "$PROGRESS_STATE" 2>/dev/null || echo build)"
+  fi
+  state_set final=true "state=$final" "phase=$phase" "detail=$detail" "error_excerpt=$excerpt" \
+    "pct=$([[ "$final" == success ]] && echo 100 || python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pct",0))' "$PROGRESS_STATE" 2>/dev/null || echo 0)"
+  while kill -0 "$DASHBOARD_PID" 2>/dev/null && (( waited < 60 )); do
+    sleep 0.5
+    waited=$((waited + 1))
+  done
+  kill "$DASHBOARD_PID" 2>/dev/null || true
+  DASHBOARD_PID=""
+  return 0
+}
+stop_dashboard() { [[ -z "$DASHBOARD_PID" ]] || kill "$DASHBOARD_PID" 2>/dev/null || true; }
+trap stop_dashboard EXIT
+start_dashboard
 
 info() { printf '%s=%s\n' "$1" "$2" >> "$INFO"; }
 
@@ -209,15 +259,12 @@ write_failure_reports() {
     printf 'variant=%s\n' "${ROOT_VARIANT:-unknown}"
     printf 'kernel_repo=%s\n' "${KERNEL_REPO:-unknown}"
     printf 'kernel_ref=%s\n' "${KERNEL_BRANCH:-unknown}"
-    printf 'reason=%s\n' "$reason"
-    printf 'exit_context=see full build log\n\n'
-    echo '=== Extracted diagnostics ==='
-    if ! grep -nEi '(fatal error:|error:|undefined reference|no rule to make target|recipe for target.*failed|killed|out of memory|oom|segmentation fault|cannot find|not found|permission denied|make(\[[0-9]+\])?: \\*\*\*|error [0-9]+)' "$BUILD_LOG" | tail -n 120; then
-      echo '(no canonical compiler/make diagnostic matched)'
-    fi
-    echo
-    echo '=== Last 500 log lines ==='
-    tail -n 500 "$BUILD_LOG" || true
+    printf 'toolchain=%s\n' "${RESOLVED_COMPILER_STRING:-unresolved}"
+    printf 'root_provider=%s %s\n' "${KSU_PROVIDER:-none}" "${KSU_PROVIDER_VERSION:-}"
+    printf 'failed_stage=%s\n' "$reason"
+    printf 'duration=%s\n' "$(fmt_dur $(( $(date +%s) - START )))"
+    printf 'run_url=%s\n\n' "${RUN_URL:-local}"
+    python3 "$SCRIPT_DIR/extract_build_errors.py" "$BUILD_LOG" --summary || tail -n 300 "$BUILD_LOG"
   } > "$summary" 2>/dev/null || true
   cp -f "$BUILD_LOG" "$full_log" 2>/dev/null || true
   if [[ -f "$full_log" ]]; then
@@ -245,22 +292,27 @@ fail() {
   # Persist failure artifacts immediately. This must not depend on the final
   # matrix status or release-publication flag.
   stage_artifacts "$ARTIFACTS" || true
-  echo "===== FAILURE DIAGNOSTICS =====" | tee -a "$BUILD_LOG" >&2
-  cat "$WORK/failure-summary.txt" 2>/dev/null | tee -a "$BUILD_LOG" >&2 || true
-  local diag
-  diag="$(grep -nEi '(fatal error:|error:|undefined reference|no rule to make target|recipe for target.*failed|killed|out of memory|oom|cannot find|not found|permission denied|make(\[[0-9]+\])?: \\*\*\*)' "$WORK/failure-summary.txt" 2>/dev/null | tail -n 8 | sed -E 's/^[0-9]+://g' | tr '\n' ' ' | cut -c1-900 || true)"
-  [[ -n "$diag" ]] || diag="${reason}"
-  tg_edit "${MID:-}" "❌ <b>Zairenkai Build gagal</b>
-🧭 Target: <code>${BUILD_PROFILE:-unknown}</code>
-📱 <code>$DEVICE</code> | 🔐 <code>$(variant_label "$ROOT_VARIANT")</code>
-🧩 Tahap: <code>$reason</code>
-🚨 <code>$(printf '%s' "$diag" | python3 -c 'import html,sys; print(html.escape(sys.stdin.read()))')</code>
-⏱ $(fmt_dur "$duration")
+  echo "===== FAILURE DIAGNOSTICS =====" >&2
+  sed -n '1,/^=== Last 300 log lines ===/p' "$WORK/failure-summary.txt" >&2 2>/dev/null || true
+  local excerpt
+  excerpt="$(python3 "$SCRIPT_DIR/extract_build_errors.py" "$BUILD_LOG" --excerpt 2>/dev/null || true)"
+  [[ -n "$excerpt" ]] || excerpt="$reason"
+  if ! dashboard_finish failure "$reason" "failed after $(fmt_dur "$duration")" "$excerpt"; then
+    tg_edit "${MID:-}" "❌ <b>Zairenkai — Build gagal</b>
+🧭 <code>$(tg_escape_html "$BUILD_PROFILE_LABEL")</code> · 📱 <code>$(tg_escape_html "$DEVICE")</code> · 🔐 <code>$(tg_escape_html "$VARIANT_LABEL")</code>
+🧩 Tahap: <b>$(tg_escape_html "$reason")</b> · ⏱ <code>$(fmt_dur "$duration")</code>
+
+🚨 <b>Error</b>
+<pre>$(tg_escape_html "${excerpt: -1500}")</pre>
 🔗 <a href=\"$TG_RUN_URL_HTML\">CI log</a>" || true
+  fi
   if is_true "${TG_SEND_FAILURE_ARTIFACTS:-true}"; then
-    tg_file "$WORK/failure-summary.txt" "🚨 Failure diagnostics — ${BUILD_PROFILE_LABEL} — $DEVICE $(variant_label "$ROOT_VARIANT")" || true
+    local tag
+    tag="$(tg_escape_html "$BUILD_PROFILE_LABEL · $VARIANT_LABEL")"
+    tg_file "$WORK/failure-summary.txt" "🚨 <b>Diagnostics</b> — <code>$tag</code>
+Stage: <code>$(tg_escape_html "$reason")</code>" || true
     if [[ -f "$WORK/failure-build.log.gz" ]]; then
-      tg_file "$WORK/failure-build.log.gz" "📦 Full build log (gzip) — ${BUILD_PROFILE_LABEL} — $DEVICE $(variant_label "$ROOT_VARIANT")" || true
+      tg_file "$WORK/failure-build.log.gz" "📦 <b>Full build log</b> (gzip) — <code>$tag</code>" || true
     fi
   fi
   exit 1
@@ -293,6 +345,7 @@ ci_phase "source-checkout"
 progress_update 5 "source" "checkout complete"
 COMMIT="$(git log -1 --pretty='%h %s')"
 COMMIT_SHA="$(git rev-parse HEAD)"
+COMMIT_SUBJECT="$(git log -1 --pretty='%s')"
 
 # ------------------------------------------------------------
 # Auto-detect architecture / defconfig / fragment
@@ -335,6 +388,7 @@ if [[ "$ROOT_VARIANT" == vanilla ]]; then
 else
   KSU_REQUIRED=true
   ci_phase "root-provider"
+  progress_update 8 "root-provider" "integrating $VARIANT_LABEL"
   run_helper root_manager_apply.sh \
     SOURCE_DIR="$SRC_DIR" WORK_DIR="$WORK" KERNEL_VERSION="$KMM" ROOT_MANAGER="$ROOT_VARIANT" \
     KSU_REPO="$KSU_REPO" KSU_REF="$KSU_REF" ENABLE_SUSFS="$ENABLE_SUSFS" KSU_HOOK_MODE="$KSU_HOOK_MODE" \
@@ -388,7 +442,7 @@ PATCH_ENV=(
   SOURCE_DIR="$SRC_DIR" DEVICE="$DEVICE" KERNEL_VERSION="$KMM" KERNEL_REPO="$KERNEL_REPO"
   PATCH_PROFILE="$PATCH_PROFILE" UPSTREAM_PROFILE="$UPSTREAM_PROFILE"
   ROOT_MANAGER="$KSU_PROVIDER" KSU_REQUIRED="$KSU_REQUIRED" KSU_PREINTEGRATED="$KSU_PREINTEGRATED"
-  ENABLE_SUSFS="$ENABLE_SUSFS" KSU_SUSFS_REQUIRED="$ENABLE_SUSFS" LTO_PLUS="$LTO_PLUS"
+  ENABLE_SUSFS="$ENABLE_SUSFS" KSU_SUSFS_REQUIRED="$ENABLE_SUSFS" LTO_PLUS="$LTO_PLUS" TWEAKS="$TWEAKS"
 )
 ci_phase "config-patches"
 run_helper apply_patch_series.sh "${PATCH_ENV[@]}" PHASE=source || fail "source patch series"
@@ -398,7 +452,8 @@ progress_update 12 "config" "patch selection complete"
 # Toolchain
 # ------------------------------------------------------------
 TOOLCHAIN_ENV="$WORK/toolchain.env"
-TOOLCHAIN="$TOOLCHAIN" TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" ARCH="$DETECTED_ARCH" \
+progress_update 15 "toolchain" "resolving ${TOOLCHAIN}${TOOLCHAIN_VERSION:+ $TOOLCHAIN_VERSION}"
+TOOLCHAIN="$TOOLCHAIN" TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" TOOLCHAIN_URL="${TOOLCHAIN_URL:-}" ARCH="$DETECTED_ARCH" \
 CLANG_URL="$CLANG_URL" GCC_URL="$GCC_URL" \
   bash "$SCRIPT_DIR/toolchain_resolver.sh" "$SRC_DIR" "$WORK" \
   > "$TOOLCHAIN_ENV" 2> >(tee -a "$BUILD_LOG" >&2) || fail "toolchain resolution"
@@ -468,31 +523,31 @@ kernel_ge "$KMM" 5 4 || MAKE_CMD+=(HOSTCC="gcc -fcommon")
 read -r -a EXTRA_ARGS <<< "$EXTRA_MAKE_ARGS"
 MAKE_CMD+=("${EXTRA_ARGS[@]}")
 
-PROJECT_MAINTAINER="${MAINTAINER:-Febrian Rahmad Cahya}"
-if [[ -n "${MID:-}" ]]; then
+state_set "kernel=$DETECTED_KERNEL_FULL_VERSION ($DETECTED_ARCH)" "toolchain=$RESOLVED_TOOLCHAIN $RESOLVED_TOOLCHAIN_VERSION · jobs $JOBS"
+if [[ -n "${MID:-}" && "$TG_DASHBOARD_ACTIVE" != true ]]; then
   tg_edit "$MID" "🚀 <b>Zairenkai Kernel Build</b>
 🧭 Target: <code>$BUILD_PROFILE_LABEL</code>
 📱 Device: <code>$DEVICE</code> | 🔐 <code>$VARIANT_LABEL</code>
 🐧 Kernel: <code>$DETECTED_KERNEL_FULL_VERSION</code> (<code>$DETECTED_ARCH</code>)
-🌿 Branch: <code>$KERNEL_BRANCH</code>
+🌿 Branch: <code>$TG_BRANCH_HTML</code>
 ⚙️ Defconfig: <code>$DETECTED_DEFCONFIG</code>
 🧩 Fragment: <code>${DETECTED_FRAGMENT:-none}</code>
 🛠 Toolchain: <code>$RESOLVED_TOOLCHAIN $RESOLVED_TOOLCHAIN_VERSION</code>
 🧵 Jobs: <code>$JOBS</code>
-🔗 <a href="$TG_RUN_URL_HTML">CI log</a>" || true
+🔗 <a href=\"$TG_RUN_URL_HTML\">CI log</a>" || true
 fi
 
 for kv in \
   "device=$DEVICE" "arch=$DETECTED_ARCH" "kernel_version=$KMM" "kernel_full_version=$DETECTED_KERNEL_FULL_VERSION" \
-  "kernel_repo=$KERNEL_REPO" "ref_type=$KERNEL_REF_TYPE" "ref=$KERNEL_BRANCH" "commit=$COMMIT" "commit_sha=$COMMIT_SHA" \
+  "kernel_repo=$KERNEL_REPO" "ref_type=$KERNEL_REF_TYPE" "ref=$KERNEL_BRANCH" "commit=$COMMIT" "commit_sha=$COMMIT_SHA" "commit_subject=$COMMIT_SUBJECT" \
   "ci_build_sha=$CI_BUILD_SHA" "build_profile=${BUILD_PROFILE:-$PROFILE_ID}" "kernel_family=$KERNEL_FAMILY" \
-  "dynamic_partition=$DYNAMIC_PARTITION" "gki=$GKI" "source_label=$SOURCE_LABEL" \
+  "dynamic_partition=$DYNAMIC_PARTITION" "gki=$GKI" "source_label=$SOURCE_LABEL" "anykernel_profile=$ANYKERNEL_PROFILE" \
   "defconfig=$DETECTED_DEFCONFIG" "fragment=${DETECTED_FRAGMENT:-}" \
   "toolchain=$RESOLVED_TOOLCHAIN" "toolchain_version=$RESOLVED_TOOLCHAIN_VERSION" "compiler=$RESOLVED_COMPILER_STRING" \
   "llvm=$LLVM_VALUE" "llvm_ias=$LLVM_IAS_VALUE" "clang_triple=$CLANG_TRIPLE" "cross_compile=$CROSS_DEFAULT" \
   "cross_compile_arm32=$CROSS_COMPILE_ARM32" "ccache=${CCACHE_PREFIX:+true}" \
   "scheduler_profile=$SCHEDULER_PROFILE" "patch_profile=$PATCH_PROFILE" "upstream_profile=$UPSTREAM_PROFILE" \
-  "lto_plus=$LTO_PLUS" "kernel_name=$KERNEL_NAME" "build_user=$KBUILD_BUILD_USER" "build_host=$KBUILD_BUILD_HOST" "maintainer=$PROJECT_MAINTAINER" \
+  "lto_plus=$LTO_PLUS" "tweaks=$TWEAKS" "kernel_name=$KERNEL_NAME" "build_user=$KBUILD_BUILD_USER" "build_host=$KBUILD_BUILD_HOST" "maintainer=$PROJECT_MAINTAINER" \
   "root_variant=$ROOT_VARIANT" "ksu_preintegrated=$KSU_PREINTEGRATED" "ksu_provider=$KSU_PROVIDER" \
   "ksu_repo=${KSU_REPO:-}" "ksu_ref=${KSU_REF:-}" "ksu_version=${KSU_PROVIDER_VERSION:-none}" \
   "ksu_commit=${KSU_PROVIDER_COMMIT:-none}" "ksu_layout=${KSU_LAYOUT_RESOLVED:-none}" "ksu_hook_mode=$KSU_HOOK_MODE" \
@@ -508,6 +563,11 @@ echo "Make command: ${MAKE_CMD[*]}" | tee -a "$BUILD_LOG"
 # ------------------------------------------------------------
 # Configure
 # ------------------------------------------------------------
+# Root-provider wiring and patches leave the tree modified, which makes
+# CONFIG_LOCALVERSION_AUTO append "-dirty". Pin the SCM suffix to the source
+# commit instead (honoured by setlocalversion on 4.4 - 5.x) so every variant
+# reports the same clean release string.
+printf -- '-g%s\n' "$(git -C "$SRC_DIR" rev-parse --short=12 HEAD)" > "$SRC_DIR/.scmversion"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
@@ -524,13 +584,14 @@ if [[ -n "$SELECTED_FRAGMENT" ]]; then
     cat "$SELECTED_FRAGMENT" >> "$OUT/.config"
   fi
   run_live "config-fragment-olddefconfig" "${MAKE_CMD[@]}" olddefconfig || fail "config fragment olddefconfig"
-  progress_update 35 "config" "fragment resolved"
+  progress_update 35 "defconfig" "fragment resolved"
 elif [[ "$CONFIG_FRAGMENT" != none && "$CONFIG_FRAGMENT" != auto ]]; then
   fail "config fragment not resolved"
 fi
 
 run_helper apply_patch_series.sh "${PATCH_ENV[@]}" PHASE=config KERNEL_OUT="$OUT" || fail "config patch profile"
 run_live "config-resolve" "${MAKE_CMD[@]}" olddefconfig || fail "olddefconfig after config patches"
+run_helper apply_patch_series.sh "${PATCH_ENV[@]}" PHASE=verify KERNEL_OUT="$OUT" || true
 
 # The selected provider/SUSFS symbols must survive config resolution.
 if [[ "$KSU_REQUIRED" == true ]]; then
@@ -563,7 +624,7 @@ info scheduler "$SCHEDULER_DETECTED"
 # ------------------------------------------------------------
 ci_phase "compile"
 progress_update 44 "compile" "starting"
-tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
+[[ "$TG_DASHBOARD_ACTIVE" == true ]] || tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
 🧭 Target: <code>${BUILD_PROFILE_LABEL}</code>
 📱 $DEVICE | 🔐 $VARIANT_LABEL | 🏗 $DETECTED_ARCH
 ⚙️ <code>$DETECTED_DEFCONFIG</code>
@@ -571,10 +632,19 @@ tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
 📊 Scheduler: <code>$SCHEDULER_DETECTED</code>
 🧵 Jobs: <code>$JOBS</code>" || true
 
-# Progress denominator: source-file estimate (never an unrestricted `make -n`).
-COMPILE_TOTAL="$(git -C "$SRC_DIR" ls-files -- '*.c' '*.S' '*.s' 2>/dev/null | wc -l | tr -d ' ')"
+# Progress denominator (never an unrestricted `make -n`): the object count of
+# the last successful build of this profile when known, else ~13% of the
+# tree's C/asm sources (measured on lavender_defconfig: 3163 of 25455).
+COMPILE_HINT_FILE="${COMPILE_HINT_FILE:-${TOOLCHAIN_CACHE_DIR:-$WORK}/.compile-objects-${BUILD_PROFILE_LABEL}}"
+if [[ -s "$COMPILE_HINT_FILE" && "$(cat "$COMPILE_HINT_FILE")" =~ ^[0-9]+$ ]]; then
+  COMPILE_TOTAL="$(cat "$COMPILE_HINT_FILE")"
+else
+  COMPILE_TOTAL="$(git -C "$SRC_DIR" ls-files -- '*.c' '*.S' '*.s' 2>/dev/null | wc -l | tr -d ' ')"
+  COMPILE_TOTAL=$(( COMPILE_TOTAL * 13 / 100 ))
+fi
 info compile_plan_total "$COMPILE_TOTAL"
 rm -f "$WORK/.stop-compile-telemetry"
+TG_DASHBOARD_ACTIVE="$TG_DASHBOARD_ACTIVE" CI_PROGRESS_STATE_JSON="$PROGRESS_STATE" \
 TG_BOT_TOKEN="$TG_BOT_TOKEN" TG_CHAT_ID="$TG_CHAT_ID" TG_TOPIC_ID="$TG_TOPIC_ID" TG_REQUIRE_TOPIC="${TG_REQUIRE_TOPIC:-false}" TG_MESSAGE_ID="$MID" \
 TG_START_TIME="$START" GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" CI_BUILD_SHA="$CI_BUILD_SHA" \
 BUILD_PROFILE="$BUILD_PROFILE_LABEL" CI_GITHUB_STATUS_ENABLED="${CI_GITHUB_STATUS_ENABLED:-false}" RUN_URL="$RUN_URL" \
@@ -598,20 +668,27 @@ if (( COMPILE_RC != 0 )); then
   fail "compile: kernel compilation returned exit ${COMPILE_RC}"
 fi
 progress_update 90 "compile" "kernel compilation complete"
+# Remember the real object count so the next build of this profile has an
+# accurate progress denominator (persisted with the toolchain cache).
+compiled_objects="$(grep -Ec '^[[:space:]]+(CC|AS|HOSTCC|HOSTAS)[[:space:]]' "$BUILD_LOG" || true)"
+if [[ "$compiled_objects" =~ ^[0-9]+$ ]] && (( compiled_objects > 500 )); then
+  mkdir -p "$(dirname -- "$COMPILE_HINT_FILE")" 2>/dev/null && printf '%s\n' "$compiled_objects" > "$COMPILE_HINT_FILE" 2>/dev/null || true
+fi
 
 # ------------------------------------------------------------
 # Collect artifacts
 # ------------------------------------------------------------
 ci_phase "artifacts"
 BOOT_DIR="$OUT/arch/$DETECTED_ARCH/boot"
-found_image=false
+KERNEL_IMAGE=""
 for img in Image.gz-dtb Image-dtb Image.gz Image.lz4 Image zImage-dtb zImage dtbo.img dtb.img; do
   if [[ -f "$BOOT_DIR/$img" ]]; then
     cp -f "$BOOT_DIR/$img" "$ARTIFACTS/$img"
-    [[ "$img" == dtb* ]] || found_image=true
+    [[ "$img" == dtb* || -n "$KERNEL_IMAGE" ]] || KERNEL_IMAGE="$img"
   fi
 done
-[[ "$found_image" == true ]] || fail "no kernel image produced in $BOOT_DIR"
+[[ -n "$KERNEL_IMAGE" ]] || fail "no kernel image produced in $BOOT_DIR"
+info kernel_image "$KERNEL_IMAGE"
 # Separate DTB for trees that do not append it to the image.
 if [[ ! -f "$ARTIFACTS/Image.gz-dtb" && ! -f "$ARTIFACTS/Image-dtb" && -d "$BOOT_DIR/dts" ]]; then
   mapfile -t DTBS < <(find "$BOOT_DIR/dts" -name "*${DEVICE}*.dtb" | sort)
@@ -652,7 +729,6 @@ if is_true "$PACKAGE_ANYKERNEL"; then
   SOURCE="$(basename "$KERNEL_REPO" .git)" ANYKERNEL3_REPO="$ANYKERNEL3_REPO" ANYKERNEL3_REF="$ANYKERNEL3_REF" \
     bash "$SCRIPT_DIR/build_anykernel.sh" > "$AK_ENV" 2> >(tee -a "$BUILD_LOG" >&2) || fail "AnyKernel3 packaging"
   source "$AK_ENV"
-  info anykernel_profile "$ANYKERNEL_PROFILE"
   info anykernel_zip "$(basename "$ANYKERNEL_ZIP")"
   info anykernel_sha256 "$ANYKERNEL_SHA256"
 fi
@@ -673,6 +749,7 @@ stage_artifacts "$ARTIFACTS"
 
 DURATION=$(( $(date +%s) - START ))
 progress_update 100 "done" "$VARIANT_LABEL ready" success
+dashboard_finish success "done" "$(basename "${ANYKERNEL_ZIP:-$ARCHIVE}") · $(fmt_dur "$DURATION")" ||
 tg_edit "$MID" "✅ <b>Zairenkai build selesai</b>
 🧭 Target: <code>${BUILD_PROFILE_LABEL}</code>
 📱 $DEVICE | 🔐 $VARIANT_LABEL

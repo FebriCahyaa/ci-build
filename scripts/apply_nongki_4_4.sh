@@ -7,9 +7,12 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+CI_LOG_TAG=nongki-4.4
 
-fail() { echo "[nongki-4.4] ERROR: $*" >&2; exit 1; }
-log() { echo "[nongki-4.4] $*" >&2; }
+fail() { ci_die "$*"; }
+log() { ci_log "$*"; }
 
 SOURCE_DIR="${SOURCE_DIR:-}"
 WORK_DIR="${WORK_DIR:-}"
@@ -33,13 +36,6 @@ INLINE_SCRIPT_BLOB="$UPSTREAM_INLINE_HOOK_BLOB"
 SYSCALL_SCRIPT_URL="https://raw.githubusercontent.com/${UPSTREAM_REPO}/${UPSTREAM_COMMIT}/Patches/syscall_hook_patches.sh"
 INLINE_SCRIPT_URL="https://raw.githubusercontent.com/${UPSTREAM_REPO}/${UPSTREAM_COMMIT}/Patches/susfs_inline_hook_patches.sh"
 
-is_true() {
-  case "${1:-}" in
-    1|true|TRUE|yes|YES|on|ON) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 [[ "$DEVICE" == "lavender" ]] || exit 0
 [[ "$KERNEL_VERSION" == 4.4* ]] || exit 0
 [[ "$ROOT_MANAGER" != "none" && -n "$ROOT_MANAGER" ]] || exit 0
@@ -56,16 +52,17 @@ is_true "$NONGKI_4_4_HOOKS" || {
 case "$ROOT_MANAGER" in
   resukisu) ;;
   kernelsu-next|sukisu-ultra)
-    cat > "$WORK_DIR/nongki-4.4.env" <<EOF_ENV
-NONGKI_4_4_ENABLED=true
-NONGKI_4_4_DEVICE=lavender
-NONGKI_4_4_KERNEL_VERSION=$KERNEL_VERSION
-NONGKI_4_4_MODE=provider-native
-NONGKI_4_4_UPSTREAM_REPO=https://github.com/$UPSTREAM_REPO
-NONGKI_4_4_UPSTREAM_COMMIT=$UPSTREAM_COMMIT
-NONGKI_4_4_HOOK_BLOB=provider-native
-NONGKI_4_4_HOOK_URL=provider-native
-EOF_ENV
+    [[ -n "$WORK_DIR" ]] || fail "WORK_DIR is required"
+    mkdir -p "$WORK_DIR"
+    write_env "$WORK_DIR/nongki-4.4.env" \
+      "NONGKI_4_4_ENABLED=true" \
+      "NONGKI_4_4_DEVICE=lavender" \
+      "NONGKI_4_4_KERNEL_VERSION=$KERNEL_VERSION" \
+      "NONGKI_4_4_MODE=provider-native" \
+      "NONGKI_4_4_UPSTREAM_REPO=https://github.com/$UPSTREAM_REPO" \
+      "NONGKI_4_4_UPSTREAM_COMMIT=$UPSTREAM_COMMIT" \
+      "NONGKI_4_4_HOOK_BLOB=provider-native" \
+      "NONGKI_4_4_HOOK_URL=provider-native"
     log "provider-native legacy hook path selected for $ROOT_MANAGER; external NonGKI source-hook script skipped"
     exit 0
     ;;
@@ -141,7 +138,7 @@ popd >/dev/null
 # Upstream scripts historically reported failed insertions through stdout and
 # continued. Refuse to silently ship a no-op when the source tree has no KSU
 # integration points at all.
-if ! grep -Rqs --include='*.c' --include='*.h' -E 'ksu_(handle_|bprm_check|hide_setprocattr|file_permission)|CONFIG_KSU' "$SOURCE_DIR/drivers/kernelsu" "$SOURCE_DIR/fs" "$SOURCE_DIR/security" "$SOURCE_DIR/kernel" 2>/dev/null; then
+if ! grep -Rqs --exclude-dir=kernelsu --include='*.c' --include='*.h' -E 'ksu_(handle_|bprm_check|hide_setprocattr|file_permission)' "$SOURCE_DIR/fs" "$SOURCE_DIR/security" "$SOURCE_DIR/kernel" "$SOURCE_DIR/drivers/input" 2>/dev/null; then
   fail "NonGKI hook stage completed but no KernelSU integration symbols were detected"
 fi
 
@@ -196,20 +193,19 @@ else
 fi
 
 HOOK_MARKER="$(mktemp "$WORK_DIR/nongki-marker.XXXXXX")"
-grep -Rhs --include='*.c' --include='*.h' -E 'ksu_(handle_execveat|handle_faccessat|handle_sys_read|handle_(newfstat_ret|fstat64_ret|stat)|handle_input_handle_event|bprm_check|handle_rename|handle_setuid|file_permission|hide_setprocattr|handle_sys_reboot|handle_setresuid)' \
-  "$SOURCE_DIR/fs" "$SOURCE_DIR/drivers" "$SOURCE_DIR/security" "$SOURCE_DIR/kernel" 2>/dev/null | head -n 1 > "$HOOK_MARKER" || true
+grep -Rhs --exclude-dir=kernelsu --include='*.c' --include='*.h' -E 'ksu_(handle_execveat|handle_faccessat|handle_sys_read|handle_(newfstat_ret|fstat64_ret|stat)|handle_input_handle_event|bprm_check|handle_rename|handle_setuid|file_permission|hide_setprocattr|handle_sys_reboot|handle_setresuid)' \
+  "$SOURCE_DIR/fs" "$SOURCE_DIR/drivers/input" "$SOURCE_DIR/security" "$SOURCE_DIR/kernel" 2>/dev/null | head -n 1 > "$HOOK_MARKER" || true
 [[ -s "$HOOK_MARKER" ]] || fail "NonGKI hook verification found no expected KSU hook markers for mode=$MODE"
 rm -f "$HOOK_MARKER"
 
-cat > "$WORK_DIR/nongki-4.4.env" <<EOF_ENV
-NONGKI_4_4_ENABLED=true
-NONGKI_4_4_DEVICE=lavender
-NONGKI_4_4_KERNEL_VERSION=$KERNEL_VERSION
-NONGKI_4_4_MODE=$MODE
-NONGKI_4_4_UPSTREAM_REPO=https://github.com/$UPSTREAM_REPO
-NONGKI_4_4_UPSTREAM_COMMIT=$UPSTREAM_COMMIT
-NONGKI_4_4_HOOK_BLOB=$ACTUAL_BLOB
-NONGKI_4_4_HOOK_URL=$URL
-EOF_ENV
+write_env "$WORK_DIR/nongki-4.4.env" \
+  "NONGKI_4_4_ENABLED=true" \
+  "NONGKI_4_4_DEVICE=lavender" \
+  "NONGKI_4_4_KERNEL_VERSION=$KERNEL_VERSION" \
+  "NONGKI_4_4_MODE=$MODE" \
+  "NONGKI_4_4_UPSTREAM_REPO=https://github.com/$UPSTREAM_REPO" \
+  "NONGKI_4_4_UPSTREAM_COMMIT=$UPSTREAM_COMMIT" \
+  "NONGKI_4_4_HOOK_BLOB=$ACTUAL_BLOB" \
+  "NONGKI_4_4_HOOK_URL=$URL"
 
 log "completed: device=lavender kernel=$KERNEL_VERSION mode=$MODE"

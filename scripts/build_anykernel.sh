@@ -25,7 +25,7 @@ ANYKERNEL3_REF="${ANYKERNEL3_REF:-master}"
 [[ -d "$ARTIFACT_DIR" ]] || ci_die "artifact directory not found: $ARTIFACT_DIR"
 
 PROFILE_FILE="$(DEVICE="$DEVICE" KERNEL_VERSION="$KERNEL_VERSION" ANYKERNEL_PROFILE="${ANYKERNEL_PROFILE:-auto}" \
-  "$CI_ROOT/scripts/select_anykernel_profile.sh")"
+  bash "$CI_ROOT/scripts/select_anykernel_profile.sh")"
 # shellcheck source=/dev/null
 source "$PROFILE_FILE"
 : "${PROFILE_ID:?PROFILE_ID missing in $PROFILE_FILE}"
@@ -45,7 +45,7 @@ case "$ANYKERNEL3_REPO" in
     AK_COMMIT="$(git -C "$AK_WORK" rev-parse --short HEAD)"
     rm -rf "$AK_WORK/.git"
     # Upstream osm0sis/AnyKernel3 has no Zairenkai templates: overlay them.
-    if [[ ! -x "$AK_WORK/ci-patch.sh" ]]; then
+    if [[ ! -f "$AK_WORK/ci-patch.sh" ]]; then
       cp -a "$CI_ROOT/anykernel/"{anykernel.sh,banner,ci-patch.sh,version.conf,profiles} "$AK_WORK/"
     fi
     ;;

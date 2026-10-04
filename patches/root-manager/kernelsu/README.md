@@ -1,7 +1,9 @@
-# KernelSU / Lavender 4.19
+# Official KernelSU provider integration
 
-The universal builder keeps KernelSU provider installation in its provider
-resolver. This directory is intentionally available for future
-KernelSU-specific source fixes without putting them in `build_kernel.sh`.
+Upstream: https://github.com/tiann/KernelSU
 
-No source patch is registered for the current Lavender tree.
+Linux 4.14 – 5.9 resolve to `v0.9.5`, the last official non-GKI release (other
+refs are rejected); Linux 5.10+ uses `main`; Linux 4.4 fails closed (upstream
+legacy support starts at 4.14). With `ENABLE_SUSFS=true` on 4.19 the pinned
+susfs4ksu `kernel-4.19` set is applied with strict `git apply --check`.
+Not part of the default release matrix.

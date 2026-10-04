@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-exec env TARGET=harness "$SCRIPT_DIR/start_local_ci.sh" "$@"
+exec env TARGET=harness bash "$SCRIPT_DIR/start_local_ci.sh" "$@"

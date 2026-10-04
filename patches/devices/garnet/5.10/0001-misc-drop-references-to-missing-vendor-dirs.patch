@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Febrian Rahmad Cahya <febricahya12345@gmail.com>
+Date: Mon, 5 Oct 2026 01:56:19 +0700
+Subject: [PATCH] misc: drop Kbuild references to directories missing from the
+ source release
+
+The published garnet tree does not contain drivers/misc/hwid/ (listed in
+Xiaomi's .gitignore) and carries drivers/misc/plaid/ only as an orphan
+gitlink without .gitmodules, so both directories are empty. Sourcing their
+Kconfig files aborts `make gki_defconfig`, and the unconditional
+`obj-y += hwid/` aborts the Image build.
+
+Both drivers are vendor_dlkm modules that a GKI Image build does not
+replace, so drop the dangling Kconfig sources and the unconditional hwid
+descent. CONFIG_XIAOMI_GPU_PLAID stays guarded by its own config symbol.
+---
+ drivers/misc/Kconfig  | 2 --
+ drivers/misc/Makefile | 1 -
+ 2 files changed, 3 deletions(-)
+
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index 2c4c7f0ad..2da522fd9 100755
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -554,7 +554,5 @@ source "drivers/misc/cardreader/Kconfig"
+ source "drivers/misc/habanalabs/Kconfig"
+ source "drivers/misc/isl97900_led/Kconfig"
+ source "drivers/misc/uacce/Kconfig"
+-source "drivers/misc/hwid/Kconfig"
+ source "drivers/misc/mi_gamekey/Kconfig"
+-source "drivers/misc/plaid/Kconfig"
+ endmenu
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+index 6c3930d5c..57385b849 100755
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -67,7 +67,6 @@ qseecom-mod-$(CONFIG_QSEECOM)  := qseecom.o
+ qseecom-mod-$(CONFIG_COMPAT)	+= compat_qseecom.o
+ obj-$(CONFIG_WIGIG_SENSING_SPI)	+= wigig_sensing.o
+ obj-$(CONFIG_KINECTICS_XR_NORDIC) += kxrctrl/
+-obj-y				+= hwid/
+ obj-$(CONFIG_MI_GAMEKEY)        += mi_gamekey/
+ obj-$(CONFIG_LDO_WL2866D)	+= wl2866d.o
+ obj-$(CONFIG_XIAOMI_GPU_PLAID)	+= plaid/

@@ -71,10 +71,30 @@ git_fetch_ref() {
     git init -q "$dir"
     git -C "$dir" remote add origin "$url"
     git -C "$dir" fetch -q --depth="$depth" origin "$ref"
-    git -C "$dir" checkout -q --detach FETCH_HEAD
+    git -C "$dir" -c advice.detachedHead=false checkout -q --detach FETCH_HEAD
   else
-    git clone -q --depth="$depth" --branch "$ref" "$url" "$dir"
+    git -c advice.detachedHead=false clone -q --depth="$depth" --branch "$ref" "$url" "$dir"
   fi
+}
+
+# write_env <file> KEY=VALUE...: write shell-quoted assignments that are safe to
+# `source`, even when a value contains spaces, '/', '#', quotes, or '$'.
+write_env() {
+  local file="$1" kv key
+  shift
+  : > "$file"
+  for kv in "$@"; do
+    key="${kv%%=*}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || ci_die "write_env: invalid key '$key'"
+    printf '%s=%q\n' "$key" "${kv#*=}" >> "$file"
+  done
+}
+
+# read_series <file>: print the patch entries of a series file, one per line,
+# with comments, blank lines, CR line endings and surrounding blanks removed.
+read_series() {
+  [[ -f "$1" ]] || return 0
+  sed -e 's/\r$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^#/d' -e '/^$/d' "$1"
 }
 
 # normalize_variant <name>: canonical root variant id.
@@ -102,16 +122,29 @@ variant_label() {
   esac
 }
 
-# expand_variants <list>: "all", comma or space separated list -> one canonical id per line.
+# expand_variants <list> [profile-default]: comma/space separated list -> one
+# canonical id per line. "", "all" and "default" select the profile default
+# (PROFILE_DEFAULT_VARIANTS), falling back to the global release matrix.
 expand_variants() {
-  local raw="${1:-$DEFAULT_VARIANTS}" item v seen=" "
-  [[ "${raw,,}" == "all" ]] && raw="$DEFAULT_VARIANTS"
+  local fallback="${2:-$DEFAULT_VARIANTS}"
+  local raw="${1:-$fallback}" item v seen=" "
+  case "${raw,,}" in all|default|auto) raw="$fallback" ;; esac
   for item in ${raw//,/ }; do
     v="$(normalize_variant "$item")" || ci_die "unknown variant: $item (use vanilla, kernelsu, kernelsu-next, resukisu, sukisu-ultra)"
     [[ "$seen" == *" $v "* ]] && continue
     seen+="$v "
     echo "$v"
   done
+}
+
+# load_profile <profile|auto> [device] [kernel-family]: import PROFILE_* from
+# profiles/targets. Fails loudly; `eval "$(resolver)"` alone would silently
+# evaluate an empty string when the resolver exits non-zero.
+load_profile() {
+  local profile_env
+  profile_env="$(BUILD_PROFILE="$1" DEVICE="${2:-${DEVICE:-}}" KERNEL_FAMILY="${3:-${KERNEL_FAMILY:-}}" \
+    bash "$CI_ROOT/scripts/resolve_build_profile.sh")" || ci_die "unable to resolve build profile: $1"
+  eval "$profile_env"
 }
 
 # kv_get <file> <key>: read key=value files such as build-info.txt.

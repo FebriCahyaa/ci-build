@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Independent Harness failure notification. It does not depend on release handoff.
+# Telegram is optional: without bot/chat/topic secrets this is a no-op.
 set -Eeuo pipefail
 
-: "${TG_BOT_TOKEN:?TG_BOT_TOKEN is required}"
-: "${TG_CHAT_ID:?TG_CHAT_ID is required}"
-: "${TG_TOPIC_ID:?TG_TOPIC_ID is required}"
+if [[ -z "${TG_BOT_TOKEN:-}" || -z "${TG_CHAT_ID:-}" || -z "${TG_TOPIC_ID:-}" ]]; then
+  echo "[telegram-fallback] Telegram build topic not configured; skipping failure notification" >&2
+  exit 0
+fi
+NL=$'\n'
 
 MONITOR="${HARNESS_MONITOR_FILE:-harness-monitor.json}"
 PROFILE="${BUILD_PROFILE:-unknown}"
@@ -16,14 +19,14 @@ PYESC_URL
 )"
 
 if [[ ! -f "$MONITOR" ]]; then
-  API="https://api.telegram.org/bot${TG_BOT_TOKEN}"
+  API="${TG_API_BASE:-https://api.telegram.org}/bot${TG_BOT_TOKEN}"
   escaped_profile="$(python3 - "$PROFILE" <<'PYESC0'
 import html,sys
 print(html.escape(sys.argv[1]), end='')
 PYESC0
 )"
-  text="❌ <b>Zairenkai Harness Kernel Build gagal</b>\n🎯 Target: <code>${escaped_profile}</code>\n🚨 <code>harness-monitor.json tidak tersedia; cek GitHub Actions run untuk detail.</code>"
-  [[ -n "$RUN_URL" ]] && text+="\n🔗 <a href=\"$ESCAPED_RUN_URL\">Harness CI log</a>"
+  text="❌ <b>Zairenkai Harness Kernel Build gagal</b>${NL}🎯 Target: <code>${escaped_profile}</code>${NL}🚨 <code>harness-monitor.json tidak tersedia; cek GitHub Actions run untuk detail.</code>"
+  [[ -n "$RUN_URL" ]] && text+="${NL}🔗 <a href=\"$ESCAPED_RUN_URL\">Harness CI log</a>"
   curl -fsS --retry 4 --retry-delay 2 -X POST "$API/sendMessage" \
     --data-urlencode "chat_id=$TG_CHAT_ID" \
     --data-urlencode "message_thread_id=$TG_TOPIC_ID" \
@@ -59,17 +62,17 @@ print(html.escape(sys.argv[1]), end='')
 PYESC
 }
 
-text="❌ <b>Zairenkai Harness Kernel Build Gagal</b>\n"
-text+="🎯 Target: <code>$(html_escape "$PROFILE")</code>\n"
-[[ -n "$stage" ]] && text+="🏗 Stage: <code>$(html_escape "$stage")</code>\n"
-[[ -n "$step" ]] && text+="🧩 Step: <code>$(html_escape "$step")</code>\n"
-text+="📌 Status: <code>$(html_escape "$status")</code>\n"
-[[ -n "$plan" ]] && text+="🆔 Execution: <code>$(html_escape "$plan")</code>\n"
-[[ -n "$source" ]] && text+="🔎 Source: <code>$(html_escape "$source")</code>\n"
-[[ -n "$error" ]] && text+="🚨 Error: <code>$(html_escape "${error:0:1800}")</code>\n"
+text="❌ <b>Zairenkai Harness Kernel Build Gagal</b>${NL}"
+text+="🎯 Target: <code>$(html_escape "$PROFILE")</code>${NL}"
+[[ -n "$stage" ]] && text+="🏗 Stage: <code>$(html_escape "$stage")</code>${NL}"
+[[ -n "$step" ]] && text+="🧩 Step: <code>$(html_escape "$step")</code>${NL}"
+text+="📌 Status: <code>$(html_escape "$status")</code>${NL}"
+[[ -n "$plan" ]] && text+="🆔 Execution: <code>$(html_escape "$plan")</code>${NL}"
+[[ -n "$source" ]] && text+="🔎 Source: <code>$(html_escape "$source")</code>${NL}"
+[[ -n "$error" ]] && text+="🚨 Error: <code>$(html_escape "${error:0:1800}")</code>${NL}"
 [[ -n "$RUN_URL" ]] && text+="🔗 <a href=\"$ESCAPED_RUN_URL\">Harness CI log</a>"
 
-API="https://api.telegram.org/bot${TG_BOT_TOKEN}"
+API="${TG_API_BASE:-https://api.telegram.org}/bot${TG_BOT_TOKEN}"
 curl -fsS --retry 4 --retry-delay 2 -X POST "$API/sendMessage" \
   --data-urlencode "chat_id=$TG_CHAT_ID" \
   --data-urlencode "message_thread_id=$TG_TOPIC_ID" \

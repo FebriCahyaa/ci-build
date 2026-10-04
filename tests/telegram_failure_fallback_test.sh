@@ -27,6 +27,8 @@ CURL_CAPTURE="$TMP/calls" PATH="$TMP/bin:$PATH" \
 grep -q 'sendMessage' "$TMP/calls"
 grep -q -- 'message_thread_id=13' "$TMP/calls"
 grep -q 'source patch series failed' "$TMP/calls"
+# Line breaks must be real newlines, not a literal backslash-n in the message.
+! grep -qF '\n' "$TMP/calls" || { echo 'FAIL: literal \n sent to Telegram' >&2; exit 1; }
 
 CURL_CAPTURE="$TMP/calls-missing" PATH="$TMP/bin:$PATH" \
   TG_BOT_TOKEN=test TG_CHAT_ID=-100123 TG_TOPIC_ID=13 \
@@ -43,5 +45,11 @@ CURL_CAPTURE="$TMP/calls-success" PATH="$TMP/bin:$PATH" \
   BUILD_PROFILE=lavender-4.19 HARNESS_MONITOR_FILE="$TMP/success.json" \
   bash "$ROOT/scripts/send_harness_failure_to_telegram.sh"
 ! test -s "$TMP/calls-success"
+
+# Telegram is optional: without credentials the relay is a successful no-op.
+: > "$TMP/calls-unconfigured"
+CURL_CAPTURE="$TMP/calls-unconfigured" PATH="$TMP/bin:$PATH" TG_BOT_TOKEN= TG_CHAT_ID= TG_TOPIC_ID= \
+  HARNESS_MONITOR_FILE="$TMP/monitor.json" bash "$ROOT/scripts/send_harness_failure_to_telegram.sh"
+! test -s "$TMP/calls-unconfigured"
 
 echo 'PASS Telegram Harness failure fallback'

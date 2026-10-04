@@ -6,7 +6,7 @@ TARGET="${TARGET:-github}"
 REPO="${REPO:-FebriCahyaa/ci-build}"
 REF="${REF:-main}"
 BUILD_PROFILE="${BUILD_PROFILE:-lavender-4.4}"
-VARIANTS="${VARIANTS:-vanilla,kernelsu-next,resukisu,sukisu-ultra}"
+VARIANTS="${VARIANTS:-default}"
 KERNEL_REPO_OVERRIDE="${KERNEL_REPO_OVERRIDE:-${KERNEL_REPO:-}}"
 KERNEL_REF_OVERRIDE="${KERNEL_REF_OVERRIDE:-${KERNEL_BRANCH:-}}"
 DEFCONFIG_OVERRIDE="${DEFCONFIG_OVERRIDE:-${DEFCONFIG:-}}"
@@ -15,8 +15,8 @@ JOBS="${JOBS:-0}"
 TOOLCHAIN="${TOOLCHAIN:-auto}"
 TOOLCHAIN_VERSION="${TOOLCHAIN_VERSION:-auto}"
 LLVM_IAS="${LLVM_IAS:-auto}"
-CLANG_URL="${CLANG_URL:-}"
-GCC_URL="${GCC_URL:-}"
+TOOLCHAIN_URL="${TOOLCHAIN_URL:-${CLANG_URL:-${GCC_URL:-}}}"
+TWEAKS="${TWEAKS:-none}"
 EXTRA_MAKE_ARGS="${EXTRA_MAKE_ARGS:-}"
 PATCH_PROFILE="${PATCH_PROFILE:-auto}"
 UPSTREAM_PROFILE="${UPSTREAM_PROFILE:-auto}"
@@ -41,7 +41,9 @@ Usage: TARGET=github|harness $0
 
 Common:
   BUILD_PROFILE=lavender-4.4|lavender-4.19|garnet-gki
-  VARIANTS=vanilla,kernelsu-next,resukisu,sukisu-ultra|all
+  VARIANTS=default|all|vanilla,kernelsu-next,resukisu,sukisu-ultra
+  TOOLCHAIN=auto|aosp|aosp-r416183b|zyc-10|proton|llvm-18|neutron|llvm|gcc|system
+  TOOLCHAIN_URL=<custom archive>  TWEAKS=none|balanced|performance
   REPO=owner/repo REF=branch
   RELEASE=true RELEASE_TAG=optional
 
@@ -63,11 +65,11 @@ run_github() {
     -f toolchain="$TOOLCHAIN" \
     -f toolchain_version="$TOOLCHAIN_VERSION" \
     -f llvm_ias="$LLVM_IAS" \
-    -f clang_url="$CLANG_URL" \
-    -f gcc_url="$GCC_URL" \
+    -f toolchain_url="$TOOLCHAIN_URL" \
     -f extra_make_args="$EXTRA_MAKE_ARGS" \
     -f patch_profile="$PATCH_PROFILE" \
     -f upstream_profile="$UPSTREAM_PROFILE" \
+    -f tweaks="$TWEAKS" \
     -f lto_plus="$LTO_PLUS" \
     -f ksu_ref="$KSU_REF" \
     -f package_anykernel="$PACKAGE_ANYKERNEL" \
@@ -93,11 +95,11 @@ run_harness() {
     -f toolchain="$TOOLCHAIN" \
     -f toolchain_version="$TOOLCHAIN_VERSION" \
     -f llvm_ias="$LLVM_IAS" \
-    -f clang_url="$CLANG_URL" \
-    -f gcc_url="$GCC_URL" \
+    -f toolchain_url="$TOOLCHAIN_URL" \
     -f extra_make_args="$EXTRA_MAKE_ARGS" \
     -f patch_profile="$PATCH_PROFILE" \
     -f upstream_profile="$UPSTREAM_PROFILE" \
+    -f tweaks="$TWEAKS" \
     -f lto_plus="$LTO_PLUS" \
     -f ksu_ref="$KSU_REF" \
     -f package_anykernel="$PACKAGE_ANYKERNEL" \

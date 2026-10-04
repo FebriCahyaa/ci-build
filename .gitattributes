@@ -1,0 +1,11 @@
+# Shell, Python, YAML and patch files must keep LF line endings: CRLF breaks
+# `bash`, shebangs, and `git apply`. (Editing from Windows/Android tools or
+# re-importing a ZIP silently converts them otherwise.)
+* text=auto eol=lf
+*.patch -text
+*.zip binary
+anykernel/tools/busybox binary
+anykernel/tools/magiskboot binary
+anykernel/tools/magiskpolicy binary
+anykernel/tools/fec binary
+anykernel/tools/*_static binary

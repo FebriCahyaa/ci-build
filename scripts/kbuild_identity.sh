@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
+# Sourced by build_kernel.sh. Do not change the caller's shell options here.
 
 # Reproducible kernel build identity. Override these environment variables
 # when another project/user explicitly needs different metadata.

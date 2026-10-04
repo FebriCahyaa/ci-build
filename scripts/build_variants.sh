@@ -11,17 +11,19 @@ CI_LOG_TAG=matrix
 BUILD_PROFILE="${BUILD_PROFILE:-auto}"
 DEVICE="${DEVICE:-generic}"
 KERNEL_FAMILY="${KERNEL_FAMILY:-}"
-VARIANTS_INPUT="${ROOT_VARIANTS:-${VARIANTS:-$DEFAULT_VARIANTS}}"
+VARIANTS_INPUT="${ROOT_VARIANTS:-${VARIANTS:-default}}"
 MATRIX_WORK_DIR="${MATRIX_WORK_DIR:-${WORK_DIR:-$PWD/work}}"
 SEED_DIR="${KERNEL_SOURCE_SEED:-$MATRIX_WORK_DIR/source-seed}"
 CCACHE_DIR="${CCACHE_DIR:-$MATRIX_WORK_DIR/ccache}"
+# Toolchains are downloaded once per matrix, not once per variant.
+export TOOLCHAIN_CACHE_DIR="${TOOLCHAIN_CACHE_DIR:-$MATRIX_WORK_DIR/toolchains}"
 
-[[ -x "$SCRIPT_DIR/build_kernel.sh" ]] || ci_die "scripts/build_kernel.sh is missing"
-[[ -x "$SCRIPT_DIR/resolve_build_profile.sh" ]] || ci_die "scripts/resolve_build_profile.sh is missing"
+[[ -f "$SCRIPT_DIR/build_kernel.sh" ]] || ci_die "scripts/build_kernel.sh is missing"
+[[ -f "$SCRIPT_DIR/resolve_build_profile.sh" ]] || ci_die "scripts/resolve_build_profile.sh is missing"
 
 resolve_profile() {
   local selected="$BUILD_PROFILE"
-  eval "$(BUILD_PROFILE="$selected" DEVICE="$DEVICE" KERNEL_FAMILY="$KERNEL_FAMILY" "$SCRIPT_DIR/resolve_build_profile.sh")"
+  load_profile "$selected" "$DEVICE" "$KERNEL_FAMILY"
   BUILD_PROFILE="$PROFILE_ID"
   DEVICE="${DEVICE_OVERRIDE:-${PROFILE_DEVICE}}"
   KERNEL_FAMILY="${KERNEL_FAMILY_OVERRIDE:-${PROFILE_KERNEL_FAMILY}}"
@@ -29,8 +31,9 @@ resolve_profile() {
 }
 
 resolve_profile
-mapfile -t VARIANTS < <(expand_variants "$VARIANTS_INPUT")
-((${#VARIANTS[@]} > 0)) || ci_die "no root variants requested"
+resolved_variants="$(expand_variants "$VARIANTS_INPUT" "${PROFILE_DEFAULT_VARIANTS:-}")" || exit 1
+[[ -n "$resolved_variants" ]] || ci_die "no root variants requested"
+mapfile -t VARIANTS <<< "$resolved_variants"
 
 KERNEL_REPO="${KERNEL_REPO:-$PROFILE_KERNEL_REPO}"
 KERNEL_BRANCH="${KERNEL_BRANCH:-$PROFILE_KERNEL_REF}"
@@ -113,7 +116,7 @@ for variant in "${VARIANTS[@]}"; do
   export NONGKI_4_4_MODE="${NONGKI_4_4_MODE:-${PROFILE_NONGKI_4_4_MODE:-auto}}"
 
   started="$(date +%s)"
-  if "$SCRIPT_DIR/build_kernel.sh"; then
+  if bash "$SCRIPT_DIR/build_kernel.sh"; then
     rc=0
     state=PASS
   else

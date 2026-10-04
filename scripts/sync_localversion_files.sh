@@ -47,8 +47,10 @@ validate_suffix_file() {
   printf '%s\n' "$value"
 }
 
-CIP="$(validate_suffix_file "$REPO_ROOT/localversion-cip" localversion-cip true)"
-ST="$(validate_suffix_file "$REPO_ROOT/localversion-st" localversion-st)"
+# Validate the CI inputs (exit on malformed files); the values themselves are
+# consumed by set_kernel_name.sh.
+validate_suffix_file "$REPO_ROOT/localversion-cip" localversion-cip true >/dev/null
+validate_suffix_file "$REPO_ROOT/localversion-st" localversion-st >/dev/null
 
 # The complete suffix is already stored in CONFIG_LOCALVERSION by set_kernel_name.sh.
 # Clear both source files because Linux 4.4 appends them before CONFIG_LOCALVERSION.

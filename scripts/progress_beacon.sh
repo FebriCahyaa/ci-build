@@ -1,19 +1,36 @@
 #!/usr/bin/env bash
+# progress_beacon.sh <percent> [state] [phase] [detail]
+#
+# Records build progress in the JSON state file read by tg_dashboard.py
+# (CI_PROGRESS_STATE_JSON, default $WORK_DIR/.ci-progress.json). When no live
+# dashboard owns the Telegram message (TG_DASHBOARD_ACTIVE!=true), it falls back
+# to a direct throttled edit through tg.sh. Optional GitHub commit-status
+# progress stays opt-in (CI_GITHUB_STATUS_ENABLED=true); Telegram is the
+# primary live UI.
+#
+# Extra state keys: COMPILE_DONE / COMPILE_TOTAL environment variables.
 set -Eeuo pipefail
 PERCENT="${1:?percent is required}"
 STATE="${2:-pending}"
 PHASE="${3:-build}"
 DETAIL="${4:-working}"
 [[ "$PERCENT" =~ ^[0-9]+$ ]] && ((PERCENT>=0 && PERCENT<=100)) || exit 2
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-if [[ -n "${TG_BOT_TOKEN:-}" && -n "${TG_CHAT_ID:-}" && -n "${TG_MESSAGE_ID:-}" ]]; then
-  SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+STATE_JSON="${CI_PROGRESS_STATE_JSON:-${WORK_DIR:-/tmp}/.ci-progress.json}"
+extra=()
+[[ -n "${COMPILE_DONE:-}" ]] && extra+=("compile_done=$COMPILE_DONE")
+[[ -n "${COMPILE_TOTAL:-}" ]] && extra+=("compile_total=$COMPILE_TOTAL")
+python3 "$SCRIPT_DIR/progress_state.py" "$STATE_JSON" \
+  "pct=$PERCENT" "state=$STATE" "phase=$PHASE" "detail=$DETAIL" "${extra[@]}" 2>/dev/null || true
+
+if [[ "${TG_DASHBOARD_ACTIVE:-false}" != true && -n "${TG_BOT_TOKEN:-}" && -n "${TG_CHAT_ID:-}" && -n "${TG_MESSAGE_ID:-}" ]]; then
+  # shellcheck source=tg.sh
   source "$SCRIPT_DIR/tg.sh"
-  TG_MESSAGE_ID="$TG_MESSAGE_ID" \
-  TG_START_TIME="${TG_START_TIME:-$(date +%s)}" \
-  TG_PROGRESS_STATE_FILE="${CI_PROGRESS_STATE_FILE:-${WORK_DIR:-/tmp}/.tg-progress-last}" \
-  BUILD_LOG="${BUILD_LOG:-${WORK_DIR:-/tmp}/build.log}" \
-    tg_progress_update "$PERCENT" "$STATE" "$PHASE" "$DETAIL" "$BUILD_LOG" || true
+  TG_START_TIME="${TG_START_TIME:-$(date +%s)}"
+  TG_PROGRESS_STATE_FILE="${CI_PROGRESS_STATE_FILE:-${WORK_DIR:-/tmp}/.tg-progress-last}"
+  BUILD_LOG="${BUILD_LOG:-${WORK_DIR:-/tmp}/build.log}"
+  tg_progress_update "$PERCENT" "$STATE" "$PHASE" "$DETAIL" "$BUILD_LOG" || true
 fi
 
 # GitHub commit-status progress is opt-in. Telegram is the primary live UI.

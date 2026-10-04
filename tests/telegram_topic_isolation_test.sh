@@ -8,7 +8,8 @@ PIPE="$ROOT/harness/kernel-pipeline.yaml"
 
 grep -q 'local topic="${TG_TOPIC_ID:-}"' "$TG" || { echo 'FAIL: regular Telegram messages do not use build topic only' >&2; exit 1; }
 ! grep -q 'TG_RELEASE_TOPIC_ID' "$TG" || { echo 'FAIL: build Telegram helper references release topic' >&2; exit 1; }
-grep -q 'TG_TOPIC_ID:?TG_TOPIC_ID is required' "$FAIL" || { echo 'FAIL: Harness failure script is not bound to build topic' >&2; exit 1; }
+grep -q -- '-z "${TG_TOPIC_ID:-}"' "$FAIL" || { echo 'FAIL: Harness failure script is not bound to build topic' >&2; exit 1; }
+grep -q 'message_thread_id=$TG_TOPIC_ID' "$FAIL" || { echo 'FAIL: Harness failure script does not post to TG_TOPIC_ID' >&2; exit 1; }
 ! grep -q 'TG_RELEASE_TOPIC_ID' "$FAIL" || { echo 'FAIL: Harness failure script references release topic' >&2; exit 1; }
 
 a=$(sed -n '/- name: Telegram Harness trigger failure fallback/,/- name: Live monitor Harness execution/p' "$WF")

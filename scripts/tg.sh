@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Telegram helper + live build dashboard. Notifications are optional; builds
-# must still work when Telegram is not configured.
+# Telegram helper + live build dashboard. Source this file. Notifications are
+# optional; builds must still work when Telegram is not configured.
+# The caller's `set -u` state is restored at the end of this file.
+case "$-" in *u*) _TG_RESTORE_NOUNSET=true ;; *) _TG_RESTORE_NOUNSET=false ;; esac
 set +u
 
 TG_BOT_TOKEN="${TG_BOT_TOKEN:-}"
@@ -16,7 +18,8 @@ TG_HTTP_TIMEOUT="${TG_HTTP_TIMEOUT:-8}"
 TG_MAX_RETRIES="${TG_MAX_RETRIES:-3}"
 
 if [[ -n "$TG_BOT_TOKEN" && -n "$TG_CHAT_ID" ]]; then
-  API="https://api.telegram.org/bot${TG_BOT_TOKEN}"
+  # TG_API_BASE allows a self-hosted Bot API server (and local test doubles).
+  API="${TG_API_BASE:-https://api.telegram.org}/bot${TG_BOT_TOKEN}"
   TG_ENABLED=true
 else
   API=""
@@ -28,6 +31,15 @@ tg_api_ok() {
 try:
  d=json.load(sys.stdin); sys.exit(0 if d.get("ok") is True else 1)
 except Exception: sys.exit(1)' <<<"${1:-}"
+}
+
+# tg_plain_text <html>: strip tags/entities for the plain-text retry used when
+# Telegram rejects the markup ("can't parse entities").
+tg_plain_text() {
+  python3 - "$1" <<'PYTGPLAIN'
+import html, re, sys
+print(html.unescape(re.sub(r'<[^>]+>', '', sys.argv[1])), end='')
+PYTGPLAIN
 }
 
 tg_msg() {
@@ -60,21 +72,10 @@ tg_msg() {
       return 0
     fi
 
-    if [[ "$response" == *"can't parse entities"* || "$response" == *"parse entities"* ]]; then
+    if [[ "$response" == *"parse entities"* ]]; then
       echo "[telegram] sendMessage HTML rejected; retrying once as plain text" >&2
-      local plain
-      plain="$(python3 - "$message" <<'PYTGPLAIN'
-import html,re,sys
-s=sys.argv[1]
-s=re.sub(r'<[^>]+>', '', s)
-print(html.unescape(s), end='')
-PYTGPLAIN
-)"
-      local plain_args=(-d "chat_id=$TG_CHAT_ID" -d "disable_web_page_preview=true")
-      [[ -n "$topic" ]] && plain_args+=(-d "message_thread_id=$topic")
-      plain_args+=(--data-urlencode "text=$plain")
-      response="$(curl -sS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" \
-        -X POST "$API/sendMessage" "${plain_args[@]}" 2>/dev/null || true)"
+      message="$(tg_plain_text "$message")"
+      response="$(_tg_send_message "$topic" true)"
       if tg_api_ok "$response"; then
         python3 -c 'import json,sys; print(json.load(sys.stdin).get("result",{}).get("message_id",""))' <<<"$response"
         return 0
@@ -96,16 +97,10 @@ tg_edit() {
   for ((attempt=1; attempt<=TG_MAX_RETRIES; attempt++)); do
     response="$(curl -sS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" -X POST "$API/editMessageText" "${args[@]}" 2>/dev/null || true)"
     if tg_api_ok "$response" || [[ "$response" == *'message is not modified'* ]]; then return 0; fi
-    if [[ "$response" == *"can't parse entities"* || "$response" == *"parse entities"* ]]; then
+    if [[ "$response" == *"parse entities"* ]]; then
       echo "[telegram] editMessageText HTML rejected; retrying once as plain text" >&2
       local plain
-      plain="$(python3 - "$message" <<'PYTGPLAINEDIT'
-import html,re,sys
-s=sys.argv[1]
-s=re.sub(r'<[^>]+>', '', s)
-print(html.unescape(s), end='')
-PYTGPLAINEDIT
-)"
+      plain="$(tg_plain_text "$message")"
       local plain_args=(-d "chat_id=$TG_CHAT_ID" -d "message_id=$message_id" -d "disable_web_page_preview=true")
       plain_args+=(--data-urlencode "text=$plain")
       response="$(curl -sS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" -X POST "$API/editMessageText" "${plain_args[@]}" 2>/dev/null || true)"
@@ -203,11 +198,13 @@ tg_log_tail() {
     printf '%s' 'Waiting for build output...'
     return 0
   fi
+  # Bound the raw text *before* HTML-escaping so an entity such as &amp; is
+  # never cut in half (which makes Telegram reject the whole message).
   tail -n 8 "$log_file" 2>/dev/null \
     | tr '\r' '\n' \
     | sed -E $'s/\\x1B\\[[0-9;]*[[:alpha:]]//g' \
     | tail -n 8 \
-    | python3 -c 'import html,sys; s=sys.stdin.read().strip(); print(html.escape(s) if s else "Waiting for build output...", end="")' 2>/dev/null || printf '%s' 'Waiting for build output...'
+    | python3 -c 'import html,sys; s=sys.stdin.read().strip()[-1800:]; print(html.escape(s) if s else "Waiting for build output...", end="")' 2>/dev/null || printf '%s' 'Waiting for build output...'
 }
 
 tg_progress_update() {
@@ -239,7 +236,7 @@ tg_progress_update() {
   bar="$(tg_progress_bar "$pct" "$TG_PROGRESS_WIDTH")"
   tail="$(tg_log_tail "$log_file")"
 
-  local icon safe_phase safe_detail safe_tail safe_run_url text
+  local icon safe_phase safe_detail safe_tail safe_run_url safe_profile safe_device safe_variant text
   case "$state" in
     success|passed) icon='✅' ;;
     failure|failed|error) icon='❌' ;;
@@ -248,20 +245,22 @@ tg_progress_update() {
   safe_phase="$(tg_escape_html "$phase")"
   safe_detail="$(tg_escape_html "$detail")"
   safe_run_url="$(tg_escape_html "${RUN_URL:-}")"
+  safe_profile="$(tg_escape_html "${BUILD_PROFILE:-unknown}")"
+  safe_device="$(tg_escape_html "${DEVICE:-unknown}")"
+  safe_variant="$(tg_escape_html "${VARIANT_LABEL:-${ROOT_VARIANT:-unknown}}")"
+  # Telegram caps message text at 4096 characters; tg_log_tail already bounds
+  # the escaped log tail, so the structural HTML is never truncated.
   safe_tail="$tail"
   [[ -n "$safe_tail" ]] || safe_tail='Waiting for build output...'
-  # Telegram caps message text at 4096 characters. Bound only the log tail so
-  # the structural HTML is never truncated or left with a malformed </pre>.
-  safe_tail="${safe_tail:0:2500}"
 
   text="${icon} <b>Zairenkai Kernel Build</b>"$'\n'
-  text+="🧭 Target: <code>${BUILD_PROFILE:-unknown}</code>"$'\n'
-  text+="📱 <code>${DEVICE:-unknown}</code> | 🔐 <code>${VARIANT_LABEL:-${ROOT_VARIANT:-unknown}}</code>"$'\n'
+  text+="🧭 Target: <code>${safe_profile}</code>"$'\n'
+  text+="📱 <code>${safe_device}</code> | 🔐 <code>${safe_variant}</code>"$'\n'
   text+="📊 <code>${pct}%</code> [<code>${bar}</code>]"$'\n'
   text+="🧩 <b>${safe_phase}</b> — ${safe_detail}"$'\n'
   text+="⏱ <code>$(fmt_dur "$elapsed")</code> | 🖥 CPU ~<code>${cpu}%</code> | RAM <code>${ram}%</code> | Load <code>${load}</code>"$'\n'
   if [[ -n "${RUN_URL:-}" ]]; then
-    text+="🔗 <a href=\"${safe_run_url}\">GitHub Actions</a>"$'\n'
+    text+="🔗 <a href=\"${safe_run_url}\">CI log</a>"$'\n'
   fi
   text+=$'\n'"📜 <b>Live log</b>"$'\n'"<pre>${safe_tail}</pre>"
 
@@ -279,4 +278,5 @@ fmt_dur() {
   fi
 }
 
-set -u
+[[ "$_TG_RESTORE_NOUNSET" == true ]] && set -u
+unset _TG_RESTORE_NOUNSET

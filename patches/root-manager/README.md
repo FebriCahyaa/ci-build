@@ -1,12 +1,16 @@
 # Root-manager integration patches
 
-Provider source is tracked upstream through Git submodules under
-`third_party/root-managers/`. Version-specific compatibility patches here are
-applied to isolated CI checkouts of those submodules.
+Provider sources come from upstream (submodule snapshot or clone) and are never
+vendored here. Per provider and kernel generation:
 
-No upstream provider source is copied into this repository as a vendored tree.
-The `.gitmodules` URLs are the synchronization source of truth.
+| File | Applied to | By |
+|---|---|---|
+| `provider-series.conf` | isolated provider checkout (`$WORK/KernelSU`) | `root_manager_apply.sh` |
+| `host-series.conf` | host kernel tree | `apply_patch_series.sh` (source phase) |
+| `config.fragment` | `$KERNEL_OUT/.config` | `apply_patch_series.sh` (config phase) |
 
-Linux 4.4 provider series currently include strict compatibility patches for
-KernelSU-Next and SukiSU Ultra. ReSukiSU uses the pinned external NonGKI source
-hook layer from `patches/upstream/lokitla-nongki/4.4/`.
+Provider patches may only touch `kernel/` paths of the provider tree (enforced
+by `tests/root_manager_registry_test.sh`). `tests/root_manager_remote_test.sh`
+resolves every profile's pinned refs and applies each series to the real
+upstream sources, so a patch written for a different provider ref than the
+profile pins is caught in CI.

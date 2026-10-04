@@ -1,1 +1,8 @@
 __pycache__/
+*.pyc
+# Local build trees produced by scripts/build_variants.sh / build_kernel.sh
+/work/
+/release/
+/harness-inputs.yaml
+/harness-response.json
+/harness-monitor.json

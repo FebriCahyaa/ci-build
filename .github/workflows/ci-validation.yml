@@ -8,332 +8,50 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-validation-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Offline suite: static checks, contracts, and behavioral tests with local
+  # fixtures. Everything here also runs locally with `bash tests/run_all.sh`.
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: false
 
-      - name: Validate root-manager gitlinks
-        run: |
-          set -euo pipefail
-          bash tests/root_manager_gitlink_test.sh
-
       - name: Install validation dependencies
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends python3 zip unzip shellcheck ruby
+          sudo apt-get install -y -qq --no-install-recommends python3 python3-yaml zip unzip shellcheck
 
-      - name: Shell syntax and executable contract
+      - name: Test suite (offline)
+        run: bash tests/run_all.sh
+
+  # Network suite: resolves every profile x default root variant against the
+  # real upstream provider sources, applies host patches to the real kernel
+  # trees, and checks that every tweak survives Kconfig on each target.
+  remote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Install dependencies
         run: |
           set -euo pipefail
-          chmod +x scripts/*.sh anykernel/*.sh
-          mapfile -t shell_files < <(find scripts anykernel -type f -name '*.sh' | sort)
-          ((${#shell_files[@]}))
-          bash -n "${shell_files[@]}"
-          shellcheck -S error scripts/lib/common.sh scripts/build_variants.sh scripts/build_kernel.sh \
-            scripts/build_anykernel.sh scripts/root_manager_apply.sh scripts/resolve_build_profile.sh \
-            scripts/select_anykernel_profile.sh scripts/generate_changelog.sh scripts/publish_ci_release.sh scripts/stage_ci_release_assets.sh scripts/assemble_release_assets.sh scripts/apply_nongki_4_4.sh \
-            anykernel/build.sh anykernel/ci-patch.sh
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            python3 bc bison flex clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libelf-dev
 
-      - name: Workflow and Harness input limits
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import re, yaml
-          def get_on(data):
-              return data.get('on') if 'on' in data else data.get(True)
-          for path in ('.github/workflows/kernel.yml', '.github/workflows/harness-kernel.yml'):
-              data = yaml.safe_load(open(path, encoding='utf-8'))
-              on = get_on(data) or {}
-              inputs = (((on.get('workflow_dispatch') or {}).get('inputs') or {}))
-              print(f'{path}: {len(inputs)} workflow_dispatch inputs')
-              assert len(inputs) <= 25, f'{path} exceeds GitHub 25-input limit'
-          pipe = yaml.safe_load(open('harness/kernel-pipeline.yaml', encoding='utf-8'))
-          vars_ = pipe['pipeline']['variables']
-          print(f'harness/kernel-pipeline.yaml: {len(vars_)} variables')
-          assert len(vars_) <= 25
-          PY
-
-      - name: Target profile contract
-        run: |
-          set -euo pipefail
-          profiles=(lavender-4.4 lavender-4.19 garnet-gki)
-          for profile in "${profiles[@]}"; do
-            eval "$(BUILD_PROFILE="$profile" bash scripts/resolve_build_profile.sh)"
-            test "$PROFILE_ID" = "$profile"
-            test -n "$PROFILE_DEVICE"
-            test -n "$PROFILE_KERNEL_FAMILY"
-            test -n "$PROFILE_KERNEL_REPO"
-            test -n "$PROFILE_DEFCONFIG"
-            test -f "anykernel/profiles/$PROFILE_ANYKERNEL_PROFILE.conf"
-            case "$profile" in
-              lavender-4.4)
-                test "$PROFILE_DEFCONFIG" = "lavender_defconfig"
-                test "$PROFILE_CONFIG_FRAGMENT" = "none"
-                ;;
-              lavender-4.19)
-                test "$PROFILE_DEFCONFIG" = "vendor/xiaomi/sdm660_defconfig"
-                test "$PROFILE_CONFIG_FRAGMENT" = "vendor/xiaomi/lavender.config"
-                ;;
-              garnet-gki)
-                test "$PROFILE_GKI" = "true"
-                ;;
-            esac
-            echo "PASS $profile -> $PROFILE_ANYKERNEL_PROFILE"
-          done
-          ! grep -RInE 'garnet-(oss|hyperos)' .github anykernel profiles harness scripts
-
-      - name: Toolchain resolver output contract
-        run: |
-          set -euo pipefail
-          tmp="$(mktemp -d)"
-          printf '%s\n' 'VERSION = 5' 'PATCHLEVEL = 10' 'SUBLEVEL = 160' > "$tmp/Makefile"
-          TOOLCHAIN=system ARCH=arm64 bash scripts/toolchain_resolver.sh "$tmp" "$tmp/work" > "$tmp/toolchain.env"
-          grep -q '^RESOLVED_COMPILER_STRING=' "$tmp/toolchain.env"
-          grep -Eq '^RESOLVED_CROSS_DEFAULT=[^[:space:]]+$' "$tmp/toolchain.env"
-          grep -Eq '^RESOLVED_CLANG_TRIPLE=[^[:space:]]+$' "$tmp/toolchain.env"
-          rm -rf "$tmp"
-          echo 'PASS toolchain resolver output contract'
-
-      - name: Harness monitor terminal-state fail-safe
-        run: |
-          set -euo pipefail
-          python3 tests/harness_monitor_test.py
-
-      - name: Commit status progress policy
-        run: |
-          set -euo pipefail
-          bash tests/progress_status_policy_test.sh
-
-      - name: AnyKernel selector contract
-        run: |
-          set -euo pipefail
-          test "$(scripts/select_anykernel_profile.sh lavender 4.4.356)" = "$PWD/anykernel/profiles/lavender-4.4.conf"
-          test "$(scripts/select_anykernel_profile.sh lavender 4.19.325)" = "$PWD/anykernel/profiles/lavender-4.19.conf"
-          test "$(scripts/select_anykernel_profile.sh garnet 5.10.160)" = "$PWD/anykernel/profiles/garnet-gki.conf"
-
-      - name: AnyKernel render smoke matrix
-        run: |
-          set -euo pipefail
-          profiles=(lavender-4.4 lavender-4.19 garnet-gki)
-          variants=(vanilla kernelsu-next resukisu sukisu-ultra)
-          for profile in "${profiles[@]}"; do
-            for variant in "${variants[@]}"; do
-              tmp="$(mktemp -d)"
-              cp -a anykernel/anykernel.sh anykernel/banner anykernel/ci-patch.sh anykernel/version.conf "$tmp/"
-              mkdir -p "$tmp/profiles" "$tmp/tools"
-              cp -a "anykernel/profiles/$profile.conf" "$tmp/profiles/"
-              cp -a anykernel/tools/ak3-core.sh "$tmp/tools/"
-              image="$(sed -n 's/^KERNEL_IMAGES="\(.*\)"/\1/p' "$tmp/profiles/$profile.conf" | awk '{print $1}')"
-              printf 'fake kernel payload' > "$tmp/$image"
-              (cd "$tmp" && bash ./ci-patch.sh --profile "$profile" --variant "$variant" --dir "$tmp")
-              ! grep -qE '@[A-Z_]+@' "$tmp/anykernel.sh" "$tmp/banner"
-              bash -n "$tmp/anykernel.sh"
-              rm -rf "$tmp"
-              echo "PASS render $profile / $variant"
-            done
-          done
-
-      - name: AnyKernel package smoke (one real package per target)
-        run: |
-          set -euo pipefail
-          for profile in lavender-4.4 lavender-4.19 garnet-gki; do
-            tmp="$(mktemp -d)"
-            mkdir -p "$tmp/profiles" "$tmp/images/vanilla" "$tmp/tools" "$tmp/out"
-            cp -a anykernel/anykernel.sh anykernel/banner anykernel/build.sh anykernel/ci-patch.sh anykernel/version.conf "$tmp/"
-            cp -a "anykernel/profiles/$profile.conf" "$tmp/profiles/"
-            cp -a anykernel/tools/ak3-core.sh "$tmp/tools/"
-            image="$(sed -n 's/^KERNEL_IMAGES="\(.*\)"/\1/p' "$tmp/profiles/$profile.conf" | awk '{print $1}')"
-            printf 'fake kernel payload' > "$tmp/images/vanilla/$image"
-            (cd "$tmp" && OUT="$tmp/out" bash ./build.sh "$profile" vanilla)
-            zipfile="$(find "$tmp/out" -type f -name '*.zip' -print -quit)"
-            test -n "$zipfile"
-            unzip -tq "$zipfile" >/dev/null
-            unzip -p "$zipfile" anykernel.sh | bash -n
-            rm -rf "$tmp"
-            echo "PASS package $profile"
-          done
-
-      - name: Release artifact assembly contract
-        run: |
-          set -euo pipefail
-          bash tests/artifact_pipeline_test.sh
-
-      - name: Root-manager checkout policy
-        run: bash tests/root_manager_checkout_policy_test.sh
-
-      - name: Root-manager provider test absent-worktree guard
-        run: bash tests/root_manager_provider_patch_absent_test.sh
-
-      - name: Root-manager provider patch guard
-        run: bash tests/root_manager_provider_patch_guard_test.sh
-
-      - name: Telegram topic delivery and kernel identity contracts
-        run: |
-          set -euo pipefail
-          bash tests/telegram_delivery_test.sh
-          bash tests/telegram_release_test.sh
-          bash tests/telegram_html_escape_test.sh
-          bash tests/telegram_html_fallback_test.sh
-          bash tests/telegram_topic_isolation_test.sh
-          bash tests/telegram_release_failure_isolation_test.sh
-          bash tests/kernelsu_next_4_19_compat_test.sh
-          bash tests/root_manager_submodule_test.sh
-          bash tests/root_manager_provider_patch_test.sh
-          bash tests/kernel_identity_test.sh
-          bash tests/harness_artifact_handoff_test.sh
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          workflow = Path(".github/workflows/harness-kernel.yml").read_text()
-          names_block = workflow.split("names = [", 2)[-1].split("]", 1)[0]
-          names = re.findall(r'"([A-Z][A-Z0-9_]+)"', names_block)
-          pipeline_text = Path("harness/kernel-pipeline.yaml").read_text()
-          declared = re.findall(r"^    - name: ([A-Z][A-Z0-9_]+)$", pipeline_text, re.M)
-          assert len(names) == 25, len(names)
-          assert len(declared) == 25, len(declared)
-          assert set(names) == set(declared), (set(names) - set(declared), set(declared) - set(names))
-          assert "TG_TOPIC_ID" in names
-          print("PASS Harness runtime bridge: 25 variables, including TG_TOPIC_ID")
-          PY
-
-      - name: Workflow run-block shell syntax
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import subprocess, tempfile, yaml, re
-          paths = [
-              '.github/workflows/kernel.yml',
-              '.github/workflows/harness-kernel.yml',
-          ]
-          for path in paths:
-              data = yaml.safe_load(open(path, encoding='utf-8'))
-              def walk(obj):
-                  if isinstance(obj, dict):
-                      for key, value in obj.items():
-                          if key == 'run' and isinstance(value, str):
-                              yield value
-                          yield from walk(value)
-                  elif isinstance(obj, list):
-                      for item in obj:
-                          yield from walk(item)
-              runs = list(walk(data))
-              assert runs, f'no run blocks found in {path}'
-              for i, run in enumerate(runs, 1):
-                  # GitHub expressions are resolved before the shell sees the block.
-                  normalized = re.sub(r'\$\{\{.*?\}\}', 'dummy', run)
-                  with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False, encoding='utf-8') as fh:
-                      fh.write(normalized)
-                      tmp = fh.name
-                  try:
-                      proc = subprocess.run(['bash', '-n', tmp], text=True, capture_output=True)
-                      assert proc.returncode == 0, f'{path} run block {i}: {proc.stderr}'
-                  finally:
-                      import os; os.unlink(tmp)
-              print(f'PASS workflow shell syntax: {path} ({len(runs)} run blocks)')
-          PY
-
-      - name: Changelog generation smoke
-        run: |
-          set -euo pipefail
-          tmp="$(mktemp -d)"
-          mkdir -p "$tmp/source" "$tmp/info/vanilla" "$tmp/info/kernelsu-next" "$tmp/info/resukisu" "$tmp/info/sukisu-ultra"
-          git -C "$tmp/source" init -q
-          git -C "$tmp/source" config user.email ci@example.invalid
-          git -C "$tmp/source" config user.name ci
-          printf 'source\n' > "$tmp/source/file.c"
-          git -C "$tmp/source" add file.c
-          git -C "$tmp/source" commit -qm 'test: changelog source'
-          for v in vanilla kernelsu-next resukisu sukisu-ultra; do
-            cat > "$tmp/info/$v/build-info.txt" <<EOF_INFO
-          build_profile=garnet-gki
-          device=garnet
-          kernel_version=5.10.160
-          kernel_family=5.10
-          defconfig=gki_defconfig
-          scheduler_detected=EAS
-          dynamic_partition=true
-          gki=true
-          anykernel_profile=garnet-gki
-          kernel_repo=test/source
-          ref=garnet-t-oss
-          commit_sha=$(git -C "$tmp/source" rev-parse HEAD)
-          commit_subject=test: changelog source
-          toolchain=clang
-          toolchain_version=test
-          llvm_ias=1
-          ksu_provider=$v
-          ksu_version=test
-          ksu_commit=test
-          kernel_image=Image
-          EOF_INFO
-            BUILD_INFO="$tmp/info/$v/build-info.txt" SOURCE_DIR="$tmp/source" VARIANT="$v" OUT_FILE="$tmp/info/$v/changelog.md" bash scripts/generate_changelog.sh single
-          done
-          INFO_ROOT="$tmp/info" OUT_FILE="$tmp/CHANGELOG.md" bash scripts/generate_changelog.sh aggregate
-          grep -q 'KernelSU-Next' "$tmp/CHANGELOG.md"
-          grep -q 'ReSukiSU' "$tmp/CHANGELOG.md"
-          grep -q 'Vanilla' "$tmp/CHANGELOG.md"
-          rm -rf "$tmp"
-
-      - name: Lavender 4.19 root-provider patch contract
-        run: |
-          set -euo pipefail
-          bash tests/resukisu_lavender_4_19_test.sh
-
-      - name: Lavender 4.19 remote patch applicability
-        timeout-minutes: 12
-        run: |
-          set -euo pipefail
-          VERIFY_REMOTE_PATCHES=true bash tests/resukisu_lavender_4_19_test.sh
-
-      - name: Provider policy tests
-        run: |
-          set -euo pipefail
-          bash tests/root_manager_policy_test.sh
-
-      - name: NonGKI lavender 4.4 policy
-        run: |
-          set -euo pipefail
-          bash tests/nongki_4_4_policy_test.sh
-          bash tests/root_manager_submodule_test.sh
-
-      - name: Harness runtime input execution contract
-        run: |
-          set -euo pipefail
-          bash tests/harness_runtime_input_test.sh
-
-      - name: Harness variable contract
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import re, yaml
-          wf=yaml.safe_load(open('.github/workflows/harness-kernel.yml', encoding='utf-8'))
-          on=wf.get('on') if 'on' in wf else wf.get(True)
-          inputs=list((((on or {}).get('workflow_dispatch') or {}).get('inputs') or {}).keys())
-          text=open('.github/workflows/harness-kernel.yml',encoding='utf-8').read()
-          payload_block=re.search(r'names = \[(.*?)\n          \]', text, re.S)
-          assert payload_block, 'payload names block missing'
-          names=re.findall(r'"([A-Z][A-Z0-9_]+)"', payload_block.group(1))
-          pipe=yaml.safe_load(open('harness/kernel-pipeline.yaml',encoding='utf-8'))
-          pnames=[v['name'] for v in pipe['pipeline']['variables']]
-          assert len(pnames) == len(set(pnames))
-          assert set(pnames) == {
-            'CI_BUILD_SHA','BUILD_PROFILE','ROOT_VARIANTS','KERNEL_REPO_OVERRIDE','KERNEL_REF_OVERRIDE',
-            'DEFCONFIG_OVERRIDE','CONFIG_FRAGMENT_OVERRIDE','JOBS','TOOLCHAIN','TOOLCHAIN_VERSION','LLVM_IAS',
-            'CLANG_URL','GCC_URL','EXTRA_MAKE_ARGS','PATCH_PROFILE','UPSTREAM_PROFILE','LTO_PLUS','KSU_REF',
-            'PACKAGE_ANYKERNEL','ROM_FAMILY','ANYKERNEL_PROFILE','ANYKERNEL3_REF','BUILD_CUSTOMIZATION',
-            'PUBLISH_RELEASE','TG_TOPIC_ID'
-          }
-          assert len(pnames) == 25
-          workflow_text = open('.github/workflows/harness-kernel.yml', encoding='utf-8').read()
-          assert 'BUILD_CUSTOMIZATION' in workflow_text
-          assert '"kernel_name":' in workflow_text
-          assert '"apt_packages":' in workflow_text
-          print('PASS Harness pipeline variable contract: 25 (BUILD_CUSTOMIZATION + TG_TOPIC_ID)')
-          PY
+      - name: Test suite (remote patch applicability)
+        run: bash tests/run_all.sh --remote-only

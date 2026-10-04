@@ -1,103 +1,44 @@
-# CI-Build Patch Registry
+# CI-Build patch registry
 
-The patch registry is intentionally outside `scripts/build_kernel.sh`.
-
-## Layout
+Source patches are applied with `git apply` by `scripts/apply_patch_series.sh`
+(host kernel tree) or `scripts/root_manager_apply.sh` (isolated provider tree).
+Every `.patch` must be listed by a series file; `scripts/validate_patch_format.py`
+rejects malformed hunks, missing entries and unreferenced (orphan) patches.
 
 ```text
 patches/
-├── devices/
-│   ├── lavender/
-│   │   └── 4.19/
-│   └── southwest-ng/
-│       └── 4.19/
-├── root-manager/
-│   ├── kernelsu/
-│   │   └── 4.19/
-│   ├── kernelsu-next/
-│   │   └── 4.19/
-│   └── resukisu/
-│       └── 4.19/
-├── upstream/
-│   ├── codelinaro/
-│   │   └── sdm660-4.19/
-│   └── linux-stable/
-│       └── 4.19/
+├── devices/<device|profile>/<mm>/series.conf     device source patches (PATCH_PROFILE)
+├── root-manager/<provider>/<mm|common>/
+│   ├── provider-series.conf                      → isolated provider checkout
+│   ├── host-series.conf                          → host kernel tree
+│   └── config.fragment                           → .config (config phase)
+├── upstream/<source>/<mm>/series.conf            upstream backports (UPSTREAM_PROFILE)
 └── features/
-    └── lto-plus/
-        └── lavender-4.19/
+    ├── tweaks/{balanced,performance}/<mm>.config TWEAKS=balanced|performance
+    ├── susfs/kernel-<mm>/config.fragment         ENABLE_SUSFS=true
+    └── lto-plus/lavender-4.19/thinlto.config     LTO_PLUS=true
 ```
 
-`*.patch` files are source patches and are applied with `git apply`.
+## Selection
 
-`*.config` files are optional Kconfig fragments and are merged into the
-generated `.config` during the config phase.
+* `PATCH_PROFILE=auto` applies `devices/<DEVICE>/<mm>`; the SouthWest-NG 4.19
+  source is recognized and kept patch-free. `PATCH_PROFILE=southwest-ng`
+  selects its scheduler/performance pair; `none` disables device patches.
+* Root-manager host/provider series and fragments apply only for root variants.
+* `UPSTREAM_PROFILE=auto` applies the CodeLinaro SDM660 set to non-SouthWest-NG
+  lavender 4.19 trees only.
+* Patches are idempotent: an already-present change is reported as
+  `ALREADY APPLIED` (ancestor commit, reverse-apply, or content match).
 
-Every patch is idempotent: the patch runner reports `ALREADY APPLIED` and
-continues when the reverse patch matches the source.
+## Kconfig fragments
 
-## Selection policy
+Fragments are merged in order (LTO+, root manager, SUSFS, tweaks) and then
+resolved by `olddefconfig`; `PHASE=verify` reports any requested value that
+Kconfig dropped because of unmet dependencies.
 
-For `PATCH_PROFILE=none`, no device source patch is applied. This is the default
-for the Southwest-NG source because its Lavender device support is already in the
-source tree. For `PATCH_PROFILE=auto` the builder selects a device profile from
-`DEVICE` + kernel major/minor, except that the Southwest-NG source is recognized
-and kept patch-free.
+## SUSFS
 
-Root-manager patches are selected only when `KSU_REQUIRED=true` and a
-recognized `KSU_PROVIDER` is active.
-
-The CodeLinaro set remains available for legacy Lavender 4.19 builds. It is not
-enabled by default for Southwest-NG; use an explicit upstream profile only after
-verifying that the selected commits are absent from the source.
-
-The explicit `southwest-ng` device profile contains the conservative
-scheduler/performance patch pair validated against the SouthWest-NG source.
-Select it with `PATCH_PROFILE=southwest-ng`; `PATCH_PROFILE=auto` remains
-patch-free for this repository.
-
-LTO+ is optional and disabled by default. Enable it with:
-
-```bash
-LTO_PLUS=true
-```
-
-The current Lavender 4.19 tree already has `CONFIG_LTO_CLANG=y` and
-declares `ARCH_SUPPORTS_THINLTO`; the optional profile only adds
-`CONFIG_THINLTO=y`. This is deliberately not forced by default.
-
-
-## Root manager + SUSFS policy
-
-Root providers are integrated through `scripts/root_manager_apply.sh` using
-the upstream `drivers/kernelsu` integration layout.
-
-Linux 4.19 pins official KernelSU to `v0.9.5`, the last official non-GKI
-release. KernelSU-Next defaults to `v3.4.0` on Linux 4.19 and later, while the
-separate Linux 4.4 compatibility path remains pinned to `v1.1.1` until a full
-v3.4.0-on-4.4 compile/backport validation is complete. ReSukiSU is pinned to
-`v4.2.0-rc3`.
-
-SUSFS for Linux 4.19 uses upstream `simonpunk/susfs4ksu` revision
-`001e69919c6271f690fd00b17e4c721c9e599152` (the dedicated `kernel-4.19` branch's latest compatible
-revision). The CI applies it with strict `git apply --check` gates.
-
-SUSFS + ReSukiSU uses ReSukiSU's integrated SUSFS hook instead of mixing
-the official-KernelSU SUSFS patch set into another provider.
-
-SUSFS + KernelSU-Next is intentionally blocked by the CI because the
-available upstream 4.19 SUSFS patch set is based on official KernelSU and
-is not a verified KernelSU-Next patch set.
-
-## Lavender 4.4 NonGKI
-
-`lavender-4.4` now has a dedicated NonGKI hook integration based on
-`Lokitla/NonGKI_Kernel_Build_2nd` (pinned commit
-`ab5b09509bcdf7a077468b0ab30bfe3cc86a0c77`). Root variants automatically use
-its 4.4-tested syscall hook layer. When the optional SUSFS path is enabled,
-the CI switches to the upstream SUSFS inline hook script and the dedicated
-4.4 SUSFS configuration surface.
-
-The full `susfs_patch_to_4.4.patch` is deliberately applied with strict
-`git apply --check`; no fuzzy application is allowed because vendor kernels
-may not match the patch's exact base blobs.
+Linux 4.19 uses `simonpunk/susfs4ksu` at `001e69919c6271f690fd00b17e4c721c9e599152`
+(official KernelSU only; KernelSU-Next and ReSukiSU manual-hook profiles are
+blocked). Linux 4.4 uses the blob-verified NonGKI `susfs_patch_to_4.4.patch`.
+Both use strict `git apply --check`; no fuzzy application.

@@ -1,9 +1,0 @@
-diff --git a/scripts/build_kernel.sh b/scripts/build_kernel.sh
---- a/scripts/build_kernel.sh
-+++ b/scripts/build_kernel.sh
-@@
- KERNEL_NAME="${KERNEL_NAME:-}"
-+source "$SCRIPT_DIR/kbuild_identity.sh"
-
-+export KBUILD_BUILD_USER
-+export KBUILD_BUILD_HOST

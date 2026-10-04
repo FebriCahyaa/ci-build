@@ -60,35 +60,53 @@ def validate_patch(path: Path) -> None:
             )
 
 
-def validate_series(path: Path) -> None:
-    lines = path.read_text(encoding="utf-8").splitlines()
-    for line in lines:
+SERIES_NAMES = ("series.conf", "host-series.conf", "provider-series.conf")
+
+
+def series_entries(path: Path) -> list[Path]:
+    entries = []
+    for line in path.read_text(encoding="utf-8").splitlines():
         entry = line.strip()
         if not entry or entry.startswith("#"):
             continue
-        patch = Path(entry) if entry.startswith("/") else path.parent / entry
+        entries.append(Path(entry) if entry.startswith("/") else path.parent / entry)
+    return entries
+
+
+def validate_series(path: Path) -> list[Path]:
+    entries = series_entries(path)
+    for patch in entries:
         if not patch.is_file():
             fail(
                 f"series {path.relative_to(ROOT)} references missing patch "
                 f"{patch.relative_to(ROOT) if patch.is_relative_to(ROOT) else patch}"
             )
+    return entries
 
 
 def main() -> int:
     patches = sorted(PATCH_ROOT.rglob("*.patch"))
     if not patches:
         fail("no .patch files found")
-
-    series = sorted(PATCH_ROOT.rglob("series.conf"))
     for patch in patches:
         validate_patch(patch)
-    for series_file in series:
-        validate_series(series_file)
 
-    print(
-        f"[patch-format] PASS: {len(patches)} patches, "
-        f"{len(series)} series files"
-    )
+    series = sorted(p for name in SERIES_NAMES for p in PATCH_ROOT.rglob(name))
+    for legacy in (p for p in series if p.name == "series.conf" and "root-manager" in p.parts):
+        fail(f"{legacy.relative_to(ROOT)}: root-manager patches must be listed in "
+             "provider-series.conf or host-series.conf")
+
+    referenced: set[Path] = set()
+    for series_file in series:
+        referenced.update(p.resolve() for p in validate_series(series_file))
+
+    # A patch that no series lists is dead code: it is never applied and
+    # silently drifts away from the trees it was written for.
+    orphans = [p for p in patches if p.resolve() not in referenced]
+    if orphans:
+        fail("unreferenced patch files: " + ", ".join(str(p.relative_to(ROOT)) for p in orphans))
+
+    print(f"[patch-format] PASS: {len(patches)} patches, {len(series)} series files, no orphans")
     return 0
 
 

@@ -1,30 +1,37 @@
 # Zairenkai AnyKernel3
 
-Vendored AnyKernel3 backend for the Zairenkai kernel CI.
+Vendored AnyKernel3 backend for the Zairenkai kernel CI. `anykernel.sh` and
+`banner` are templates rendered by `ci-patch.sh` from `profiles/<profile>.conf`
+and the root variant right before packaging.
 
-Supported profiles:
+| Profile | Kernel | Scheduler model | Dynamic partitions | Boot |
+|---|---|---|---|---|
+| `lavender-4.4` | Linux 4.4 | HMP/EAS | supported | legacy |
+| `lavender-4.19` | Linux 4.19 | EAS/WALT | required | legacy |
+| `garnet-gki` | Linux 5.10 GKI | EAS | required | A/B, Image only (vendor DTBO untouched) |
 
-- `lavender-4.4` — Linux 4.4, HMP/EAS, legacy + dynamic-partition compatible.
-- `lavender-4.19` — Linux 4.19, dynamic-partition compatible.
-- `garnet-gki` — Linux 5.10 GKI, A/B boot and dynamic-partition ROM compatible.
+Root variants: `vanilla`, `kernelsu`, `kernelsu-next`, `resukisu`,
+`sukisu-ultra` (aliases such as `ksun`, `sukisu` are accepted).
 
-Root variants:
+## Rendering
 
-- `vanilla`
-- `kernelsu-next`
-- `resukisu`
+```bash
+./ci-patch.sh --profile lavender-4.19 --variant kernelsu-next --dir .
+```
 
-The release matrix intentionally uses these three variants. The `kernelsu`
-variant remains supported by the shared renderer for compatibility, but is not
-part of the default release matrix.
+The renderer fails when a profile is missing or an `@PLACEHOLDER@` token
+remains unresolved. Values are inserted literally (`&` is not special).
 
 ## Local packaging
 
+Place compiled images at `images/<variant>/<image>` (first match of the
+profile's `KERNEL_IMAGES` order wins), then:
+
 ```bash
 ./build.sh lavender-4.4 vanilla kernelsu-next resukisu
-./build.sh lavender-4.19 vanilla kernelsu-next resukisu
-./build.sh garnet-gki vanilla kernelsu-next resukisu
+./build.sh garnet-gki vanilla sukisu-ultra
 ```
 
-Place the compiled kernel image at `images/<variant>/<image>`. The packager is
-fail-closed: no kernel image means no ZIP is produced.
+Packaging is fail-closed: no accepted kernel image means no ZIP. Every ZIP is
+checked with `unzip -t`. Target selection is owned by `profiles/targets/` in
+ci-build; do not add another registry in workflow files.

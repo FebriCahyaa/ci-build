@@ -10,10 +10,10 @@ on:
         options: [lavender-4.4, lavender-4.19, garnet-gki]
         default: lavender-4.4
       root_variants:
-        description: "Root variants: vanilla,kernelsu-next,resukisu,sukisu-ultra or all"
+        description: "Root variants: default (profile set), all, or e.g. vanilla,kernelsu-next,resukisu,sukisu-ultra"
         required: true
         type: string
-        default: vanilla,kernelsu-next,resukisu,sukisu-ultra
+        default: default
       kernel_repo_override:
         description: "Optional kernel repository override"
         required: false
@@ -43,7 +43,7 @@ on:
         description: "Toolchain family"
         required: true
         type: choice
-        options: [auto, aosp, proton, neutron, llvm, gcc, system]
+        options: [auto, aosp, aosp-r416183b, zyc-10, proton, llvm-18, neutron, llvm, gcc, system]
         default: auto
       toolchain_version:
         description: "Toolchain revision/tag"
@@ -56,13 +56,8 @@ on:
         type: choice
         options: [auto, "0", "1"]
         default: auto
-      clang_url:
-        description: "Optional custom Clang archive URL"
-        required: false
-        type: string
-        default: ""
-      gcc_url:
-        description: "Optional custom GCC archive URL"
+      toolchain_url:
+        description: "Optional custom toolchain archive URL (clang, or GCC when toolchain=gcc)"
         required: false
         type: string
         default: ""
@@ -81,6 +76,12 @@ on:
         required: true
         type: string
         default: auto
+      tweaks:
+        description: "Kernel tweaks (see patches/features/tweaks)"
+        required: true
+        type: choice
+        options: [none, balanced, performance]
+        default: none
       lto_plus:
         description: "Optional LTO+ profile"
         required: true
@@ -148,9 +149,8 @@ jobs:
       - name: Harness preflight
         run: |
           set -euo pipefail
-          chmod +x scripts/*.sh
-          python3 -m py_compile scripts/harness_monitor.py
-          bash -n scripts/build_variants.sh scripts/build_kernel.sh scripts/apply_nongki_4_4.sh scripts/apply_susfs.sh scripts/assemble_release_assets.sh scripts/publish_ci_release.sh scripts/stage_ci_release_assets.sh scripts/fetch_harness_staging_assets.sh scripts/cleanup_ci_release_transients.sh scripts/send_release_to_telegram.sh scripts/send_harness_failure_to_telegram.sh
+          python3 -m py_compile scripts/*.py
+          bash -n scripts/*.sh scripts/lib/*.sh
           test -f profiles/targets/${{ inputs.build_profile }}.conf
           test -f anykernel/anykernel.sh
           git rev-parse HEAD
@@ -195,8 +195,7 @@ jobs:
           TOOLCHAIN: ${{ inputs.toolchain }}
           TOOLCHAIN_VERSION: ${{ inputs.toolchain_version }}
           LLVM_IAS: ${{ inputs.llvm_ias }}
-          CLANG_URL: ${{ inputs.clang_url }}
-          GCC_URL: ${{ inputs.gcc_url }}
+          TOOLCHAIN_URL: ${{ inputs.toolchain_url }}
           EXTRA_MAKE_ARGS: ${{ inputs.extra_make_args }}
           PATCH_PROFILE: ${{ inputs.patch_profile }}
           UPSTREAM_PROFILE: ${{ inputs.upstream_profile }}
@@ -208,6 +207,7 @@ jobs:
           ANYKERNEL_PROFILE: ${{ inputs.anykernel_profile }}
           ANYKERNEL3_REF: ${{ inputs.anykernel3_ref }}
           KERNEL_NAME_INPUT: ${{ inputs.kernel_name }}
+          TWEAKS_INPUT: ${{ inputs.tweaks }}
           APT_PACKAGES_INPUT: ${{ inputs.apt_packages }}
           PUBLISH_RELEASE: ${{ inputs.publish_release }}
           TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
@@ -230,9 +230,15 @@ jobs:
           ]
 
           values = {name: os.environ.get(name, "") for name in names}
+          # One URL input on the GitHub side; Harness keeps separate variables.
+          url = os.environ.get("TOOLCHAIN_URL", "")
+          is_gcc = os.environ.get("TOOLCHAIN", "") == "gcc"
+          values["CLANG_URL"] = "" if is_gcc else url
+          values["GCC_URL"] = url if is_gcc else ""
           values["BUILD_CUSTOMIZATION"] = json.dumps({
               "kernel_name": os.environ.get("KERNEL_NAME_INPUT", ""),
               "apt_packages": os.environ.get("APT_PACKAGES_INPUT", ""),
+              "tweaks": os.environ.get("TWEAKS_INPUT", "none"),
           }, separators=(",", ":"), ensure_ascii=False)
           lines = ["pipeline:", "  identifier: Universal_Kernel_Build", "  variables:"]
           for name in names:

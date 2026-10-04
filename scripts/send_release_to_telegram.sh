@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
+# Relay a published GitHub release (message + assets) to the Telegram release
+# topic. Telegram is optional: without bot/chat/topic secrets this is a no-op.
 set -Eeuo pipefail
-: "${TG_BOT_TOKEN:?TG_BOT_TOKEN is required}"
-: "${TG_CHAT_ID:?TG_CHAT_ID is required}"
-: "${TG_RELEASE_TOPIC_ID:?TG_RELEASE_TOPIC_ID is required}"
+if [[ -z "${TG_BOT_TOKEN:-}" || -z "${TG_CHAT_ID:-}" || -z "${TG_RELEASE_TOPIC_ID:-}" ]]; then
+  echo "[telegram-release] Telegram release relay not configured (TG_BOT_TOKEN/TG_CHAT_ID/TG_RELEASE_TOPIC_ID); skipping" >&2
+  exit 0
+fi
 : "${GITHUB_TOKEN:?GITHUB_TOKEN is required}"
 : "${GH_REPOSITORY:?GH_REPOSITORY is required}"
 : "${RELEASE_TAG:?RELEASE_TAG is required}"
 
 API_GH="https://api.github.com"
-API_TG="https://api.telegram.org/bot${TG_BOT_TOKEN}"
+API_TG="${TG_API_BASE:-https://api.telegram.org}/bot${TG_BOT_TOKEN}"
 BUILD_PROFILE_LABEL="${BUILD_PROFILE:-unknown}"
 WORK="${ASSET_DIR:-${RUNNER_TEMP:-/tmp}/harness-telegram-assets}"
 mkdir -p "$WORK"; trap 'rm -rf "$WORK"' EXIT
@@ -78,8 +81,13 @@ for a in v.get("assets",[]):
     assets.append(a)
 print(len(assets))
 names=[a.get("name","") for a in assets]; variants=[]
-for key,label in (("sukisu-ultra","SukiSU Ultra"),("kernelsu-next","KernelSU-Next"),("resukisu","ReSukiSU"),("kernelsu","KernelSU"),("vanilla","Vanilla")):
-    if any(key in n.lower() for n in names): variants.append(label)
+import re
+# Word-bounded patterns: "kernelsu" must not match "kernelsu-next", and
+# "sukisu" must not match "resukisu".
+patterns=(("SukiSU Ultra",r"(?<![a-z])sukisu[-_ ]?ultra"),("KernelSU-Next",r"kernelsu-next"),
+          ("ReSukiSU",r"resukisu"),("KernelSU",r"kernelsu(?!-next)"),("Vanilla",r"vanilla"))
+for label,pattern in patterns:
+    if any(re.search(pattern, n.lower()) for n in names): variants.append(label)
 print(", ".join(variants) if variants else "lihat assets release")
 PY
 )

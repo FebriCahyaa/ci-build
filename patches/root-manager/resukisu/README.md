@@ -1,18 +1,14 @@
-# ReSukiSU / Lavender 4.19
+# ReSukiSU provider integration
 
-ReSukiSU + SUSFS is the root-manager path used by the current Lavender
-build configuration.
+Upstream: https://github.com/ReSukiSU/ReSukiSU (pinned `v4.2.0-rc3`)
 
-The current source exposes the handler calls expected by ReSukiSU, but
-the tree still carries two legacy boolean guards and uses static SELinux
-file-operation objects. The following patches provide the narrow 4.19
-compatibility changes required by the current ReSukiSU SUSFS checks:
+| Kernel | Hook mode | Host integration |
+|---|---|---|
+| 4.4 | manual | NonGKI syscall hook stage (`patches/upstream/lokitla-nongki/4.4`) |
+| 4.19 | manual | `4.19/host-series.conf` (execve, faccessat, stat/newfstat/fstat64, reboot, SELinux exports) |
+| 5.10 GKI | tracepoint | none |
 
-1. SELinux static exports
-2. `ksu_vfs_read_hook` legacy guard removal
-3. `ksu_input_hook` legacy guard removal
-4. C90-safe `ksu_handle_setresuid` insertion
-5. Restore the missing SUSFS process-state helpers and deferred work item
-   required by the current ReSukiSU provider on this 4.19 tree
-
-These patches are narrow and only alter the ephemeral CI kernel checkout.
+On the KernelSU-preintegrated Nexus 4.4 tree the existing `fs/stat.c` hook
+lacks `ksu_handle_newfstat_ret`/`ksu_handle_fstat64_ret`, which ReSukiSU's
+`manual_hook_check.mk` requires; port those hooks before expecting a 4.4
+ReSukiSU build to pass.

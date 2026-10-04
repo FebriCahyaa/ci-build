@@ -34,5 +34,5 @@ WORK_DIR="$TMP/work" BUILD_LOG="$TMP/work/build.log" DEVICE=garnet ROOT_VARIANT=
 test -f "$TMP/work/.tg-progress-last"
 PATH="$TMP/bin:$PATH" TG_BOT_TOKEN=test TG_CHAT_ID=123 TG_MESSAGE_ID=777 TG_START_TIME="$(date +%s)" \
 WORK_DIR="$TMP/work" BUILD_LOG="$TMP/work/build.log" DEVICE=garnet ROOT_VARIANT=vanilla VARIANT_LABEL=Vanilla \
-  GH_TOKEN= GH_REPOSITORY= CI_BUILD_SHA= "$ROOT/scripts/progress_beacon.sh" 45 pending compile 'objects 2/2'
+  GH_TOKEN= GH_REPOSITORY= CI_BUILD_SHA= bash "$ROOT/scripts/progress_beacon.sh" 45 pending compile 'objects 2/2'
 printf 'PASS telegram progress helper\n'

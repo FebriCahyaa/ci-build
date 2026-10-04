@@ -8,22 +8,26 @@ LOCAL_MANIFEST_BRANCH="${LOCAL_MANIFEST_BRANCH:-}"
 BUILD_CMD="${BUILD_CMD:-mka bacon}"
 RUN_URL="${RUN_URL:-}"
 TG_RUN_URL_HTML="$(tg_escape_html "${RUN_URL:-}")"
+DEVICE_HTML="$(tg_escape_html "$DEVICE")"
+MANIFEST_HTML="$(tg_escape_html "$MANIFEST_URL")"
+BRANCH_HTML="$(tg_escape_html "$MANIFEST_BRANCH")"
+LUNCH_HTML="$(tg_escape_html "$LUNCH_TARGET")"
 SRC="${ROM_DIR:-$HOME/rom}"
 START=$(date +%s)
-mkdir -p "$SRC" && cd "$SRC"
+mkdir -p "$SRC" && cd "$SRC" || { echo "ERROR: cannot enter ROM_DIR=$SRC" >&2; exit 1; }
 
 MID=$(tg_msg "🚀 <b>Build ROM dimulai</b>
-📱 Device: <code>$DEVICE</code>
-📦 Manifest: <code>$MANIFEST_URL</code> (<code>$MANIFEST_BRANCH</code>)
-🎯 Lunch: <code>$LUNCH_TARGET</code>
+📱 Device: <code>$DEVICE_HTML</code>
+📦 Manifest: <code>$MANIFEST_HTML</code> (<code>$BRANCH_HTML</code>)
+🎯 Lunch: <code>$LUNCH_HTML</code>
 🔗 <a href=\"$TG_RUN_URL_HTML\">Log CI</a>") || MID=""
 
 fail() {
   local d=$(( $(date +%s) - START ))
   tg_edit "$MID" "❌ <b>Build ROM GAGAL</b> pada tahap: <code>$1</code>
-📱 $DEVICE | ⏱ $(fmt_dur $d)
+📱 $DEVICE_HTML | ⏱ $(fmt_dur $d)
 🔗 <a href=\"$TG_RUN_URL_HTML\">Log CI</a>" || true
-  [ -f "$SRC/out/error.log" ] && tg_file "$SRC/out/error.log" "📄 error.log — $DEVICE" || true
+  [ -f "$SRC/out/error.log" ] && tg_file "$SRC/out/error.log" "📄 error.log — $DEVICE_HTML" || true
   if [ -f "$SRC/build.log" ]; then
     tail -n 300 "$SRC/build.log" > "$SRC/tail.log"
     tg_file "$SRC/tail.log" "📄 300 baris terakhir" || true
@@ -39,15 +43,16 @@ if [ -n "$LOCAL_MANIFEST_URL" ]; then
   rm -rf .repo/local_manifests
   git clone "$LOCAL_MANIFEST_URL" ${LOCAL_MANIFEST_BRANCH:+-b "$LOCAL_MANIFEST_BRANCH"} .repo/local_manifests || fail "local manifest"
 fi
-tg_edit "$MID" "🔄 <b>Sync source…</b> 📱 $DEVICE" || true
+tg_edit "$MID" "🔄 <b>Sync source…</b> 📱 $DEVICE_HTML" || true
 repo sync -c -j"$(nproc --all)" --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune > "$SRC/sync.log" 2>&1 \
   || repo sync -c -j4 --force-sync --no-clone-bundle --no-tags > "$SRC/sync.log" 2>&1 || fail "repo sync"
 
 # ---- Build ----
-export USE_CCACHE=1 CCACHE_EXEC="$(command -v ccache || true)"
+CCACHE_EXEC="$(command -v ccache || true)"
+export USE_CCACHE=1 CCACHE_EXEC
 ccache -M "${CCACHE_SIZE:-50G}" >/dev/null 2>&1 || true
-tg_edit "$MID" "🔨 <b>Compiling ROM…</b> 📱 $DEVICE
-🎯 <code>$LUNCH_TARGET</code>" || true
+tg_edit "$MID" "🔨 <b>Compiling ROM…</b> 📱 $DEVICE_HTML
+🎯 <code>$LUNCH_HTML</code>" || true
 set +u; source build/envsetup.sh; set -u
 lunch "$LUNCH_TARGET" > "$SRC/build.log" 2>&1 || fail "lunch"
 ( eval "$BUILD_CMD" ) >> "$SRC/build.log" 2>&1 || fail "compile"
@@ -66,7 +71,7 @@ if [ -n "${RCLONE_REMOTE:-}" ] && command -v rclone >/dev/null; then
 fi
 D=$(( $(date +%s) - START ))
 tg_edit "$MID" "✅ <b>Build ROM SELESAI</b>
-📱 $DEVICE | ⏱ $(fmt_dur $D)
+📱 $DEVICE_HTML | ⏱ $(fmt_dur $D)
 📦 <code>$(basename "$ZIP")</code> ($SIZE)
 🔐 SHA256: <code>${SHA:0:16}…</code>
 ⬇️ $LINK" || true

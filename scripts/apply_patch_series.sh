@@ -1,9 +1,21 @@
 #!/usr/bin/env bash
+# Modular patch registry runner.
+#
+#   PHASE=source  apply host-kernel source patches (device, root-manager host, upstream)
+#   PHASE=config  merge Kconfig fragments into $KERNEL_OUT/.config
+#   PHASE=verify  after olddefconfig: report which fragment values survived
+#
+# Root-manager registry contract (patches/root-manager/<provider>/<mm>|common/):
+#   host-series.conf      host-kernel patches — applied HERE
+#   provider-series.conf  provider-tree patches — applied by root_manager_apply.sh
+#   config.fragment       Kconfig overrides — applied HERE in the config phase
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-PATCH_ROOT="$REPO_ROOT/patches"
+# shellcheck source=lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+CI_LOG_TAG=patches
+PATCH_ROOT="${CI_PATCH_ROOT:-$CI_ROOT/patches}"
 
 SOURCE_DIR="${SOURCE_DIR:-}"
 DEVICE="${DEVICE:-generic}"
@@ -12,12 +24,13 @@ PATCH_PROFILE="${PATCH_PROFILE:-auto}"
 UPSTREAM_PROFILE="${UPSTREAM_PROFILE:-auto}"
 ROOT_MANAGER="${ROOT_MANAGER:-none}"
 KSU_REQUIRED="${KSU_REQUIRED:-false}"
-KSU_SUSFS_REQUIRED="${KSU_SUSFS_REQUIRED:-false}"
 KERNEL_REPO="${KERNEL_REPO:-}"
 PHASE="${PHASE:-source}"
 LTO_PLUS="${LTO_PLUS:-false}"
 ENABLE_SUSFS="${ENABLE_SUSFS:-false}"
 KSU_PREINTEGRATED="${KSU_PREINTEGRATED:-false}"
+TWEAKS="${TWEAKS:-none}"
+SOUTHWEST_NG_REPO="pix106/android_kernel_xiaomi_sdm660_southwest-ng"
 
 # root_manager_apply.sh reports official KernelSU as "official"; the patch
 # registry stores it under root-manager/kernelsu.
@@ -26,41 +39,32 @@ case "$ROOT_MANAGER" in
   ""|vanilla) ROOT_MANAGER=none ;;
 esac
 
-# root_file <name>: version-specific registry file, falling back to common/.
-root_file() {
-  local provider="$1" name="$2"
-  if [[ -f "$PATCH_ROOT/root-manager/$provider/$KERNEL_MM/$name" ]]; then
-    printf '%s\n' "$PATCH_ROOT/root-manager/$provider/$KERNEL_MM/$name"
-  elif [[ -f "$PATCH_ROOT/root-manager/$provider/common/$name" ]]; then
-    printf '%s\n' "$PATCH_ROOT/root-manager/$provider/common/$name"
-  fi
-}
-
-fail() {
-  echo "[patches] ERROR: $*" >&2
-  exit 1
-}
+fail() { ci_die "$*"; }
 
 [[ -n "$SOURCE_DIR" && -d "$SOURCE_DIR/.git" ]] ||
   fail "SOURCE_DIR must point to a git working tree: ${SOURCE_DIR:-<empty>}"
 
-major="${KERNEL_VERSION%%.*}"
-minor="${KERNEL_VERSION#*.}"
-minor="${minor%%.*}"
-KERNEL_MM="${major}.${minor}"
+KERNEL_MM="$(kernel_mm "$KERNEL_VERSION")"
+
+# root_file <provider> <name>: version-specific registry file, falling back to common/.
+root_file() {
+  local provider="$1" name="$2" candidate
+  for candidate in "$PATCH_ROOT/root-manager/$provider/$KERNEL_MM/$name" \
+                   "$PATCH_ROOT/root-manager/$provider/common/$name"; do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+}
 
 series_apply() {
-  local series="$1"
+  local series="$1" entry patch patch_commit
   [[ -f "$series" ]] || return 0
 
   echo "[patches] series=$series"
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
-    [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
-
-    local patch="$line"
+  while IFS= read -r entry; do
+    patch="$entry"
     [[ "$patch" = /* ]] || patch="$(dirname "$series")/$patch"
     [[ -f "$patch" ]] || fail "patch listed by series is missing: $patch"
 
@@ -81,140 +85,190 @@ series_apply() {
       git -C "$SOURCE_DIR" apply --whitespace=nowarn "$patch"
     elif git -C "$SOURCE_DIR" apply -R --check --whitespace=nowarn "$patch" >/dev/null 2>&1; then
       echo "[patches] ALREADY APPLIED $patch"
-    elif python3 "$REPO_ROOT/scripts/patch_content_check.py" "$SOURCE_DIR" "$patch" >/dev/null 2>&1; then
+    elif python3 "$SCRIPT_DIR/patch_content_check.py" "$SOURCE_DIR" "$patch" >/dev/null 2>&1; then
       echo "[patches] ALREADY APPLIED $patch (content already present)"
     else
       echo "[patches] FAILED CHECK $patch" >&2
       git -C "$SOURCE_DIR" apply --check --whitespace=nowarn "$patch" || true
       fail "patch does not apply cleanly: $patch"
     fi
-  done < "$series"
+  done < <(read_series "$series")
 }
 
+# config_apply <fragment>: set/unset Kconfig symbols in $KERNEL_OUT/.config.
+# Values are passed through the environment, never interpolated into sed/awk
+# programs, so '&', '|', '\' and quotes in string options are preserved.
 config_apply() {
-  local fragment="$1"
+  local fragment="$1" line key value
   [[ -f "$fragment" ]] || fail "config fragment missing: $fragment"
   [[ -f "$KERNEL_OUT/.config" ]] || fail "kernel output .config missing: $KERNEL_OUT/.config"
 
   echo "[patches] CONFIG $fragment"
-
+  printf '%s\n' "$fragment" >> "$KERNEL_OUT/.ci-config-fragments"
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%$'\r'}"
-    [[ -z "$line" ]] && continue
-    # Keep "# CONFIG_FOO is not set" (a real directive); skip other comments.
-    [[ "${line:0:1}" == "#" && ! "$line" =~ ^\#\ CONFIG_[A-Za-z0-9_]+\ is\ not\ set$ ]] && continue
+    [[ -z "${line//[[:space:]]/}" ]] && continue
+    if [[ "$line" =~ ^\#\ (CONFIG_[A-Za-z0-9_]+)\ is\ not\ set$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      value=""
+    elif [[ "$line" == \#* ]]; then
+      continue
+    elif [[ "$line" =~ ^(CONFIG_[A-Za-z0-9_]+)=(.*)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      value="${BASH_REMATCH[2]}"
+    else
+      fail "unsupported config fragment line in $fragment: $line"
+    fi
 
-    case "$line" in
-      CONFIG_*=y|CONFIG_*=m|CONFIG_*="\""*"\""|CONFIG_*=*)
-        key="${line%%=*}"
-        value="${line#*=}"
-        if grep -qE "^${key}=" "$KERNEL_OUT/.config"; then
-          sed -i -E "s|^${key}=.*$|${key}=${value}|" "$KERNEL_OUT/.config"
-        elif grep -qE "^# ${key} is not set$" "$KERNEL_OUT/.config"; then
-          sed -i -E "s|^# ${key} is not set$|${key}=${value}|" "$KERNEL_OUT/.config"
-        else
-          printf '%s\n' "${key}=${value}" >> "$KERNEL_OUT/.config"
-        fi
-        ;;
-      "# CONFIG_"*" is not set")
-        key="$(printf '%s' "$line" | sed -E 's/^# (CONFIG_[A-Za-z0-9_]+) is not set$/\1/')"
-        if grep -qE "^${key}=" "$KERNEL_OUT/.config"; then
-          sed -i -E "s|^${key}=.*$|# ${key} is not set|" "$KERNEL_OUT/.config"
-        elif ! grep -qE "^# ${key} is not set$" "$KERNEL_OUT/.config"; then
-          printf '# %s is not set\n' "$key" >> "$KERNEL_OUT/.config"
-        fi
-        ;;
-      *)
-        fail "unsupported config fragment line: $line"
-        ;;
-    esac
+    CFG_KEY="$key" CFG_VALUE="$value" awk '
+      BEGIN {
+        key = ENVIRON["CFG_KEY"]; value = ENVIRON["CFG_VALUE"]
+        want = (value == "") ? "# " key " is not set" : key "=" value
+        done = 0
+      }
+      ($0 == "# " key " is not set") || (index($0, key "=") == 1) {
+        if (!done) { print want; done = 1 }
+        next
+      }
+      { print }
+      END { if (!done) print want }
+    ' "$KERNEL_OUT/.config" > "$KERNEL_OUT/.config.ci-tmp"
+    mv -f "$KERNEL_OUT/.config.ci-tmp" "$KERNEL_OUT/.config"
   done < "$fragment"
 }
 
-if [[ "$PHASE" == "source" ]]; then
-  case "$PATCH_PROFILE" in
-    none|off|false|"")
-      echo "[patches] device profile disabled (PATCH_PROFILE=$PATCH_PROFILE)"
-      ;;
-    auto)
-      # The Southwest-NG source is already a complete SDM660/Lavender-capable
-      # tree. Do not apply legacy SUSFS-only Lavender patches to it.
-      if [[ "$KERNEL_REPO" == *"pix106/android_kernel_xiaomi_sdm660_southwest-ng"* ]]; then
-        echo "[patches] auto device profile: southwest-ng (no device source patch)"
-      else
-        device_series="$PATCH_ROOT/devices/$DEVICE/$KERNEL_MM/series.conf"
-        series_apply "$device_series"
-      fi
-      ;;
-    *)
-      device_series="$PATCH_ROOT/devices/$PATCH_PROFILE/$KERNEL_MM/series.conf"
-      series_apply "$device_series"
-      ;;
-  esac
+# config_verify: compare every merged fragment with the resolved .config.
+# Kconfig silently drops values whose dependencies are unmet; report them.
+config_verify() {
+  local list="$KERNEL_OUT/.ci-config-fragments" fragment
+  [[ -f "$list" ]] || { echo "[patches] VERIFY no config fragments were merged"; return 0; }
+  while IFS= read -r fragment; do
+    python3 - "$fragment" "$KERNEL_OUT/.config" <<'PY'
+import re, sys
+frag, cfg = sys.argv[1:3]
+have = {}
+for line in open(cfg, encoding="utf-8", errors="replace"):
+    m = re.match(r"^(CONFIG_[A-Za-z0-9_]+)=(.*)$", line.rstrip("\n"))
+    if m:
+        have[m.group(1)] = m.group(2)
+    m = re.match(r"^# (CONFIG_[A-Za-z0-9_]+) is not set$", line.rstrip("\n"))
+    if m:
+        have[m.group(1)] = ""
+want, dropped = 0, []
+for line in open(frag, encoding="utf-8"):
+    line = line.rstrip("\r\n")
+    m = re.match(r"^(CONFIG_[A-Za-z0-9_]+)=(.*)$", line)
+    unset = re.match(r"^# (CONFIG_[A-Za-z0-9_]+) is not set$", line)
+    if m:
+        want += 1
+        if have.get(m.group(1)) != m.group(2):
+            dropped.append(f"{m.group(1)}={m.group(2)} -> {have.get(m.group(1)) or 'unset'}")
+    elif unset:
+        want += 1
+        if have.get(unset.group(1), ""):
+            dropped.append(f"{unset.group(1)} still ={have[unset.group(1)]}")
+name = frag.split("/patches/", 1)[-1]
+print(f"[patches] VERIFY {name}: {want - len(dropped)}/{want} applied" + ("" if not dropped else "; not applied: " + ", ".join(dropped)))
+PY
+  done < <(sort -u "$list")
+}
 
-  if [[ "$KSU_REQUIRED" == "true" && "$ROOT_MANAGER" != "none" ]]; then
-    # Provider patches target the isolated provider checkout and are handled
-    # by root_manager_apply.sh. Some provider versions additionally require a
-    # small compatibility backport in the host kernel tree itself. Keep those
-    # patches in a separate host-series registry so they never touch the
-    # provider gitlink/submodule.
-    if [[ "$ROOT_MANAGER" == "kernelsu-next" ]]; then
-      # KernelSU-Next provider patches are applied inside the isolated
-      # provider checkout by root_manager_apply.sh. Only host-series.conf
-      # is allowed to touch the host kernel tree.
-      host_series="$PATCH_ROOT/root-manager/kernelsu-next/$KERNEL_MM/host-series.conf"
-      [[ -f "$host_series" ]] && series_apply "$host_series"
-    else
-      root_series="$(root_file "$ROOT_MANAGER" series.conf)"
-      [[ -n "$root_series" ]] && series_apply "$root_series"
-    fi
-  fi
-
-  case "$UPSTREAM_PROFILE" in
-    auto)
-      if [[ "$DEVICE" == "lavender" && "$KERNEL_MM" == "4.19" ]]; then
-        if [[ "$KERNEL_REPO" == *"pix106/android_kernel_xiaomi_sdm660_southwest-ng"* ]]; then
-          echo "[patches] auto upstream profile: southwest-ng (no legacy CodeLinaro patch set)"
+case "$PHASE" in
+  source)
+    case "$PATCH_PROFILE" in
+      none|off|false|"")
+        echo "[patches] device profile disabled (PATCH_PROFILE=$PATCH_PROFILE)"
+        ;;
+      auto)
+        # The Southwest-NG source is already a complete SDM660/Lavender-capable
+        # tree. Do not apply legacy SUSFS-only Lavender patches to it.
+        if [[ "$KERNEL_REPO" == *"$SOUTHWEST_NG_REPO"* ]]; then
+          echo "[patches] auto device profile: southwest-ng (no device source patch)"
         else
+          series_apply "$PATCH_ROOT/devices/$DEVICE/$KERNEL_MM/series.conf"
+        fi
+        ;;
+      *)
+        series_apply "$PATCH_ROOT/devices/$PATCH_PROFILE/$KERNEL_MM/series.conf"
+        ;;
+    esac
+
+    # Provider-tree patches are applied to the isolated provider checkout by
+    # root_manager_apply.sh. Only host-series.conf may touch the host kernel.
+    if is_true "$KSU_REQUIRED" && [[ "$ROOT_MANAGER" != "none" ]]; then
+      host_series="$(root_file "$ROOT_MANAGER" host-series.conf)"
+      if [[ -n "$host_series" ]]; then
+        series_apply "$host_series"
+      else
+        echo "[patches] no host-kernel series for $ROOT_MANAGER Linux $KERNEL_MM"
+      fi
+    fi
+
+    case "$UPSTREAM_PROFILE" in
+      auto)
+        if [[ "$DEVICE" == "lavender" && "$KERNEL_MM" == "4.19" ]]; then
+          if [[ "$KERNEL_REPO" == *"$SOUTHWEST_NG_REPO"* ]]; then
+            echo "[patches] auto upstream profile: southwest-ng (no legacy CodeLinaro patch set)"
+          else
+            series_apply "$PATCH_ROOT/upstream/codelinaro/sdm660-4.19/series.conf"
+          fi
+        fi
+        ;;
+      codelinaro-sdm660)
+        if [[ "$DEVICE" == "lavender" && "$KERNEL_MM" == "4.19" ]]; then
           series_apply "$PATCH_ROOT/upstream/codelinaro/sdm660-4.19/series.conf"
         fi
-      fi
-      ;;
-    codelinaro-sdm660)
-      if [[ "$DEVICE" == "lavender" && "$KERNEL_MM" == "4.19" ]]; then
-        series_apply "$PATCH_ROOT/upstream/codelinaro/sdm660-4.19/series.conf"
-      fi
-      ;;
-    none|"")
-      ;;
-    *)
-      series_apply "$PATCH_ROOT/upstream/$UPSTREAM_PROFILE/$KERNEL_MM/series.conf"
-      ;;
-  esac
+        ;;
+      none|"") ;;
+      *) series_apply "$PATCH_ROOT/upstream/$UPSTREAM_PROFILE/$KERNEL_MM/series.conf" ;;
+    esac
+    ;;
 
-elif [[ "$PHASE" == "config" ]]; then
-  KERNEL_OUT="${KERNEL_OUT:-}"
-  [[ -n "$KERNEL_OUT" ]] || fail "KERNEL_OUT is required during config phase"
+  config)
+    KERNEL_OUT="${KERNEL_OUT:-}"
+    [[ -n "$KERNEL_OUT" ]] || fail "KERNEL_OUT is required during config phase"
 
-  if [[ "$LTO_PLUS" == "true" || "$LTO_PLUS" == "1" ]]; then
-    if [[ "$DEVICE" == "lavender" && "$KERNEL_MM" == "4.19" ]]; then
+    rm -f "$KERNEL_OUT/.ci-config-fragments"
+    if is_true "$LTO_PLUS" && [[ "$DEVICE" == "lavender" && "$KERNEL_MM" == "4.19" ]]; then
       config_apply "$PATCH_ROOT/features/lto-plus/lavender-4.19/thinlto.config"
     fi
-  fi
 
-  if [[ "$ROOT_MANAGER" != "none" ]]; then
-    root_config="$(root_file "$ROOT_MANAGER" config.fragment)"
-    [[ -n "$root_config" ]] && config_apply "$root_config"
-  elif [[ "$KSU_PREINTEGRATED" == "true" ]]; then
-    # Vanilla build of a tree that already carries a root provider.
-    config_apply "$PATCH_ROOT/root-manager/none/common/config.fragment"
-  fi
+    if [[ "$ROOT_MANAGER" != "none" ]]; then
+      root_config="$(root_file "$ROOT_MANAGER" config.fragment)"
+      [[ -n "$root_config" ]] && config_apply "$root_config"
+    elif is_true "$KSU_PREINTEGRATED"; then
+      # Vanilla build of a tree that already carries a root provider.
+      config_apply "$PATCH_ROOT/root-manager/none/common/config.fragment"
+    fi
 
-  if [[ "$ENABLE_SUSFS" == "true" || "$ENABLE_SUSFS" == "1" ]]; then
-    susfs_config="$PATCH_ROOT/features/susfs/kernel-$KERNEL_MM/config.fragment"
-    [[ -f "$susfs_config" ]] || fail "SUSFS config fragment missing: $susfs_config"
-    config_apply "$susfs_config"
-  fi
-else
-  fail "invalid PHASE=$PHASE"
-fi
+    if is_true "$ENABLE_SUSFS"; then
+      susfs_config="$PATCH_ROOT/features/susfs/kernel-$KERNEL_MM/config.fragment"
+      [[ -f "$susfs_config" ]] || fail "SUSFS config fragment missing: $susfs_config"
+      config_apply "$susfs_config"
+    fi
+
+    # Tweaks go last so they are the final word before olddefconfig.
+    case "${TWEAKS,,}" in
+      none|off|false|"") ;;
+      balanced|performance)
+        for level in balanced $([[ "${TWEAKS,,}" == performance ]] && echo performance); do
+          tweak="$PATCH_ROOT/features/tweaks/$level/$KERNEL_MM.config"
+          if [[ -f "$tweak" ]]; then
+            config_apply "$tweak"
+          else
+            echo "[patches] no $level tweaks for Linux $KERNEL_MM"
+          fi
+        done
+        ;;
+      *) fail "invalid TWEAKS=$TWEAKS (use none, balanced or performance)" ;;
+    esac
+    ;;
+
+  verify)
+    KERNEL_OUT="${KERNEL_OUT:-}"
+    [[ -n "$KERNEL_OUT" && -f "$KERNEL_OUT/.config" ]] || fail "KERNEL_OUT/.config is required during verify phase"
+    config_verify
+    ;;
+
+  *) fail "invalid PHASE=$PHASE" ;;
+esac

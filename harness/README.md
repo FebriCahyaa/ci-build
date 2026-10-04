@@ -1,49 +1,48 @@
 # Harness CI
 
-The Harness kernel pipeline is the same build implementation used by GitHub Actions and local execution.
-
 ## Kernel pipeline
 
-Use `harness/kernel-pipeline.yaml` as a Remote Pipeline. The important variables are:
+`kernel-pipeline.yaml` (`Universal_Kernel_Build`) runs the same
+`scripts/build_variants.sh` used locally. It clones ci-build, checks out the
+exact `CI_BUILD_SHA`, initializes the root-manager submodules for that commit,
+and builds the requested variants from one kernel source seed with shared
+ccache and a shared toolchain cache.
+
+All 25 pipeline variables are runtime inputs supplied by
+`.github/workflows/harness-kernel.yml`:
 
 ```text
 BUILD_PROFILE   = lavender-4.4 | lavender-4.19 | garnet-gki
-ROOT_VARIANTS   = vanilla,kernelsu-next,resukisu,sukisu-ultra | subset | all
+ROOT_VARIANTS   = default | all | vanilla,kernelsu-next,resukisu,sukisu-ultra
 PUBLISH_RELEASE = false | true
+BUILD_CUSTOMIZATION = {"kernel_name": "...", "apt_packages": "...", "tweaks": "none|balanced|performance"}
 ```
 
-The remaining variables are optional build overrides and are intentionally aligned with the GitHub Actions bridge.
+Required Harness secret: `github_token` (contents: write on the repository).
+Verify a token before storing it with
+`GH_TOKEN=... GH_REPOSITORY=owner/ci-build bash scripts/github_harness_preflight.sh`
+(creates and deletes a temporary draft release).
+Optional: `tg_bot_token`, `tg_chat_id` for the live build dashboard.
 
-### Progressive artifact persistence and failure diagnostics
+### Artifact persistence and failure diagnostics
 
-Each completed variant is staged immediately into a per-execution draft GitHub Release named `harness-<executionId>`. This happens before the next variant starts, so artifacts from successful variants remain downloadable even if a later variant fails. When `PUBLISH_RELEASE=true`, the same draft release is finalized only after the complete build succeeds.
+Each finished variant is staged immediately into the per-execution prerelease
+`harness-<executionId>` (`staging-*` assets), so completed variants survive a
+later failure. On exit the pipeline assembles the release set, re-stages it as
+`handoff-*` assets plus a `handoff-HANDOFF-READY.txt` marker, and — when
+`PUBLISH_RELEASE=true` and the matrix succeeded — publishes the final release.
 
-On failure, the builder writes both `failure-summary.txt` (extracted diagnostics plus the last 300 log lines) and `failure-build.log.gz` (the full build log) and stages them into the same draft release. The GitHub bridge monitor reads the staged failure summary for the final Telegram error message.
-
-The pipeline:
-
-```text
-ci-build checkout
-   -> dependency installation
-   -> target profile resolution
-   -> one kernel source seed
-   -> 4 root variants
-   -> AnyKernel3 + changelog
-   -> optional GitHub release
-```
+Failed variants upload `failure-summary.txt` (first error with context, unique
+error lines, log tail) and `failure-build.log.gz`.
 
 ## GitHub bridge
 
-`.github/workflows/harness-kernel.yml` triggers `Universal_Kernel_Build`, monitors the execution, and relays the release to Telegram when requested.
-
-Required Harness secret:
-
-```text
-github_token
-```
-
-Telegram build progress uses `TG_TOPIC_ID`. Published releases use the separate `tg_release_topic_id` secret and are relayed to `TG_RELEASE_TOPIC_ID`; the two topics are intentionally isolated.
+`harness-kernel.yml` triggers the pipeline, monitors it
+(`scripts/harness_monitor.py`), materializes the handoff as a GitHub Actions
+artifact, sends failures to `TG_TOPIC_ID`, relays a successful published
+release to `TG_RELEASE_TOPIC_ID`, then removes the transient handoff assets.
 
 ## ROM pipeline
 
-`harness/rom-pipeline.yaml` remains separate because AOSP/ROM builds require a self-managed runner with substantially more disk and memory than the universal kernel pipeline.
+`rom-pipeline.yaml` stays separate: AOSP/ROM builds need a self-managed Docker
+runner with far more disk and memory than the kernel pipeline.

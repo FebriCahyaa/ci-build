@@ -1,6 +1,6 @@
-# KernelSU-Next 4.4 legacy requirements.
+# KernelSU-Next v1.1.1 / Linux 4.4: built-in KSU with the kprobes hook path.
+# (KPROBE_EVENTS is not needed and cannot be enabled without tracing on the
+# Nexus lavender tree; HAVE_KPROBES is selected by the architecture.)
 CONFIG_KSU=y
 CONFIG_KPROBES=y
-CONFIG_HAVE_KPROBES=y
-CONFIG_KPROBE_EVENTS=y
 CONFIG_EXT4_FS=y

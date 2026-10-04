@@ -149,15 +149,16 @@ pipeline:
                       export DEBIAN_FRONTEND=noninteractive
                       CI_DIR="$PWD/ci-build"
                       rm -rf "$CI_DIR"
-                      git clone --depth=1 --recurse-submodules https://github.com/FebriCahyaa/ci-build.git "$CI_DIR"
-                      bash "$CI_DIR/scripts/bootstrap_root_manager_submodules.sh"
-                      git -C "$CI_DIR" submodule sync --recursive
-                      git -C "$CI_DIR" submodule update --init --recursive
+                      git clone --depth=1 "https://github.com/${GH_REPOSITORY}.git" "$CI_DIR"
 
+                      # Check out the exact commit first, then initialize the
+                      # root-manager submodules so their gitlinks match CI_BUILD_SHA
+                      # (not the default branch head of the initial clone).
                       if [[ -n "${CI_BUILD_SHA:-}" ]]; then
                         git -C "$CI_DIR" fetch --depth=1 origin "$CI_BUILD_SHA"
-                        git -C "$CI_DIR" checkout --detach "$CI_BUILD_SHA"
+                        git -C "$CI_DIR" -c advice.detachedHead=false checkout --detach "$CI_BUILD_SHA"
                       fi
+                      bash "$CI_DIR/scripts/bootstrap_root_manager_submodules.sh"
 
                       echo "== ci-build revision =="
                       git -C "$CI_DIR" log -1 --oneline
@@ -170,10 +171,10 @@ pipeline:
                       v=json.loads(sys.argv[1] or "{}")
                       print(v.get("kernel_name", ""))
                       print(v.get("apt_packages", ""))
+                      print(v.get("tweaks", "none"))
                       PY_CUSTOM
                       )
-                      export KERNEL_NAME="${customization[0]:-}" APT_PACKAGES="${customization[1]:-}"
-                      chmod +x scripts/*.sh
+                      export KERNEL_NAME="${customization[0]:-}" APT_PACKAGES="${customization[1]:-}" TWEAKS="${customization[2]:-none}"
 
                       # The handoff must survive both successful builds and unexpected
                       # setup/compile failures. Keep all finalization inside the EXIT trap.
@@ -215,16 +216,19 @@ pipeline:
                           package_count="$(find "$PWD/release/assets" -maxdepth 1 -type f \
                             \( -name '*.tar.gz' -o -name '*.zip' \) | wc -l | tr -d ' ')"
                           if (( package_count > 0 )); then
-                            GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" \
+                            if GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" \
                               RELEASE_TAG="harness-${HARNESS_EXECUTION_ID}" \
                               RELEASE_NAME="Zairenkai ${BUILD_PROFILE}" \
                               RELEASE_BODY_FILE="$PWD/release/CHANGELOG.md" \
                               RELEASE_DRAFT=false RELEASE_PRERELEASE=false \
                               RELEASE_CLEAN_STAGING=true \
                               ASSET_DIR="$PWD/release/assets" \
-                              bash scripts/publish_ci_release.sh || \
+                              CI_BUILD_SHA="${CI_BUILD_SHA:-$(git rev-parse HEAD)}" \
+                              bash scripts/publish_ci_release.sh; then
+                              echo "[harness] public release published; GitHub Actions owns the release-topic Telegram relay" >&2
+                            else
                               echo "[harness] public release publication failed; staging handoff remains the fallback" >&2
-                            echo "[harness] public release published; GitHub Actions owns the release-topic Telegram relay" >&2
+                            fi
                           else
                             echo "[harness] no installable package exists; retaining diagnostic staging release" >&2
                           fi

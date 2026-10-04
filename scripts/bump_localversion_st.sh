@@ -41,7 +41,9 @@ current="$(read_value_file "$FILE")"
 
 if [[ "$BUMP" == true ]]; then
   [[ -n "$current" ]] || { echo "ERROR: cannot bump missing/empty $FILE" >&2; exit 1; }
-  [[ "$current" =~ ^-([A-Za-z0-9][A-Za-z0-9._-]*)([0-9]+)$ ]] || {
+  # The codename must end with a non-digit so "-VEGA19" bumps to "-VEGA20",
+  # not "-VEGA110" (a greedy codename group would swallow the leading digit).
+  [[ "$current" =~ ^-([A-Za-z][A-Za-z0-9._-]*[A-Za-z._-])([0-9]+)$ || "$current" =~ ^-([A-Za-z])([0-9]+)$ ]] || {
     echo "ERROR: unsupported localversion-st format: $current" >&2
     exit 1
   }

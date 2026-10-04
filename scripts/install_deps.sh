@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Install kernel build dependencies. Shared by GitHub Actions, Harness, and local builds.
+# libz3-4 is required by prebuilt clang releases such as ZyC Clang.
 #   EXTRA: APT_PACKAGES="pkg1 pkg2"
 set -Eeuo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib/common.sh"
@@ -12,6 +13,7 @@ PACKAGES=(
   python3 zip unzip xz-utils zstd lz4 tar gzip ccache
   libssl-dev libelf-dev
   clang lld llvm
+  libz3-4
   gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu
 )
 

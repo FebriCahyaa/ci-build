@@ -2,7 +2,8 @@
 # Stage build artifacts into a per-execution published prerelease GitHub Release.
 # Used by Harness so successful/failed matrix diagnostics remain downloadable
 # to GitHub Actions and visible through the Harness artifact metadata link.
-# Final publishing reuses the same tag and removes the handoff assets.
+# Final publishing reuses the same tag; cleanup_ci_release_transients.sh
+# removes the handoff/staging copies after GitHub Actions has relayed them.
 set -Eeuo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib/common.sh"
 CI_LOG_TAG=release-stage
@@ -163,7 +164,7 @@ PY_ASSETS
 fi
 
 shopt -s nullglob
-assets=("$ASSET_DIR"/*.zip "$ASSET_DIR"/*.tar.gz "$ASSET_DIR"/*.md "$ASSET_DIR"/*.txt "$ASSET_DIR"/*.gz)
+assets=("$ASSET_DIR"/*.zip "$ASSET_DIR"/*.tar.gz "$ASSET_DIR"/*.md "$ASSET_DIR"/*.txt "$ASSET_DIR"/*.gz "$ASSET_DIR"/SHA256SUMS)
 # Deduplicate overlapping globs (for example *.tar.gz also matches *.gz).
 unique_assets=()
 declare -A seen_asset=()

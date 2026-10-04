@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Standalone AnyKernel3 packager.
-# Usage: ./build.sh <profile> [vanilla kernelsu-next resukisu]
+# Usage: ./build.sh <profile> [variant ...]
+#   variant: vanilla | kernelsu | kernelsu-next | resukisu | sukisu-ultra (aliases accepted)
 set -Eeuo pipefail
 cd "$(dirname -- "$0")"
 
@@ -8,7 +9,7 @@ PROFILE="${1:?usage: ./build.sh <profile> [variant ...]}"
 shift || true
 VARIANT_ARGS=("$@")
 if ((${#VARIANT_ARGS[@]} == 0)); then
-  read -r -a VARIANT_ARGS <<< "${VARIANTS:-vanilla kernelsu-next resukisu}"
+  read -r -a VARIANT_ARGS <<< "${VARIANTS:-vanilla kernelsu-next resukisu sukisu-ultra}"
 fi
 
 OUT="${OUT:-out}"
@@ -24,6 +25,7 @@ for raw in "${VARIANT_ARGS[@]}"; do
     ksu|kernelsu|official) VARIANT=kernelsu ;;
     ksun|kernelsu-next|next) VARIANT=kernelsu-next ;;
     resukisu|re-sukisu) VARIANT=resukisu ;;
+    suki|sukisu|sukisu-ultra|sukisu_ultra|sukisuultra) VARIANT=sukisu-ultra ;;
     *) echo "ERROR: unsupported variant: $raw" >&2; exit 2 ;;
   esac
 
@@ -41,7 +43,8 @@ for raw in "${VARIANT_ARGS[@]}"; do
   done
   [[ -n "$found" ]] || { echo "ERROR: no kernel image for $PROFILE/$VARIANT (wanted: $KERNEL_IMAGES)" >&2; exit 1; }
 
-  KERNEL_NAME="${KERNEL_NAME:-Zairenkai}" BUILD_LABEL="${BUILD_LABEL:-$KERNEL_NAME-$PROFILE}" \
+  KERNEL_NAME="${KERNEL_NAME:-Zairenkai}"
+  KERNEL_NAME="$KERNEL_NAME" BUILD_LABEL="${BUILD_LABEL:-$KERNEL_NAME-$PROFILE}" \
     KERNEL_RELEASE="${KERNEL_RELEASE:-}" SCHEDULER="${SCHEDULER:-}" TOOLCHAIN="${TOOLCHAIN:-}" \
     bash "$W/ci-patch.sh" --profile "$PROFILE" --variant "$VARIANT" --dir "$W" >&2
 

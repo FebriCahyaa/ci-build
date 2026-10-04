@@ -873,9 +873,9 @@ def github_release_state() -> tuple[str, str]:
     except Exception:
         return "", ""
 
-    # While the Harness build is running we intentionally keep this release
-    # in draft state. Draft staging is persistence, not completion. Never let
-    # a per-variant success/failure asset terminate the monitor early.
+    # The handoff release is a published prerelease while Harness runs; only
+    # unprefixed assets (written by a final publish) count as completion, so
+    # per-variant staging-/handoff- assets never terminate the monitor early.
     if bool(release.get("draft")):
         return "", ""
 
@@ -915,10 +915,8 @@ def github_release_state() -> tuple[str, str]:
 
 
 
-
-
 def github_failure_diagnostics() -> str:
-    """Read the most recent staged failure summary from the per-execution draft release."""
+    """Read the most recent staged failure summary from the per-execution handoff release."""
     if not GH_REPOSITORY:
         return ""
 
@@ -968,7 +966,7 @@ def github_progress_state() -> tuple[int | None, str, str]:
     if not GH_REPOSITORY or not CI_BUILD_SHA:
         return None, "", ""
     path = (
-        f"/repos/{urllib.parse.quote(GH_REPOSITORY, safe='')}"
+        f"/repos/{urllib.parse.quote(GH_REPOSITORY, safe='/')}"
         f"/commits/{urllib.parse.quote(CI_BUILD_SHA, safe='')}"
         f"/statuses?context={urllib.parse.quote(PROGRESS_CONTEXT, safe='')}&per_page=100"
     )

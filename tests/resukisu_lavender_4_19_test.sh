@@ -4,7 +4,7 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 fail=0
 check(){ grep -qE "$2" "$1" && echo "PASS: $3" || { echo "FAIL: $3" >&2; fail=1; }; }
 
-SERIES="$ROOT/patches/root-manager/resukisu/4.19/series.conf"
+SERIES="$ROOT/patches/root-manager/resukisu/4.19/host-series.conf"
 RDIR="$ROOT/patches/root-manager/resukisu/4.19"
 NDIR="$ROOT/patches/root-manager/kernelsu-next/4.19"
 
@@ -17,7 +17,7 @@ expected_series=$(cat <<'EOF_SERIES'
 EOF_SERIES
 )
 actual_series="$(sed '/^[[:space:]]*#/d;/^[[:space:]]*$/d' "$SERIES")"
-[[ "$actual_series" == "$expected_series" ]] && echo 'PASS: ReSukiSU 4.19 patch series' || { echo 'FAIL: ReSukiSU 4.19 patch series' >&2; fail=1; }
+[[ "$actual_series" == "$expected_series" ]] && echo 'PASS: ReSukiSU 4.19 host patch series' || { echo 'FAIL: ReSukiSU 4.19 patch series' >&2; fail=1; }
 
 check "$RDIR/config.fragment" '^CONFIG_KSU=y$' 'ReSukiSU 4.19 KSU enabled'
 check "$RDIR/config.fragment" '^CONFIG_KSU_MANUAL_HOOK=y$' 'ReSukiSU 4.19 Manual Hook selected'
@@ -43,30 +43,7 @@ check "$NDIR/config.fragment" '^CONFIG_KPROBE_EVENTS=y$' 'KernelSU-Next 4.19 KPR
 check "$NDIR/config.fragment" '^CONFIG_KSU=y$' 'KernelSU-Next 4.19 KSU enabled'
 ! grep -q '^CONFIG_HAVE_KPROBES=' "$NDIR/config.fragment" && echo 'PASS: hidden HAVE_KPROBES symbol is not force-set' || { echo 'FAIL: CONFIG_HAVE_KPROBES force-set' >&2; fail=1; }
 
-if [[ "${VERIFY_REMOTE_PATCHES:-false}" == "true" ]]; then
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT
-  git clone --quiet --depth=1 --filter=blob:none --sparse --branch main \
-    https://github.com/pix106/android_kernel_xiaomi_sdm660_southwest-ng.git "$tmp/kernel"
-  # The sparse checkout is file-level, so cone mode cannot be used here.
-  # Keep paths anchored to the repository root to avoid non-cone glob matches.
-  git -C "$tmp/kernel" sparse-checkout set --no-cone \
-    /fs/exec.c /fs/open.c /fs/stat.c /kernel/reboot.c \
-    /security/selinux/selinuxfs.c /arch/Kconfig
-  while IFS= read -r patch_name; do
-    [[ -z "$patch_name" ]] && continue
-    [[ "$patch_name" == \#* ]] && continue
-    patch="$RDIR/$patch_name"
-    [[ -f "$patch" ]] || { echo "FAIL: series patch missing: $patch_name" >&2; fail=1; continue; }
-    git -C "$tmp/kernel" apply --check --whitespace=nowarn "$patch"
-    echo "PASS: remote apply check $patch_name"
-  done < <(sed '/^[[:space:]]*#/d;/^[[:space:]]*$/d' "$SERIES")
-  git clone --quiet --depth=1 --branch v3.4.0 --filter=blob:none \
-    https://github.com/KernelSU-Next/KernelSU-Next.git "$tmp/ksu-next"
-  grep -qE 'config KPROBES' "$tmp/kernel/arch/Kconfig" || { echo 'FAIL: target KPROBES Kconfig missing' >&2; fail=1; }
-  grep -qE 'depends on MODULES' "$tmp/kernel/arch/Kconfig" || { echo 'FAIL: target KPROBES MODULES dependency missing' >&2; fail=1; }
-  grep -qE 'depends on KPROBES' "$tmp/ksu-next/kernel/Kconfig" || { echo 'FAIL: KSU-Next legacy dependency on KPROBES missing' >&2; fail=1; }
-  echo 'PASS: remote KSU-Next 4.19 Kconfig dependency contract'
-fi
+# Remote applicability against the real SouthWest-NG tree lives in
+# tests/root_manager_remote_test.sh.
 
 exit "$fail"
