@@ -2,7 +2,7 @@ diff --git a/kernel/Kbuild b/kernel/Kbuild
 index 71d8e3a66d876e4a188e50d5e3ce42da26b1b87c..f512c6d03098b30e3ae34c4ebd1f7de9d5f468c3 100644
 --- a/kernel/Kbuild
 +++ b/kernel/Kbuild
-@@ -92,6 +92,7 @@ endif
+@@ -92,6 +92,8 @@ endif
  endif
  
  ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include
@@ -202,7 +202,7 @@ diff --git a/kernel/kpm/compat/linux/set_memory.h b/kernel/kpm/compat/linux/set_
 new file mode 100644
 --- /dev/null
 +++ b/kernel/kpm/compat/linux/set_memory.h
-@@ -0,0 +1,24 @@
+@@ -0,0 +1,19 @@
 +/* SPDX-License-Identifier: GPL-2.0-only */
 +/*
 + * SukiSU Ultra Linux 4.4 compatibility overlay for <linux/set_memory.h>.
