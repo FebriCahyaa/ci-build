@@ -1,3 +1,11 @@
+## ReSukiSU / Lavender 4.19 manual hook
+
+- Replaced the stale SUSFS-specific 4.19 root-provider patches with the official ReSukiSU manual integration shape for this exact SouthWest-NG layout.
+- Added required execve, faccessat, stat and reboot hooks plus SELinux static exports.
+- Explicitly enabled ReSukiSU automatic LSM/input hooks for setuid, initrc and input paths.
+- Removed obsolete `ksu_vfs_read_hook` / `ksu_input_hook` compatibility code and the incomplete legacy SUSFS process-state patch.
+- KernelSU-Next 4.19 now enables `CONFIG_MODULES=y` because this kernel's `CONFIG_KPROBES` requires it.
+
 # Root-manager and SUSFS integration
 
 ## Southwest-NG 4.19 balanced profile

@@ -1,3 +1,7 @@
-# ReSukiSU 4.19: legacy manual hook path.
+# ReSukiSU / Lavender 4.19: stable legacy Manual Hook integration.
+# ReSukiSU's 4.19 manual path relies on the kernel-side hooks registered below.
 CONFIG_KSU=y
 CONFIG_KSU_MANUAL_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y

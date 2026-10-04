@@ -1,5 +1,7 @@
-# KernelSU-Next 4.19: built-in KSU driver + kprobe-capable legacy path.
-CONFIG_KSU=y
+# KernelSU-Next v1.1.1 / Linux 4.19: built-in KSU via Kprobe legacy path.
+# KPROBES depends on MODULES in this kernel generation, even though KSU itself
+# is compiled into vmlinux.
+CONFIG_MODULES=y
 CONFIG_KPROBES=y
-CONFIG_HAVE_KPROBES=y
 CONFIG_KPROBE_EVENTS=y
+CONFIG_KSU=y

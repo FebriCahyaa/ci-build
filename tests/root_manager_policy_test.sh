@@ -19,6 +19,9 @@ for f in \
 done
 grep -q '^CONFIG_KSU_MANUAL_HOOK=y$' "$ROOT/patches/root-manager/resukisu/4.4/config.fragment" && echo 'PASS: ReSukiSU 4.4 manual hook' || { echo 'FAIL: ReSukiSU 4.4 manual hook' >&2; fail=1; }
 grep -q '^CONFIG_KSU_MANUAL_HOOK=y$' "$ROOT/patches/root-manager/resukisu/4.19/config.fragment" && echo 'PASS: ReSukiSU 4.19 manual hook' || { echo 'FAIL: ReSukiSU 4.19 manual hook' >&2; fail=1; }
+grep -q '^CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y$' "$ROOT/patches/root-manager/resukisu/4.19/config.fragment" && echo 'PASS: ReSukiSU 4.19 auto setuid hook' || { echo 'FAIL: ReSukiSU 4.19 auto setuid hook' >&2; fail=1; }
+grep -q '^CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y$' "$ROOT/patches/root-manager/resukisu/4.19/config.fragment" && echo 'PASS: ReSukiSU 4.19 auto initrc hook' || { echo 'FAIL: ReSukiSU 4.19 auto initrc hook' >&2; fail=1; }
+grep -q '^CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y$' "$ROOT/patches/root-manager/resukisu/4.19/config.fragment" && echo 'PASS: ReSukiSU 4.19 auto input hook' || { echo 'FAIL: ReSukiSU 4.19 auto input hook' >&2; fail=1; }
 grep -q '^CONFIG_KSU_TRACEPOINT_HOOK=y$' "$ROOT/patches/root-manager/resukisu/5.10/config.fragment" && echo 'PASS: ReSukiSU 5.10 tracepoint hook' || { echo 'FAIL: ReSukiSU 5.10 tracepoint hook' >&2; fail=1; }
 test -f "$ROOT/patches/features/susfs/kernel-4.4/config.fragment" && echo 'PASS: SUSFS 4.4 config fragment' || { echo 'FAIL: SUSFS 4.4 config fragment' >&2; fail=1; }
 grep -q '^CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y$' "$ROOT/patches/features/susfs/kernel-4.4/config.fragment" && echo 'PASS: SUSFS 4.4 cmdline spoof' || { echo 'FAIL: SUSFS 4.4 cmdline spoof' >&2; fail=1; }

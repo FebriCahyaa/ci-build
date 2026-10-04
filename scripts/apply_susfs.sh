@@ -111,6 +111,14 @@ SUSFS_COMMIT="$(git -C "$SUSFS_DIR" rev-parse HEAD)"
 SUSFS_VERSION="$(grep -RhsE '^#define[[:space:]]+SUSFS_VERSION|Bump version to' "$SUSFS_DIR/include" "$SUSFS_DIR/kernel_patches" 2>/dev/null | head -n1 || true)"
 [[ -n "$SUSFS_VERSION" ]] || SUSFS_VERSION="1.5.5 / kernel-4.19"
 
+if [[ "$PROVIDER" == "resukisu" && "$MM" == "4.19" ]]; then
+  # Lavender 4.19 uses the dedicated ReSukiSU Manual Hook profile. The
+  # external 4.19 SUSFS fragment selects CONFIG_KSU_SUSFS instead, which is
+  # a different provider hook mode and must not be mixed with this source
+  # patch series. Keep this failure explicit and early.
+  fail "ReSukiSU Lavender 4.19 uses the validated Manual Hook profile; external ENABLE_SUSFS=true requires a separate SUSFS-inline source integration"
+fi
+
 if [[ "$PROVIDER" == "resukisu" ]]; then
   # ReSukiSU provides its SUSFS path itself. We only verify the Kconfig
   # surface exists; no official-KernelSU-only patch is mixed into it.

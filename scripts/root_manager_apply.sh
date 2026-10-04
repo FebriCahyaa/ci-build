@@ -126,8 +126,20 @@ fi
 case "$KSU_HOOK_MODE" in
   auto)
     case "$PROVIDER" in
-      official) HOOK_MODE="kprobe" ;;
-      *) HOOK_MODE="auto" ;;
+      official)
+        HOOK_MODE="kprobe"
+        ;;
+      resukisu)
+        # Lavender 4.19 uses the dedicated ReSukiSU Manual Hook series.
+        if [[ "$KERNEL_MM" == "4.19" ]]; then
+          HOOK_MODE="manual"
+        else
+          HOOK_MODE="auto"
+        fi
+        ;;
+      *)
+        HOOK_MODE="auto"
+        ;;
     esac
     ;;
   kprobe|manual|susfs)

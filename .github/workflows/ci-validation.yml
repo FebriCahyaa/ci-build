@@ -257,6 +257,17 @@ jobs:
           grep -q 'Vanilla' "$tmp/CHANGELOG.md"
           rm -rf "$tmp"
 
+      - name: Lavender 4.19 root-provider patch contract
+        run: |
+          set -euo pipefail
+          bash tests/resukisu_lavender_4_19_test.sh
+
+      - name: Lavender 4.19 remote patch applicability
+        timeout-minutes: 12
+        run: |
+          set -euo pipefail
+          VERIFY_REMOTE_PATCHES=true bash tests/resukisu_lavender_4_19_test.sh
+
       - name: Provider policy tests
         run: |
           set -euo pipefail
