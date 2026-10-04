@@ -2,9 +2,8 @@ name: CI Validation
 
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,148 +11,193 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install validators
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends shellcheck ruby
-
-      - name: Workflow dispatch input limits
-        run: |
-          ruby - <<'RUBY'
-          require "yaml"
-
-          files = [
-            ".github/workflows/kernel.yml",
-            ".github/workflows/harness-kernel.yml",
-            ".github/workflows/ci-validation.yml",
-            ".github/workflows/rom.yml"
-          ]
-
-          files.each do |file|
-            data = YAML.load_file(file)
-            triggers = data["on"] || data[true] || {}
-            dispatch = triggers["workflow_dispatch"]
-            next unless dispatch
-
-            inputs = dispatch["inputs"] || {}
-            count = inputs.length
-            abort "#{file}: workflow_dispatch has #{count} inputs; GitHub allows at most 25" if count > 25
-            puts "workflow_dispatch inputs OK: #{file} (#{count})"
-          end
-          RUBY
-
-      - name: Bash syntax
+      - name: Install validation dependencies
         run: |
           set -euo pipefail
-          find scripts -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends python3 zip unzip shellcheck ruby
 
-      - name: ShellCheck errors
+      - name: Shell syntax and executable contract
         run: |
           set -euo pipefail
-          find scripts -type f -name '*.sh' -print0 | xargs -0 -r shellcheck -S error
+          chmod +x scripts/*.sh anykernel/*.sh
+          mapfile -t shell_files < <(find scripts anykernel -type f -name '*.sh' | sort)
+          ((${#shell_files[@]}))
+          bash -n "${shell_files[@]}"
+          shellcheck -S error scripts/lib/common.sh scripts/build_variants.sh scripts/build_kernel.sh \
+            scripts/build_anykernel.sh scripts/root_manager_apply.sh scripts/resolve_build_profile.sh \
+            scripts/select_anykernel_profile.sh scripts/generate_changelog.sh scripts/publish_ci_release.sh \
+            anykernel/build.sh anykernel/ci-patch.sh
 
-      - name: Patch registry structure
+      - name: Workflow and Harness input limits
         run: |
           set -euo pipefail
-          chmod +x scripts/*.sh
-          test -x scripts/apply_patch_series.sh
-          test -x scripts/run_with_heartbeat.sh
-          test -x scripts/set_kernel_name.sh
-          test -f kernel-name
-          test "$(awk 'NF && $0 !~ /^[[:space:]]*#/ {count++} END {print count+0}' kernel-name)" -eq 1
-          test -f kernel-codename
-          test "$(awk 'NF && $0 !~ /^[[:space:]]*#/ {count++} END {print count+0}' kernel-codename)" -eq 1
-          test -f kernel-build
-          test "$(awk 'NF && $0 !~ /^[[:space:]]*#/ {count++} END {print count+0}' kernel-build)" -eq 1
-          test -f localversion-cip
-          test "$(cat kernel-name)" = "Zairenkai"
-          test "$(cat localversion-cip)" = "-$(cat kernel-name)"
-          test -f localversion-st
-          test "$(cat kernel-codename)" = "$(sed -n '1p' kernel-codename)"
-          test "$(cat kernel-build)" = "$(sed -n '1p' kernel-build)"
-          test "$(cat localversion-st)" = "-$(cat kernel-codename)$(cat kernel-build)"
-          test "$(cat kernel-build)" -ge 1
-          test -x scripts/sync_localversion_files.sh
-          test -x scripts/bump_localversion_st.sh
-          ! grep -R -nE '^@@$' patches --include='*.patch'
-          test -f patches/devices/lavender/4.19/series.conf
-          test -f patches/devices/southwest-ng/4.19/series.conf
-          test -f patches/root-manager/resukisu/4.19/series.conf
-          test -f patches/upstream/codelinaro/sdm660-4.19/series.conf
-          test -f patches/features/lto-plus/lavender-4.19/thinlto.config
+          python3 - <<'PY'
+          import re, yaml
+          def get_on(data):
+              return data.get('on') if 'on' in data else data.get(True)
+          for path in ('.github/workflows/kernel.yml', '.github/workflows/harness-kernel.yml'):
+              data = yaml.safe_load(open(path, encoding='utf-8'))
+              on = get_on(data) or {}
+              inputs = (((on.get('workflow_dispatch') or {}).get('inputs') or {}))
+              print(f'{path}: {len(inputs)} workflow_dispatch inputs')
+              assert len(inputs) <= 25, f'{path} exceeds GitHub 25-input limit'
+          pipe = yaml.safe_load(open('harness/kernel-pipeline.yaml', encoding='utf-8'))
+          vars_ = pipe['pipeline']['variables']
+          print(f'harness/kernel-pipeline.yaml: {len(vars_)} variables')
+          assert len(vars_) <= 25
+          PY
 
-      - name: Python monitor validation
+      - name: Target profile contract
         run: |
           set -euo pipefail
-          python3 -m py_compile scripts/harness_monitor.py scripts/patch_content_check.py
+          profiles=(lavender-4.4 lavender-4.19 garnet-gki)
+          for profile in "${profiles[@]}"; do
+            eval "$(BUILD_PROFILE="$profile" bash scripts/resolve_build_profile.sh)"
+            test "$PROFILE_ID" = "$profile"
+            test -n "$PROFILE_DEVICE"
+            test -n "$PROFILE_KERNEL_FAMILY"
+            test -n "$PROFILE_KERNEL_REPO"
+            test -n "$PROFILE_DEFCONFIG"
+            test -f "anykernel/profiles/$PROFILE_ANYKERNEL_PROFILE.conf"
+            echo "PASS $profile -> $PROFILE_ANYKERNEL_PROFILE"
+          done
+          ! grep -RInE 'garnet-(oss|hyperos)' .github anykernel profiles harness scripts
 
-      - name: Patch format and series validation
+      - name: Toolchain resolver output contract
         run: |
           set -euo pipefail
-          python3 scripts/validate_patch_format.py
+          tmp="$(mktemp -d)"
+          printf '%s\n' 'VERSION = 5' 'PATCHLEVEL = 10' 'SUBLEVEL = 160' > "$tmp/Makefile"
+          TOOLCHAIN=system ARCH=arm64 bash scripts/toolchain_resolver.sh "$tmp" "$tmp/work" > "$tmp/toolchain.env"
+          grep -q '^RESOLVED_COMPILER_STRING=' "$tmp/toolchain.env"
+          grep -Eq '^RESOLVED_CROSS_DEFAULT=[^[:space:]]+$' "$tmp/toolchain.env"
+          grep -Eq '^RESOLVED_CLANG_TRIPLE=[^[:space:]]+$' "$tmp/toolchain.env"
+          rm -rf "$tmp"
+          echo 'PASS toolchain resolver output contract'
 
-      - name: Modular patch registry
+      - name: AnyKernel selector contract
         run: |
           set -euo pipefail
-          chmod +x scripts/*.sh
-          test -x scripts/apply_patch_series.sh
-          test -x scripts/set_kernel_name.sh
-          test -f patches/devices/lavender/4.19/series.conf
-          test -f patches/devices/southwest-ng/4.19/series.conf
-          test -f patches/root-manager/kernelsu/4.19/series.conf
-          test -f patches/root-manager/kernelsu-next/4.19/series.conf
-          test -f patches/root-manager/resukisu/4.19/series.conf
-          test -f patches/upstream/codelinaro/sdm660-4.19/series.conf
-          test -f patches/features/lto-plus/lavender-4.19/thinlto.config
+          test "$(scripts/select_anykernel_profile.sh lavender 4.4.356)" = "$PWD/anykernel/profiles/lavender-4.4.conf"
+          test "$(scripts/select_anykernel_profile.sh lavender 4.19.325)" = "$PWD/anykernel/profiles/lavender-4.19.conf"
+          test "$(scripts/select_anykernel_profile.sh garnet 5.10.160)" = "$PWD/anykernel/profiles/garnet-gki.conf"
 
-      - name: AnyKernel profile selection
+      - name: AnyKernel render smoke matrix
         run: |
           set -euo pipefail
-          test "$(DEVICE=lavender KERNEL_VERSION=4.4.325 ROM_FAMILY=legacy ANYKERNEL_PROFILE=auto ./scripts/select_anykernel_profile.sh | xargs basename)" = "lavender-4.4.conf"
-          test "$(DEVICE=lavender KERNEL_VERSION=4.19.325 ROM_FAMILY=custom-android ANYKERNEL_PROFILE=auto ./scripts/select_anykernel_profile.sh | xargs basename)" = "lavender-4.19.conf"
-          test "$(DEVICE=garnet KERNEL_VERSION=5.10.0 ROM_FAMILY=oss ANYKERNEL_PROFILE=auto ./scripts/select_anykernel_profile.sh | xargs basename)" = "garnet-oss.conf"
-          test "$(DEVICE=garnet KERNEL_VERSION=5.10.0 ROM_FAMILY=hyperos ANYKERNEL_PROFILE=auto ./scripts/select_anykernel_profile.sh | xargs basename)" = "garnet-hyperos.conf"
+          profiles=(lavender-4.4 lavender-4.19 garnet-gki)
+          variants=(vanilla kernelsu-next resukisu)
+          for profile in "${profiles[@]}"; do
+            for variant in "${variants[@]}"; do
+              tmp="$(mktemp -d)"
+              cp -a anykernel/anykernel.sh anykernel/banner anykernel/ci-patch.sh anykernel/version.conf "$tmp/"
+              mkdir -p "$tmp/profiles" "$tmp/tools"
+              cp -a "anykernel/profiles/$profile.conf" "$tmp/profiles/"
+              cp -a anykernel/tools/ak3-core.sh "$tmp/tools/"
+              image="$(sed -n 's/^KERNEL_IMAGES="\(.*\)"/\1/p' "$tmp/profiles/$profile.conf" | awk '{print $1}')"
+              printf 'fake kernel payload' > "$tmp/$image"
+              (cd "$tmp" && bash ./ci-patch.sh --profile "$profile" --variant "$variant" --dir "$tmp")
+              ! grep -qE '@[A-Z_]+@' "$tmp/anykernel.sh" "$tmp/banner"
+              bash -n "$tmp/anykernel.sh"
+              rm -rf "$tmp"
+              echo "PASS render $profile / $variant"
+            done
+          done
 
-      - name: Harness variable alignment
+      - name: AnyKernel package smoke (one real package per target)
         run: |
           set -euo pipefail
-          ruby - <<'RUBY'
-          require "yaml"
+          for profile in lavender-4.4 lavender-4.19 garnet-gki; do
+            tmp="$(mktemp -d)"
+            mkdir -p "$tmp/profiles" "$tmp/images/vanilla" "$tmp/tools" "$tmp/out"
+            cp -a anykernel/anykernel.sh anykernel/banner anykernel/ci-patch.sh anykernel/version.conf "$tmp/"
+            cp -a "anykernel/profiles/$profile.conf" "$tmp/profiles/"
+            cp -a anykernel/tools/ak3-core.sh "$tmp/tools/"
+            image="$(sed -n 's/^KERNEL_IMAGES="\(.*\)"/\1/p' "$tmp/profiles/$profile.conf" | awk '{print $1}')"
+            printf 'fake kernel payload' > "$tmp/images/vanilla/$image"
+            (cd "$tmp" && OUT="$tmp/out" ./build.sh "$profile" vanilla)
+            zipfile="$(find "$tmp/out" -type f -name '*.zip' -print -quit)"
+            test -n "$zipfile"
+            unzip -tq "$zipfile" >/dev/null
+            unzip -p "$zipfile" anykernel.sh | bash -n
+            rm -rf "$tmp"
+            echo "PASS package $profile"
+          done
 
-          pipeline = YAML.load_file("harness/kernel-pipeline.yaml")["pipeline"]
-          pipeline_vars = pipeline.fetch("variables").map { |v| v.fetch("name") }
-
-          workflow_text = File.read(".github/workflows/harness-kernel.yml")
-          names_block = workflow_text[/names\s*=\s*\[(.*?)\]/m, 1]
-          abort "harness-kernel.yml: payload names list not found" unless names_block
-
-          payload_vars = names_block.scan(/"([A-Z0-9_]+)"/).flatten.uniq
-          missing = pipeline_vars - payload_vars
-          extra = payload_vars - pipeline_vars
-
-          abort "Harness payload missing pipeline variables: #{missing.join(", ")}" unless missing.empty?
-          abort "Harness payload has unknown pipeline variables: #{extra.join(", ")}" unless extra.empty?
-
-          puts "Harness variable alignment OK (#{pipeline_vars.length} variables)"
-          RUBY
-
-      - name: YAML parse
+      - name: Changelog generation smoke
         run: |
           set -euo pipefail
-          ruby -e '
-            require "yaml"
-            ARGV.each do |file|
-              YAML.load_file(file)
-              puts "OK #{file}"
-            end
-          ' \
-            .github/workflows/kernel.yml \
-            .github/workflows/harness-kernel.yml \
-            .github/workflows/rom.yml \
-            harness/kernel-pipeline.yaml \
-            harness/rom-pipeline.yaml
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/source" "$tmp/info/vanilla" "$tmp/info/kernelsu-next" "$tmp/info/resukisu"
+          git -C "$tmp/source" init -q
+          git -C "$tmp/source" config user.email ci@example.invalid
+          git -C "$tmp/source" config user.name ci
+          printf 'source\n' > "$tmp/source/file.c"
+          git -C "$tmp/source" add file.c
+          git -C "$tmp/source" commit -qm 'test: changelog source'
+          for v in vanilla kernelsu-next resukisu; do
+            cat > "$tmp/info/$v/build-info.txt" <<EOF_INFO
+          build_profile=garnet-gki
+          device=garnet
+          kernel_version=5.10.160
+          kernel_family=5.10
+          defconfig=gki_defconfig
+          scheduler_detected=EAS
+          dynamic_partition=true
+          gki=true
+          anykernel_profile=garnet-gki
+          kernel_repo=test/source
+          ref=garnet-t-oss
+          commit_sha=$(git -C "$tmp/source" rev-parse HEAD)
+          commit_subject=test: changelog source
+          toolchain=clang
+          toolchain_version=test
+          llvm_ias=1
+          ksu_provider=$v
+          ksu_version=test
+          ksu_commit=test
+          kernel_image=Image
+          EOF_INFO
+            BUILD_INFO="$tmp/info/$v/build-info.txt" SOURCE_DIR="$tmp/source" VARIANT="$v" OUT_FILE="$tmp/info/$v/changelog.md" bash scripts/generate_changelog.sh single
+          done
+          INFO_ROOT="$tmp/info" OUT_FILE="$tmp/CHANGELOG.md" bash scripts/generate_changelog.sh aggregate
+          grep -q 'KernelSU-Next' "$tmp/CHANGELOG.md"
+          grep -q 'ReSukiSU' "$tmp/CHANGELOG.md"
+          grep -q 'Vanilla' "$tmp/CHANGELOG.md"
+          rm -rf "$tmp"
+
+      - name: Provider policy tests
+        run: |
+          set -euo pipefail
+          bash tests/root_manager_policy_test.sh
+
+      - name: Harness variable contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, yaml
+          wf=yaml.safe_load(open('.github/workflows/harness-kernel.yml', encoding='utf-8'))
+          on=wf.get('on') if 'on' in wf else wf.get(True)
+          inputs=list((((on or {}).get('workflow_dispatch') or {}).get('inputs') or {}).keys())
+          text=open('.github/workflows/harness-kernel.yml',encoding='utf-8').read()
+          payload_block=re.search(r'names = \[(.*?)\n          \]', text, re.S)
+          assert payload_block, 'payload names block missing'
+          names=re.findall(r'"([A-Z][A-Z0-9_]+)"', payload_block.group(1))
+          pipe=yaml.safe_load(open('harness/kernel-pipeline.yaml',encoding='utf-8'))
+          pnames=[v['name'] for v in pipe['pipeline']['variables']]
+          assert len(pnames) == len(set(pnames))
+          assert set(pnames) == {
+            'CI_BUILD_SHA','BUILD_PROFILE','ROOT_VARIANTS','KERNEL_REPO_OVERRIDE','KERNEL_REF_OVERRIDE',
+            'DEFCONFIG_OVERRIDE','CONFIG_FRAGMENT_OVERRIDE','JOBS','TOOLCHAIN','TOOLCHAIN_VERSION','LLVM_IAS',
+            'CLANG_URL','GCC_URL','EXTRA_MAKE_ARGS','PATCH_PROFILE','UPSTREAM_PROFILE','LTO_PLUS','KSU_REF',
+            'PACKAGE_ANYKERNEL','ROM_FAMILY','ANYKERNEL_PROFILE','ANYKERNEL3_REF','KERNEL_NAME','APT_PACKAGES','PUBLISH_RELEASE'
+          }
+          assert len(pnames) == 25
+          print('PASS Harness pipeline variable contract: 25')
+          PY

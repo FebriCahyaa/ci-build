@@ -12,8 +12,11 @@ count_actions() {
   grep -Ec '^[[:space:]]+(CC|AS|HOSTCC|HOSTAS)[[:space:]]' "$BUILD_LOG" 2>/dev/null || true
 }
 emit() {
-  GH_TOKEN="${GH_TOKEN:-}" GH_REPOSITORY="${GH_REPOSITORY:-}" \
-  CI_BUILD_SHA="${CI_BUILD_SHA:-}" HARNESS_EXECUTION_ID="${HARNESS_EXECUTION_ID:-}" \
+  # Telemetry is optional for local/offline builds. Do not invoke the status
+  # publisher until every required GitHub status value is available.
+  [[ -n "${GH_TOKEN:-}" && -n "${GH_REPOSITORY:-}" && -n "${CI_BUILD_SHA:-}" && -n "${HARNESS_EXECUTION_ID:-}" ]] || return 0
+  GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" \
+  CI_BUILD_SHA="$CI_BUILD_SHA" HARNESS_EXECUTION_ID="$HARNESS_EXECUTION_ID" \
   RUN_URL="${RUN_URL:-}" WORK_DIR="$WORK_DIR" \
   "$PROGRESS_SCRIPT" "$1" pending "kernel compile" "$2" || true
 }

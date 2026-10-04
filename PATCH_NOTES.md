@@ -15,9 +15,8 @@ The CI uses provider-native integration and strict compatibility gates.
 
 - Official KernelSU: `tiann/KernelSU@v0.9.5`. KernelSU's own documentation states
   v0.9.5 is the final non-GKI release.
-- KernelSU-Next: `KernelSU-Next/KernelSU-Next@v3.4.0`, which currently documents
-  4.4 through 6.6 support.
-- ReSukiSU: `ReSukiSU/ReSukiSU@main`, which documents older-kernel support and a
+- KernelSU-Next: `v1.1.1` for legacy 4.x builds and `v3.4.0` for the 5.10 GKI build; the provider resolver selects the family-specific ref.
+- ReSukiSU: `ReSukiSU/ReSukiSU@v4.2.0-rc3`, which documents older-kernel support and a
   SUSFS inline-hook mode.
 
 ## SUSFS

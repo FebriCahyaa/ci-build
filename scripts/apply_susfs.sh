@@ -68,9 +68,12 @@ else
     [[ -f "$f" ]] || fail "missing upstream SUSFS file: $f"
   done
 
-  [[ -d "$SOURCE_DIR/KernelSU" ]] || fail "official KernelSU provider checkout missing"
+  # root_manager_apply.sh checks the provider out under WORK_DIR and links
+  # drivers/kernelsu -> <provider>/kernel; the KernelSU patch targets that checkout.
+  KSU_DIR="${KSU_DIR:-$WORK_DIR/KernelSU}"
+  [[ -d "$KSU_DIR/.git" ]] || fail "official KernelSU provider checkout missing: $KSU_DIR"
 
-  pushd "$SOURCE_DIR/KernelSU" >/dev/null
+  pushd "$KSU_DIR" >/dev/null
   git apply --check --whitespace=nowarn "$PATCH_KSU" ||
     fail "SUSFS KernelSU patch does not apply cleanly: 10_enable_susfs_for_ksu.patch"
   git apply --whitespace=nowarn "$PATCH_KSU"

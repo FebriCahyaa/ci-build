@@ -3,39 +3,39 @@ name: Harness Kernel Build
 on:
   workflow_dispatch:
     inputs:
-      kernel_repo:
-        description: "Kernel repository URL"
-        required: true
-        type: string
-        default: "https://github.com/pix106/android_kernel_xiaomi_sdm660_southwest-ng"
-      kernel_branch:
-        description: "Kernel branch, tag, or ref"
-        required: true
-        type: string
-        default: "main"
-      device:
-        description: "Device codename"
-        required: true
-        type: string
-        default: "lavender"
-      arch:
-        description: "Architecture"
+      build_profile:
+        description: "Canonical target profile"
         required: true
         type: choice
-        options: [auto, arm64, arm, x86, riscv]
-        default: auto
-      defconfig:
-        description: "Defconfig (auto = detect)"
+        options: [lavender-4.4, lavender-4.19, garnet-gki]
+        default: lavender-4.4
+      root_variants:
+        description: "Root variants: vanilla,kernelsu-next,resukisu or all"
         required: true
         type: string
-        default: "auto"
-      config_fragment:
-        description: "Fragment (auto = detect, none = disable)"
-        required: true
+        default: vanilla,kernelsu-next,resukisu
+      kernel_repo_override:
+        description: "Optional kernel repository override"
+        required: false
         type: string
-        default: "auto"
+        default: ""
+      kernel_ref_override:
+        description: "Optional kernel branch/tag/commit override"
+        required: false
+        type: string
+        default: ""
+      defconfig_override:
+        description: "Optional defconfig override"
+        required: false
+        type: string
+        default: ""
+      config_fragment_override:
+        description: "Optional config fragment override"
+        required: false
+        type: string
+        default: ""
       jobs:
-        description: "Parallel jobs"
+        description: "Parallel jobs; 0 = auto"
         required: true
         type: string
         default: "0"
@@ -46,33 +46,23 @@ on:
         options: [auto, aosp, proton, neutron, llvm, gcc, system]
         default: auto
       toolchain_version:
-        description: "Toolchain version/tag"
+        description: "Toolchain revision/tag"
         required: true
         type: string
-        default: "auto"
+        default: auto
       llvm_ias:
-        description: "LLVM IAS"
+        description: "LLVM IAS mode"
         required: true
         type: choice
         options: [auto, "0", "1"]
         default: auto
-      cross_compile:
-        description: "CROSS_COMPILE prefix"
-        required: false
-        type: string
-        default: "auto"
       clang_url:
-        description: "Optional custom Clang archive"
+        description: "Optional custom Clang archive URL"
         required: false
         type: string
         default: ""
       gcc_url:
-        description: "Optional custom GCC archive"
-        required: false
-        type: string
-        default: ""
-      apt_packages:
-        description: "Optional extra apt packages"
+        description: "Optional custom GCC archive URL"
         required: false
         type: string
         default: ""
@@ -81,183 +71,131 @@ on:
         required: false
         type: string
         default: ""
-      enable_ksu:
-        description: "KernelSU provider"
-        required: true
-        type: choice
-        options: [false, kernelsu, kernelsu-next, resukisu]
-        default: false
-      ksu_ref:
-        description: "KernelSU provider ref (auto = 4.19-compatible default)"
-        required: false
-        type: string
-        default: "auto"
-
-      enable_susfs:
-        description: "SUSFS (4.19-compatible pinned revision)"
-        required: true
-        type: choice
-        options: [false, true]
-        default: false
-
       patch_profile:
-        description: "Modular source patch profile"
+        description: "Modular patch profile"
         required: true
         type: string
-        default: "none"
+        default: auto
       upstream_profile:
         description: "Upstream patch profile"
         required: true
         type: string
-        default: "none"
+        default: auto
       lto_plus:
-        description: "Optional LTO+ feature profile"
+        description: "Optional LTO+ profile"
         required: true
-        type: choice
-        options: [false, true]
+        type: boolean
         default: false
-      kernel_name:
-        description: "Kernel display name (maps to localversion-cip)"
-        required: false
+      ksu_ref:
+        description: "Root provider ref; auto uses target-safe pinned ref"
+        required: true
         type: string
-        default: ""
-
+        default: auto
       package_anykernel:
-        description: "Package flashable AnyKernel3 ZIP"
+        description: "Package AnyKernel3"
         required: true
         type: boolean
         default: true
       rom_family:
-        description: "ROM family for AnyKernel profile selection"
+        description: "ROM family metadata"
         required: true
         type: choice
         options: [auto, oss, hyperos, miui, custom-android, legacy]
-        default: custom-android
+        default: auto
       anykernel_profile:
         description: "AnyKernel profile"
         required: true
         type: string
-        default: "auto"
+        default: auto
+      anykernel3_ref:
+        description: "AnyKernel3 ref for external repository"
+        required: true
+        type: string
+        default: master
+      kernel_name:
+        description: "Kernel display name"
+        required: false
+        type: string
+        default: ""
+      apt_packages:
+        description: "Optional extra apt packages"
+        required: false
+        type: string
+        default: ""
+      publish_release:
+        description: "Publish Harness result as GitHub Release"
+        required: true
+        type: boolean
+        default: false
+
 permissions:
   contents: read
 
 jobs:
   trigger-harness:
     runs-on: ubuntu-latest
-    timeout-minutes: 140
+    timeout-minutes: 150
     steps:
       - name: Checkout CI repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
-      - name: Verify CI monitor scripts
+      - name: Harness preflight
         run: |
           set -euo pipefail
-          chmod +x scripts/harness_monitor.py scripts/send_release_to_telegram.sh scripts/publish_ci_release.sh scripts/*.sh
-          test -x scripts/harness_monitor.py
+          chmod +x scripts/*.sh
           python3 -m py_compile scripts/harness_monitor.py
-          bash -n scripts/build_kernel.sh scripts/run_with_heartbeat.sh scripts/send_release_to_telegram.sh scripts/publish_ci_release.sh
-          test -f kernel-name
-          test -f scripts/send_release_to_telegram.sh
-          test -f scripts/publish_ci_release.sh
-          echo "CI monitor and kernel-name files are present"
+          bash -n scripts/build_variants.sh scripts/build_kernel.sh scripts/publish_ci_release.sh
+          test -f profiles/targets/${{ inputs.build_profile }}.conf
+          test -f anykernel/anykernel.sh
           git rev-parse HEAD
 
       - name: Build Harness API payload
         env:
-          HARNESS_API_KEY: ${{ secrets.HARNESS_API_KEY }}
-          HARNESS_ACCOUNT: ${{ secrets.HARNESS_ACCOUNT_ID }}
-          HARNESS_ORG: default
-          HARNESS_PROJECT: ci_build
-          PIPELINE_ID: Universal_Kernel_Build
           CI_BUILD_SHA: ${{ github.sha }}
-          KERNEL_REPO: ${{ inputs.kernel_repo }}
-          KERNEL_BRANCH: ${{ inputs.kernel_branch }}
-          KERNEL_REF_TYPE: auto
-          DEVICE: ${{ inputs.device }}
-          ARCH: ${{ inputs.arch }}
-          DEFCONFIG: ${{ inputs.defconfig }}
-          CONFIG_FRAGMENT: ${{ inputs.config_fragment }}
+          BUILD_PROFILE: ${{ inputs.build_profile }}
+          ROOT_VARIANTS: ${{ inputs.root_variants }}
+          KERNEL_REPO_OVERRIDE: ${{ inputs.kernel_repo_override }}
+          KERNEL_REF_OVERRIDE: ${{ inputs.kernel_ref_override }}
+          DEFCONFIG_OVERRIDE: ${{ inputs.defconfig_override }}
+          CONFIG_FRAGMENT_OVERRIDE: ${{ inputs.config_fragment_override }}
           JOBS: ${{ inputs.jobs }}
           TOOLCHAIN: ${{ inputs.toolchain }}
           TOOLCHAIN_VERSION: ${{ inputs.toolchain_version }}
           LLVM_IAS: ${{ inputs.llvm_ias }}
-          CROSS_COMPILE: ${{ inputs.cross_compile }}
-          CROSS_COMPILE_ARM32: ""
           CLANG_URL: ${{ inputs.clang_url }}
           GCC_URL: ${{ inputs.gcc_url }}
-          APT_PACKAGES: ${{ inputs.apt_packages }}
           EXTRA_MAKE_ARGS: ${{ inputs.extra_make_args }}
-          SCHEDULER_PROFILE: auto
           PATCH_PROFILE: ${{ inputs.patch_profile }}
           UPSTREAM_PROFILE: ${{ inputs.upstream_profile }}
           LTO_PLUS: ${{ inputs.lto_plus }}
-          KERNEL_NAME: ${{ inputs.kernel_name }}
-          ENABLE_KSU: ${{ inputs.enable_ksu }}
           KSU_REF: ${{ inputs.ksu_ref }}
-          ENABLE_SUSFS: ${{ inputs.enable_susfs }}
-          SUSFS_REF: 001e69919c6271f690fd00b17e4c721c9e599152
-          KSU_REPO: ""
-          KSU_LAYOUT: auto
-          KSU_HOOK_MODE: auto
           PACKAGE_ANYKERNEL: ${{ inputs.package_anykernel }}
           ROM_FAMILY: ${{ inputs.rom_family }}
           ANYKERNEL_PROFILE: ${{ inputs.anykernel_profile }}
-          ANYKERNEL3_REPO: local
-          ANYKERNEL3_REF: vendored
+          ANYKERNEL3_REF: ${{ inputs.anykernel3_ref }}
+          KERNEL_NAME: ${{ inputs.kernel_name }}
+          APT_PACKAGES: ${{ inputs.apt_packages }}
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
+          HARNESS_PIPELINE_ID: Universal_Kernel_Build
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import json, os
           names = [
-            "CI_BUILD_SHA","KERNEL_REPO","KERNEL_BRANCH","KERNEL_REF_TYPE","DEVICE","ARCH","DEFCONFIG","CONFIG_FRAGMENT","JOBS",
-            "TOOLCHAIN","TOOLCHAIN_VERSION","LLVM_IAS","CROSS_COMPILE","CROSS_COMPILE_ARM32",
-            "CLANG_URL","GCC_URL","APT_PACKAGES","EXTRA_MAKE_ARGS","SCHEDULER_PROFILE",
-            "PATCH_PROFILE","UPSTREAM_PROFILE","LTO_PLUS","KERNEL_NAME",
-            "ENABLE_KSU","KSU_REF","ENABLE_SUSFS","SUSFS_REF","KSU_PROVIDER","KSU_REPO","KSU_LAYOUT","KSU_HOOK_MODE","PACKAGE_ANYKERNEL","ROM_FAMILY","ANYKERNEL_PROFILE","ANYKERNEL3_REPO","ANYKERNEL3_REF"
+              "CI_BUILD_SHA","BUILD_PROFILE","ROOT_VARIANTS","KERNEL_REPO_OVERRIDE","KERNEL_REF_OVERRIDE",
+              "DEFCONFIG_OVERRIDE","CONFIG_FRAGMENT_OVERRIDE","JOBS","TOOLCHAIN","TOOLCHAIN_VERSION","LLVM_IAS",
+              "CLANG_URL","GCC_URL","EXTRA_MAKE_ARGS","PATCH_PROFILE","UPSTREAM_PROFILE","LTO_PLUS","KSU_REF",
+              "PACKAGE_ANYKERNEL","ROM_FAMILY","ANYKERNEL_PROFILE","ANYKERNEL3_REF","KERNEL_NAME","APT_PACKAGES","PUBLISH_RELEASE"
           ]
           values = {n: os.environ.get(n, "") for n in names}
-          values["CI_BUILD_SHA"] = os.environ.get("CI_BUILD_SHA", "")
-          values["KERNEL_REF_TYPE"] = "auto"
-          values["CROSS_COMPILE_ARM32"] = ""
-          values["SCHEDULER_PROFILE"] = "auto"
-
-          # GitHub input "enable_ksu" doubles as the provider selector:
-          # false         -> disabled
-          # kernelsu      -> explicit official KernelSU
-          # true          -> enabled with automatic provider selection
-          # kernelsu-next -> explicit KernelSU-Next
-          # resukisu      -> explicit ReSukiSU
-          raw_ksu = values.get("ENABLE_KSU", "").strip().lower()
-
-          if raw_ksu in {"false", "0", "no", "off", ""}:
-              values["ENABLE_KSU"] = "false"
-              values["KSU_PROVIDER"] = "auto"
-          elif raw_ksu in {"kernelsu", "official"}:
-              values["ENABLE_KSU"] = "true"
-              values["KSU_PROVIDER"] = "official"
-          elif raw_ksu in {"true", "1", "yes", "on"}:
-              values["ENABLE_KSU"] = "true"
-              values["KSU_PROVIDER"] = "auto"
-          elif raw_ksu in {"kernelsu-next", "resukisu"}:
-              values["ENABLE_KSU"] = "true"
-              values["KSU_PROVIDER"] = raw_ksu
-          else:
-              raise SystemExit(f"Unsupported ENABLE_KSU value: {raw_ksu}")
-
-          payload = {
-              "pipeline": {
-                  "identifier": os.environ["PIPELINE_ID"],
-                  "variables": [
-                      {"name": n, "type": "String", "value": values.get(n, "")}
-                      for n in names
-                  ],
-              }
-          }
-          # Boolean values are intentionally passed as strings because the Harness pipeline variables are strings.
+          payload = {"pipeline": {"identifier": os.environ["HARNESS_PIPELINE_ID"], "variables": [
+              {"name": n, "type": "String", "value": values[n]} for n in names
+          ]}}
+          if len(names) > 25:
+              raise SystemExit(f"Harness variable count {len(names)} exceeds limit 25")
           with open("harness-payload.json", "w", encoding="utf-8") as f:
-            json.dump(payload, f, separators=(",", ":"))
+              json.dump(payload, f, separators=(",", ":"))
+          print(f"Harness variable count: {len(names)}")
           PY
 
       - name: Trigger Harness pipeline
@@ -273,45 +211,19 @@ jobs:
           TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
         run: |
           set -euo pipefail
-
-          tg_args=(
-            --data-urlencode "chat_id=${TG_CHAT_ID}"
-            --data-urlencode "text=❌ <b>GitHub → Harness trigger gagal</b>"
-            -d "parse_mode=HTML"
-          )
-          if [[ -n "${TG_TOPIC_ID:-}" ]]; then
-            tg_args+=( -d "message_thread_id=${TG_TOPIC_ID}" )
-          fi
-
-          http_code="$(curl -sS --retry 2 --retry-delay 2 -X POST \
-            "https://app.harness.io/pipeline/api/pipeline/execute/${PIPELINE_ID}?accountIdentifier=${HARNESS_ACCOUNT}&orgIdentifier=${HARNESS_ORG}&projectIdentifier=${HARNESS_PROJECT}" \
-            -H "x-api-key: ${HARNESS_API_KEY}" \
-            -H "Content-Type: application/json" \
-            --data-binary @harness-payload.json \
-            -o harness-response.json \
-            -w "%{http_code}")"
-
+          endpoint="https://app.harness.io/pipeline/api/pipeline/execute/${PIPELINE_ID}?accountIdentifier=${HARNESS_ACCOUNT}&orgIdentifier=${HARNESS_ORG}&projectIdentifier=${HARNESS_PROJECT}"
+          http_code="$(curl -sS --retry 2 --retry-delay 2 -X POST "$endpoint" \
+            -H "x-api-key: ${HARNESS_API_KEY}" -H "Content-Type: application/json" \
+            --data-binary @harness-payload.json -o harness-response.json -w '%{http_code}')"
           if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
-            echo "ERROR: Harness execute API returned HTTP ${http_code}" >&2
-            echo "----- Harness response body -----" >&2
             cat harness-response.json >&2 || true
-            echo "--------------------------------" >&2
-            if [[ -n "${TG_BOT_TOKEN:-}" && -n "${TG_CHAT_ID:-}" ]]; then
-              curl -fsS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
-                "${tg_args[@]}" || true
-            fi
             exit 1
           fi
-
-          PLAN_ID="$(python3 -c 'import json; d=json.load(open("harness-response.json", encoding="utf-8")); print(((d.get("data") or {}).get("planExecution") or {}).get("uuid") or ((d.get("data") or {}).get("planExecution") or {}).get("planExecutionId") or d.get("planExecutionId") or d.get("executionId") or "")')"
-          if [[ -z "$PLAN_ID" ]]; then
-            echo "ERROR: Harness trigger response did not contain a plan execution ID." >&2
-            cat harness-response.json >&2
-            exit 1
-          fi
-          echo "Harness plan execution ID: $PLAN_ID"
+          PLAN_ID="$(python3 -c 'import json; d=json.load(open("harness-response.json",encoding="utf-8")); print(((d.get("data") or {}).get("planExecution") or {}).get("uuid") or ((d.get("data") or {}).get("planExecution") or {}).get("planExecutionId") or d.get("planExecutionId") or d.get("executionId") or "")')"
+          [[ -n "$PLAN_ID" ]] || { cat harness-response.json >&2; exit 1; }
           echo "plan_execution_id=$PLAN_ID" >> "$GITHUB_OUTPUT"
           echo "release_tag=harness-$PLAN_ID" >> "$GITHUB_OUTPUT"
+          echo "Harness plan execution: $PLAN_ID"
 
       - name: Live monitor Harness execution
         if: steps.trigger.outputs.plan_execution_id != ''
@@ -324,8 +236,8 @@ jobs:
           HARNESS_PLAN_EXECUTION_ID: ${{ steps.trigger.outputs.plan_execution_id }}
           CI_BUILD_SHA: ${{ github.sha }}
           HARNESS_EXECUTION_URL: https://app.harness.io/ng/account/${{ secrets.HARNESS_ACCOUNT_ID }}/module/ci/orgs/default/projects/ci_build/pipelines/Universal_Kernel_Build/executions/${{ steps.trigger.outputs.plan_execution_id }}/pipeline
-          DEVICE: ${{ inputs.device }}
-          KERNEL_BRANCH: ${{ inputs.kernel_branch }}
+          DEVICE: ${{ inputs.build_profile == 'garnet-gki' && 'garnet' || 'lavender' }}
+          KERNEL_BRANCH: ${{ inputs.build_profile }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
@@ -337,13 +249,13 @@ jobs:
           HARNESS_GRAPH_FALLBACK_EVERY: "3"
           HARNESS_RELEASE_CHECK_EVERY: "6"
           HARNESS_EXPECTED_STAGE_NAME: "Kernel Build"
-          HARNESS_EXPECTED_STEP_NAME: "Build Universal Kernel"
+          HARNESS_EXPECTED_STEP_NAME: "Build Universal Kernel Matrix"
           TG_HTTP_TIMEOUT: "8"
           HARNESS_MAX_SECONDS: "8100"
         run: python3 scripts/harness_monitor.py
 
-      - name: Relay Harness logs and artifacts to Telegram
-        if: always() && steps.trigger.outputs.plan_execution_id != ''
+      - name: Relay Harness result to Telegram
+        if: always() && steps.trigger.outputs.plan_execution_id != '' && inputs.publish_release
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
@@ -352,18 +264,12 @@ jobs:
           GH_REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ steps.trigger.outputs.release_tag }}
           HARNESS_MONITOR_FILE: harness-monitor.json
-        run: python3 -c 'import os; os.system("bash scripts/send_release_to_telegram.sh")'
+        run: bash scripts/send_release_to_telegram.sh
 
       - name: Propagate Harness result
         if: always()
         run: |
           set -euo pipefail
-          if [[ -f harness-monitor.json ]]; then
-            status="$(python3 -c 'import json; print(json.load(open("harness-monitor.json",encoding="utf-8")).get("status","UNKNOWN"))')"
-            case "$status" in
-              SUCCESS|SUCCEEDED) exit 0 ;;
-              *) echo "Harness result: $status"; exit 1 ;;
-            esac
-          fi
-          echo "Harness execution did not produce a monitor result."
-          exit 1
+          test -f harness-monitor.json
+          status="$(python3 -c 'import json; print(json.load(open("harness-monitor.json",encoding="utf-8")).get("status","UNKNOWN"))')"
+          case "$status" in SUCCESS|SUCCEEDED) exit 0 ;; *) echo "Harness result: $status"; exit 1 ;; esac

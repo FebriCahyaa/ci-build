@@ -1,32 +1,46 @@
 #!/usr/bin/env bash
+# Universal kernel builder: one kernel source + one root variant -> artifacts + AnyKernel3 ZIP.
+# Shared by GitHub Actions, Harness, and local builds. Multi-variant builds use build_variants.sh.
+#
+# Required: KERNEL_REPO
+# Main options (all optional):
+#   KERNEL_BRANCH KERNEL_REF_TYPE DEVICE ARCH DEFCONFIG CONFIG_FRAGMENT JOBS KERNEL_TARGET
+#   ROOT_VARIANT=vanilla|kernelsu|kernelsu-next|resukisu   (preferred over ENABLE_KSU/KSU_PROVIDER)
+#   KSU_REF ENABLE_SUSFS SUSFS_REF KSU_REPO KSU_HOOK_MODE
+#   TOOLCHAIN TOOLCHAIN_VERSION LLVM LLVM_IAS CROSS_COMPILE CROSS_COMPILE_ARM32 CLANG_URL GCC_URL
+#   PATCH_PROFILE UPSTREAM_PROFILE LTO_PLUS SCHEDULER_PROFILE KERNEL_NAME EXTRA_MAKE_ARGS
+#   PACKAGE_ANYKERNEL ANYKERNEL_PROFILE ANYKERNEL3_REPO ANYKERNEL3_REF
+#   USE_CCACHE CCACHE_DIR TOOLCHAIN_CACHE_DIR KERNEL_SOURCE_SEED WORK_DIR
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/common.sh"
 source "$SCRIPT_DIR/tg.sh"
+CI_LOG_TAG=build
 
+# Resolve a canonical target profile once; explicit environment overrides remain authoritative.
+if [[ -n "${BUILD_PROFILE:-}" ]]; then
+  eval "$(BUILD_PROFILE="$BUILD_PROFILE" DEVICE="${DEVICE:-generic}" KERNEL_FAMILY="${KERNEL_FAMILY:-}" "$SCRIPT_DIR/resolve_build_profile.sh")"
+elif [[ -z "${PROFILE_ID:-}" ]]; then
+  # Auto-select when DEVICE/FAMILY identify one canonical target.
+  if [[ -n "${DEVICE:-}" && "${DEVICE:-generic}" != generic ]]; then
+    BUILD_PROFILE="auto"
+    eval "$(BUILD_PROFILE=auto DEVICE="$DEVICE" KERNEL_FAMILY="${KERNEL_FAMILY:-}" "$SCRIPT_DIR/resolve_build_profile.sh")"
+  fi
+fi
+
+KERNEL_REPO="${KERNEL_REPO:-${PROFILE_KERNEL_REPO:-}}"
 : "${KERNEL_REPO:?KERNEL_REPO is required}"
 
-KERNEL_BRANCH="${KERNEL_BRANCH:-main}"
-DEVICE="${DEVICE:-generic}"
-ARCH="${ARCH:-auto}"
-DEFCONFIG="${DEFCONFIG:-auto}"
-CONFIG_FRAGMENT="${CONFIG_FRAGMENT:-auto}"
-KERNEL_REF_TYPE="${KERNEL_REF_TYPE:-auto}"
-
-# Normalize full Git refs so --branch/--tag receives the short ref.
-case "$KERNEL_REF_TYPE" in
-  branch)
-    KERNEL_BRANCH="${KERNEL_BRANCH#refs/heads/}"
-    ;;
-  tag)
-    KERNEL_BRANCH="${KERNEL_BRANCH#refs/tags/}"
-    ;;
-  auto)
-    KERNEL_BRANCH="${KERNEL_BRANCH#refs/heads/}"
-    KERNEL_BRANCH="${KERNEL_BRANCH#refs/tags/}"
-    ;;
-esac
-
+KERNEL_BRANCH="${KERNEL_BRANCH:-${PROFILE_KERNEL_REF:-main}}"
+KERNEL_BRANCH="${KERNEL_BRANCH#refs/heads/}"
+KERNEL_BRANCH="${KERNEL_BRANCH#refs/tags/}"
+KERNEL_REF_TYPE="${KERNEL_REF_TYPE:-${PROFILE_KERNEL_REF_TYPE:-auto}}"
+DEVICE="${DEVICE:-${PROFILE_DEVICE:-generic}}"
+KERNEL_FAMILY="${KERNEL_FAMILY:-${PROFILE_KERNEL_FAMILY:-}}"
+ARCH="${ARCH:-${PROFILE_ARCH:-auto}}"
+DEFCONFIG="${DEFCONFIG:-${PROFILE_DEFCONFIG:-auto}}"
+CONFIG_FRAGMENT="${CONFIG_FRAGMENT:-${PROFILE_CONFIG_FRAGMENT:-auto}}"
 JOBS="${JOBS:-0}"
 KERNEL_TARGET="${KERNEL_TARGET:-}"
 
@@ -34,72 +48,52 @@ TOOLCHAIN="${TOOLCHAIN:-auto}"
 TOOLCHAIN_VERSION="${TOOLCHAIN_VERSION:-auto}"
 LLVM="${LLVM:-auto}"
 LLVM_IAS="${LLVM_IAS:-auto}"
-
 CROSS_COMPILE="${CROSS_COMPILE:-auto}"
 CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32:-}"
-
 CLANG_URL="${CLANG_URL:-}"
 GCC_URL="${GCC_URL:-}"
-APT_PACKAGES="${APT_PACKAGES:-}"
 EXTRA_MAKE_ARGS="${EXTRA_MAKE_ARGS:-}"
 
-SCHEDULER_PROFILE="${SCHEDULER_PROFILE:-auto}"
-PATCH_PROFILE="${PATCH_PROFILE:-auto}"
-UPSTREAM_PROFILE="${UPSTREAM_PROFILE:-auto}"
-
-# The Southwest-NG performance profile is selected through the existing
-# PATCH_PROFILE input so the GitHub workflows remain within GitHub's
-# 25-input workflow_dispatch limit.
+SCHEDULER_PROFILE="${SCHEDULER_PROFILE:-${PROFILE_SCHEDULER_PROFILE:-auto}}"
+PATCH_PROFILE="${PATCH_PROFILE:-${PROFILE_PATCH_PROFILE:-auto}}"
+UPSTREAM_PROFILE="${UPSTREAM_PROFILE:-${PROFILE_UPSTREAM_PROFILE:-auto}}"
+LTO_PLUS="${LTO_PLUS:-${PROFILE_LTO_PLUS:-false}}"
+KERNEL_NAME="${KERNEL_NAME:-}"
+# PATCH_PROFILE=southwest-ng also labels the scheduler profile (keeps workflow inputs <= 25).
 if [[ "$PATCH_PROFILE" == "southwest-ng" && "$SCHEDULER_PROFILE" == "auto" ]]; then
   SCHEDULER_PROFILE="southwest-ng"
 fi
 
-LTO_PLUS="${LTO_PLUS:-false}"
-KERNEL_NAME="${KERNEL_NAME:-}"
-# Zairenkai build identity. Kbuild embeds these values in the kernel
-# version string instead of the transient Harness runner identity.
-source "$SCRIPT_DIR/kbuild_identity.sh"
-
-# A blank/auto value means kernel-name is the single source of truth.
-if [[ -z "$KERNEL_NAME" || "$KERNEL_NAME" == "auto" ]]; then
-  if [[ -f "$SCRIPT_DIR/../kernel-name" ]]; then
-    mapfile -t _kernel_name_values < <(sed -e 's/\r$//' \
-      -e '/^[[:space:]]*#/d' \
-      -e '/^[[:space:]]*$/d' \
-      "$SCRIPT_DIR/../kernel-name")
-    if ((${#_kernel_name_values[@]} > 1)); then
-      echo "ERROR: $SCRIPT_DIR/../kernel-name must contain exactly one non-empty value" >&2
-      exit 1
-    fi
-    if ((${#_kernel_name_values[@]} == 1)); then
-      KERNEL_NAME="${_kernel_name_values[0]}"
-    else
-      KERNEL_NAME=""
-    fi
-  fi
+# Root variant. ROOT_VARIANT is the single switch; ENABLE_KSU/KSU_PROVIDER stay
+# accepted for older callers.
+if [[ -n "${ROOT_VARIANT:-}" ]]; then
+  ROOT_VARIANT="$(normalize_variant "$ROOT_VARIANT")" || ci_die "invalid ROOT_VARIANT=$ROOT_VARIANT"
+else
+  case "${ENABLE_KSU:-false}:${KSU_PROVIDER:-auto}" in
+    false:*|0:*|"":*) ROOT_VARIANT=vanilla ;;
+    *:auto) ROOT_VARIANT=kernelsu-next ;;
+    *) ROOT_VARIANT="$(normalize_variant "$KSU_PROVIDER")" || ci_die "invalid KSU_PROVIDER=$KSU_PROVIDER" ;;
+  esac
 fi
-
-# KernelSU:
-#   false = never install missing KernelSU
-#   true  = install when required/missing
-#   auto  = install only when the source/defconfig indicates KSU is required
-ENABLE_KSU="${ENABLE_KSU:-auto}"
-KSU_PROVIDER="${KSU_PROVIDER:-auto}"
-KSU_PROVIDER_ORIGINAL="$KSU_PROVIDER"
 KSU_REPO="${KSU_REPO:-}"
 KSU_REF="${KSU_REF:-auto}"
+KSU_HOOK_MODE="${KSU_HOOK_MODE:-auto}"
 ENABLE_SUSFS="${ENABLE_SUSFS:-false}"
 SUSFS_REF="${SUSFS_REF:-001e69919c6271f690fd00b17e4c721c9e599152}"
-KSU_LAYOUT="${KSU_LAYOUT:-auto}"
-KSU_HOOK_MODE="${KSU_HOOK_MODE:-auto}"
+[[ "$ROOT_VARIANT" == vanilla ]] && ENABLE_SUSFS=false
 
-PACKAGE_ANYKERNEL="${PACKAGE_ANYKERNEL:-false}"
-ROM_FAMILY="${ROM_FAMILY:-oss}"
-ANYKERNEL_PROFILE="${ANYKERNEL_PROFILE:-auto}"
-ANYKERNEL_REPO="${ANYKERNEL_REPO:-https://github.com/osm0sis/AnyKernel3}"
-ANYKERNEL_BRANCH="${ANYKERNEL_BRANCH:-master}"
-ANYKERNEL3_REPO="${ANYKERNEL3_REPO:-$ANYKERNEL_REPO}"
-ANYKERNEL3_REF="${ANYKERNEL3_REF:-$ANYKERNEL_BRANCH}"
+PACKAGE_ANYKERNEL="${PACKAGE_ANYKERNEL:-${PROFILE_PACKAGE_ANYKERNEL:-true}}"
+ANYKERNEL_PROFILE="${ANYKERNEL_PROFILE:-${PROFILE_ANYKERNEL_PROFILE:-auto}}"
+ANYKERNEL3_REPO="${ANYKERNEL3_REPO:-local}"
+ANYKERNEL3_REF="${ANYKERNEL3_REF:-${PROFILE_ANYKERNEL3_REF:-master}}"
+USE_CCACHE="${USE_CCACHE:-true}"
+ROM_FAMILY="${ROM_FAMILY:-${PROFILE_ROM_FAMILY:-auto}}"
+DYNAMIC_PARTITION="${DYNAMIC_PARTITION:-${PROFILE_DYNAMIC_PARTITION:-false}}"
+GKI="${GKI:-${PROFILE_GKI:-false}}"
+SOURCE_LABEL="${SOURCE_LABEL:-${PROFILE_SOURCE_LABEL:-}}"
+KSU_NEXT_LEGACY_REF="${KSU_NEXT_LEGACY_REF:-${PROFILE_KSU_NEXT_LEGACY_REF:-v1.1.1}}"
+KSU_NEXT_GKI_REF="${KSU_NEXT_GKI_REF:-${PROFILE_KSU_NEXT_GKI_REF:-v3.4.0}}"
+RESUKISU_REF_DEFAULT="${RESUKISU_REF_DEFAULT:-${PROFILE_RESUKISU_REF:-v4.2.0-rc3}}"
 
 BUILD_ENV="${BUILD_ENV:-}"
 RUN_URL="${RUN_URL:-}"
@@ -110,506 +104,277 @@ SRC_DIR="$WORK/kernel"
 OUT="${KERNEL_OUT:-$WORK/kernel-out}"
 ARTIFACTS="$WORK/artifacts"
 BUILD_LOG="$WORK/build.log"
-CI_BUILD_SHA="${CI_BUILD_SHA:-$(git -C "$SCRIPT_DIR/.." rev-parse HEAD 2>/dev/null || true)}"
+INFO="$ARTIFACTS/build-info.txt"
+CI_BUILD_SHA="${CI_BUILD_SHA:-$(git -C "$CI_ROOT" rev-parse HEAD 2>/dev/null || true)}"
 HARNESS_EXECUTION_ID="${HARNESS_EXECUTION_ID:-}"
 GH_TOKEN="${GH_TOKEN:-}"
 GH_REPOSITORY="${GH_REPOSITORY:-}"
 PROGRESS_SCRIPT="$SCRIPT_DIR/progress_beacon.sh"
-COMPILE_PROGRESS_SCRIPT="$SCRIPT_DIR/compile_progress.sh"
 
+rm -rf "$ARTIFACTS"
 mkdir -p "$WORK" "$ARTIFACTS"
-
+: > "$BUILD_LOG"
 export CI_HEARTBEAT_SECONDS="${CI_HEARTBEAT_SECONDS:-15}"
 
-# Harness workspaces can lose Git executable bits when CI source bundles are
-# transferred between systems. Restore the required helper permissions locally.
-chmod +x   "$SCRIPT_DIR/kbuild_identity.sh"   "$SCRIPT_DIR/run_with_heartbeat.sh"   "$SCRIPT_DIR/sync_localversion_files.sh"   "$SCRIPT_DIR/apply_patch_series.sh"   "$SCRIPT_DIR/toolchain_resolver.sh"   "$SCRIPT_DIR/detect_defconfig.sh"   "$SCRIPT_DIR/set_kernel_name.sh"   "$SCRIPT_DIR/progress_beacon.sh"   "$SCRIPT_DIR/compile_progress.sh"   "$SCRIPT_DIR/select_anykernel_profile.sh"   "$SCRIPT_DIR/build_anykernel.sh"   2>/dev/null || true
+# Harness workspaces can lose executable bits; every helper is invoked via bash anyway.
+chmod +x "$SCRIPT_DIR"/*.sh 2>/dev/null || true
 
-ci_phase() {
-  local label="$1"
-  echo "[CI-PHASE] ${label}" | tee -a "$BUILD_LOG"
-}
+# Kbuild identity (KBUILD_BUILD_USER/HOST) and kernel name.
+source "$SCRIPT_DIR/kbuild_identity.sh"
+if [[ -z "$KERNEL_NAME" || "$KERNEL_NAME" == "auto" ]]; then
+  KERNEL_NAME="$(read_value_file "$CI_ROOT/kernel-name")"
+fi
+
+ci_phase() { echo "[CI-PHASE] $1" | tee -a "$BUILD_LOG"; }
 
 progress_update() {
   local pct="$1" phase="$2" detail="$3" state="${4:-pending}"
-  if [[ -n "$GH_TOKEN" && -n "$GH_REPOSITORY" && -n "$CI_BUILD_SHA" && -n "$HARNESS_EXECUTION_ID" ]]; then
-    GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" CI_BUILD_SHA="$CI_BUILD_SHA"     HARNESS_EXECUTION_ID="$HARNESS_EXECUTION_ID" RUN_URL="$RUN_URL" WORK_DIR="$WORK"       "$PROGRESS_SCRIPT" "$pct" "$state" "$phase" "$detail" || true
-  fi
+  [[ -n "$GH_TOKEN" && -n "$GH_REPOSITORY" && -n "$CI_BUILD_SHA" && -n "$HARNESS_EXECUTION_ID" ]] || return 0
+  GH_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" CI_BUILD_SHA="$CI_BUILD_SHA" \
+  HARNESS_EXECUTION_ID="$HARNESS_EXECUTION_ID" RUN_URL="$RUN_URL" WORK_DIR="$WORK" \
+    bash "$PROGRESS_SCRIPT" "$pct" "$state" "$phase${VARIANT_TAG:+ [$VARIANT_TAG]}" "$detail" || true
 }
+VARIANT_TAG="${VARIANT_PROGRESS_TAG:-}"
 
 run_live() {
   local label="$1"
   shift
-  if [[ ! -f "$SCRIPT_DIR/run_with_heartbeat.sh" ]]; then
-    echo "[CI-WRAPPER] ERROR: missing $SCRIPT_DIR/run_with_heartbeat.sh" | tee -a "$BUILD_LOG" >&2
-    return 127
-  fi
-
-  # Invoke through bash so a lost executable bit or stale shebang cannot hide
-  # the actual wrapper/command failure from the build log.
-  bash "$SCRIPT_DIR/run_with_heartbeat.sh" "$label" "$BUILD_LOG" "$@" \
-    2> >(tee -a "$BUILD_LOG" >&2)
+  bash "$SCRIPT_DIR/run_with_heartbeat.sh" "$label" "$BUILD_LOG" "$@" 2> >(tee -a "$BUILD_LOG" >&2)
 }
 
-FAIL_HANDLED=false
+# run_helper <script> [VAR=value...]: run a helper script, logging its output.
+run_helper() {
+  local script="$1"
+  shift
+  env "$@" bash "$SCRIPT_DIR/$script" 2>&1 | tee -a "$BUILD_LOG"
+  return "${PIPESTATUS[0]}"
+}
 
+info() { printf '%s=%s\n' "$1" "$2" >> "$INFO"; }
+
+FAIL_HANDLED=false
 fail() {
   local reason="$1"
-
-  if [[ "$FAIL_HANDLED" == true ]]; then
-    exit 1
-  fi
+  [[ "$FAIL_HANDLED" == true ]] && exit 1
   FAIL_HANDLED=true
-
   local duration=$(( $(date +%s) - START ))
-
+  echo "[build] FAILED: $reason" | tee -a "$BUILD_LOG" >&2
+  tail -n 300 "$BUILD_LOG" > "$WORK/error_tail.log" 2>/dev/null || true
   tg_edit "${MID:-}" "❌ <b>Kernel build gagal</b>
-📱 $DEVICE | 🏗 ${DETECTED_ARCH:-$ARCH}
+📱 $DEVICE | 🔐 $(variant_label "$ROOT_VARIANT")
 🧩 Tahap: <code>$reason</code>
 ⏱ $(fmt_dur "$duration")
 🔗 <a href=\"$RUN_URL\">CI log</a>"
-
-  if [[ -f "$BUILD_LOG" ]]; then
-    tail -n 300 "$BUILD_LOG" > "$WORK/error_tail.log" || true
-    tg_file "$WORK/error_tail.log" "📄 Last 300 build log lines — $DEVICE"
-  fi
-
+  tg_file "$WORK/error_tail.log" "📄 Last 300 build log lines — $DEVICE $(variant_label "$ROOT_VARIANT")"
   exit 1
 }
-
 trap 'fail "unexpected error at line $LINENO"' ERR
 
-if [[ "$JOBS" == "0" || -z "$JOBS" ]]; then
-  JOBS="$(nproc 2>/dev/null || echo 2)"
-fi
+[[ "$JOBS" == "0" || -z "$JOBS" ]] && JOBS="$(nproc 2>/dev/null || echo 2)"
+[[ -n "$KERNEL_BRANCH" ]] || fail "KERNEL_BRANCH is empty"
+[[ -n "$DEVICE" && "$DEVICE" != "generic" ]] || fail "DEVICE is missing or still 'generic'"
 
 # ------------------------------------------------------------
-# Basic input validation
+# Source checkout (KERNEL_SOURCE_SEED = pristine clone shared by variants)
 # ------------------------------------------------------------
-
-if [[ -z "$KERNEL_BRANCH" ]]; then
-  fail "KERNEL_BRANCH is empty"
-fi
-
-if [[ -z "$DEVICE" || "$DEVICE" == "generic" ]]; then
-  fail "DEVICE is missing or still 'generic'"
-fi
-
-case "$ENABLE_KSU" in
-  true|false|auto)
-    ;;
-  *)
-    fail "invalid ENABLE_KSU=$ENABLE_KSU"
-    ;;
-esac
-
-# ------------------------------------------------------------
-# Source checkout
-# ------------------------------------------------------------
-
 rm -rf "$SRC_DIR"
+if [[ "$KERNEL_REF_TYPE" == auto ]]; then
+  if is_commit_ref "$KERNEL_BRANCH"; then KERNEL_REF_TYPE=commit; else KERNEL_REF_TYPE=branch; fi
+fi
+case "$KERNEL_REF_TYPE" in branch|tag|commit) ;; *) fail "invalid KERNEL_REF_TYPE=$KERNEL_REF_TYPE" ;; esac
 
-case "$KERNEL_REF_TYPE" in
-  auto)
-    if [[ "$KERNEL_BRANCH" =~ ^[0-9a-fA-F]{40}$ || "$KERNEL_BRANCH" =~ ^[0-9a-fA-F]{64}$ ]]; then
-      KERNEL_REF_TYPE=commit
-    else
-      KERNEL_REF_TYPE=branch
-    fi
-    ;;
-  branch|tag|commit)
-    ;;
-  *)
-    fail "invalid KERNEL_REF_TYPE=$KERNEL_REF_TYPE"
-    ;;
-esac
-
-if [[ "$KERNEL_REF_TYPE" == commit ]]; then
-  git init "$SRC_DIR" >/dev/null
-  git -C "$SRC_DIR" remote add origin "$KERNEL_REPO"
-  git -C "$SRC_DIR" fetch --depth=1 origin "$KERNEL_BRANCH" || fail "fetch kernel commit"
-  git -C "$SRC_DIR" checkout --detach FETCH_HEAD || fail "checkout kernel commit"
+if [[ -n "${KERNEL_SOURCE_SEED:-}" && -d "$KERNEL_SOURCE_SEED/.git" ]]; then
+  cp -a "$KERNEL_SOURCE_SEED" "$SRC_DIR"
+  git -C "$SRC_DIR" reset -q --hard
+  git -C "$SRC_DIR" clean -qfdx
 else
-  git clone --depth=1 --branch "$KERNEL_BRANCH" "$KERNEL_REPO" "$SRC_DIR" || fail "clone kernel"
+  git_fetch_ref "$KERNEL_REPO" "$KERNEL_BRANCH" "$SRC_DIR" || fail "clone kernel"
 fi
 
 cd "$SRC_DIR"
 ci_phase "source-checkout"
 progress_update 5 "source" "checkout complete"
-
 COMMIT="$(git log -1 --pretty='%h %s')"
 COMMIT_SHA="$(git rev-parse HEAD)"
 
 # ------------------------------------------------------------
 # Auto-detect architecture / defconfig / fragment
 # ------------------------------------------------------------
-
 DETECT_ENV="$WORK/detection.env"
-
-ARCH="$ARCH" DEVICE="$DEVICE" DEFCONFIG="$DEFCONFIG" CONFIG_FRAGMENT="$CONFIG_FRAGMENT" \
-  "$SCRIPT_DIR/detect_defconfig.sh" \
-  --repo "$SRC_DIR" \
-  --arch "$ARCH" \
-  --device "$DEVICE" \
-  --defconfig "$DEFCONFIG" \
-  --fragment "$CONFIG_FRAGMENT" \
-  > "$DETECT_ENV" \
-  2> >(tee -a "$BUILD_LOG" >&2) || fail "auto-detect"
-
+bash "$SCRIPT_DIR/detect_defconfig.sh" \
+  --repo "$SRC_DIR" --arch "$ARCH" --device "$DEVICE" \
+  --defconfig "$DEFCONFIG" --fragment "$CONFIG_FRAGMENT" \
+  > "$DETECT_ENV" 2> >(tee -a "$BUILD_LOG" >&2) || fail "auto-detect"
 source "$DETECT_ENV"
+KMM="$DETECTED_KERNEL_VERSION"
 
-# Detection script returns paths relative to arch/$ARCH/configs.
 SELECTED_FRAGMENT=""
-
 if [[ -n "${DETECTED_FRAGMENT:-}" ]]; then
   SELECTED_FRAGMENT="$SRC_DIR/arch/$DETECTED_ARCH/configs/$DETECTED_FRAGMENT"
   [[ -f "$SELECTED_FRAGMENT" ]] || fail "detected fragment missing"
 fi
-
-# ------------------------------------------------------------
-# Optional user build environment
-# ------------------------------------------------------------
 
 if [[ -n "$BUILD_ENV" ]]; then
   eval "$BUILD_ENV"
 fi
 
 # ------------------------------------------------------------
-# KernelSU provider detection / integration
+# Root provider integration
 #
-# Root integration is explicit: a plain source tree does not suddenly become
-# rooted just because its defconfig lacks CONFIG_KSU. When a root manager is
-# requested, the CI installs the requested provider before defconfig so its
-# Kconfig is visible to Kbuild.
-# ---------------------------------------------------------------------------
-
-KSU_REQUIRED=false
-KSU_SUSFS_REQUIRED=false
-
-if grep -qE 'source "[^"]*kernelsu[^"]*/Kconfig"|obj-\$\(CONFIG_KSU\).*kernelsu' \
-    "$SRC_DIR/drivers/Kconfig" "$SRC_DIR/drivers/Makefile" 2>/dev/null; then
-  KSU_REQUIRED=true
+# Root integration is explicit. A tree that already carries a provider is
+# built with it compiled out for the vanilla variant, and has it replaced by
+# the requested provider for root variants.
+# ------------------------------------------------------------
+KSU_PREINTEGRATED=false
+if grep -qE 'kernelsu' "$SRC_DIR/drivers/Makefile" 2>/dev/null ||
+   grep -qE '^CONFIG_KSU=(y|m)' "$SRC_DIR/arch/$DETECTED_ARCH/configs/$DETECTED_DEFCONFIG" ${SELECTED_FRAGMENT:+"$SELECTED_FRAGMENT"} 2>/dev/null; then
+  KSU_PREINTEGRATED=true
 fi
 
-if grep -qE '^CONFIG_KSU(=y|=m)' \
-    "$SRC_DIR/arch/$DETECTED_ARCH/configs/$DETECTED_DEFCONFIG" 2>/dev/null; then
-  KSU_REQUIRED=true
-fi
-
-if [[ -n "$SELECTED_FRAGMENT" ]] && grep -qE '^CONFIG_KSU(=y|=m)' \
-    "$SELECTED_FRAGMENT" 2>/dev/null; then
-  KSU_REQUIRED=true
-fi
-
-if [[ "$ENABLE_KSU" == "true" ]]; then
-  [[ "$KSU_PROVIDER" == "auto" || -n "$KSU_PROVIDER" ]] || KSU_PROVIDER="auto"
-  case "$KSU_PROVIDER" in
-    auto)
-      if [[ "$ENABLE_SUSFS" == "true" ]]; then
-        KSU_PROVIDER="resukisu"
-      else
-        KSU_PROVIDER="kernelsu-next"
-      fi
-      ;;
-    official|kernelsu|kernelsu-next|ksu-next|next|resukisu|re-sukisu|custom)
-      ;;
-    none|false)
-      fail "ENABLE_KSU=true but KSU_PROVIDER=$KSU_PROVIDER"
-      ;;
-    *)
-      fail "invalid KSU_PROVIDER=$KSU_PROVIDER"
-      ;;
-  esac
-  KSU_REQUIRED=true
-elif [[ "$ENABLE_KSU" == "false" ]]; then
-  if [[ "$KSU_REQUIRED" == "true" ]]; then
-    fail "kernel source/defconfig requires KernelSU but ENABLE_KSU=false"
-  fi
-  KSU_PROVIDER="none"
+if [[ "$ROOT_VARIANT" == vanilla ]]; then
+  KSU_REQUIRED=false
+  KSU_PROVIDER=none
+  KSU_REPO="" KSU_REF="" KSU_PROVIDER_COMMIT=none KSU_PROVIDER_VERSION=none KSU_LAYOUT_RESOLVED=none
 else
-  # auto preserves an already-integrated source tree, but does not inject a
-  # root provider into a plain kernel unless the source explicitly requires it.
-  if [[ "$KSU_REQUIRED" != "true" ]]; then
-    KSU_PROVIDER="none"
-  else
-    KSU_PROVIDER="auto"
-    if [[ "$ENABLE_SUSFS" == "true" ]]; then
-      KSU_PROVIDER="resukisu"
-    else
-      KSU_PROVIDER="kernelsu-next"
-    fi
-  fi
-fi
-
-if [[ "$KSU_REQUIRED" == "true" ]]; then
-  ROOT_MANAGER="$KSU_PROVIDER"
-  if ! SOURCE_DIR="$SRC_DIR" \
-       WORK_DIR="$WORK" \
-       KERNEL_VERSION="$DETECTED_KERNEL_VERSION" \
-       ROOT_MANAGER="$ROOT_MANAGER" \
-       KSU_REPO="$KSU_REPO" \
-       KSU_REF="$KSU_REF" \
-       ENABLE_SUSFS="$ENABLE_SUSFS" \
-       KSU_HOOK_MODE="$KSU_HOOK_MODE" \
-       "$SCRIPT_DIR/root_manager_apply.sh"; then
-    fail "KernelSU provider integration"
-  fi
-
+  KSU_REQUIRED=true
+  ci_phase "root-provider"
+  run_helper root_manager_apply.sh \
+    SOURCE_DIR="$SRC_DIR" WORK_DIR="$WORK" KERNEL_VERSION="$KMM" ROOT_MANAGER="$ROOT_VARIANT" \
+    KSU_REPO="$KSU_REPO" KSU_REF="$KSU_REF" ENABLE_SUSFS="$ENABLE_SUSFS" KSU_HOOK_MODE="$KSU_HOOK_MODE" \
+    KSU_NEXT_LEGACY_REF="$KSU_NEXT_LEGACY_REF" KSU_NEXT_GKI_REF="$KSU_NEXT_GKI_REF" \
+    RESUKISU_REF_DEFAULT="$RESUKISU_REF_DEFAULT" ||
+    fail "root provider integration ($ROOT_VARIANT)"
   source "$WORK/root-manager.env"
-  KSU_PROVIDER="$KSU_PROVIDER"
-  KSU_REPO="$KSU_REPO"
-  KSU_REF="$KSU_REF"
-  KSU_PROVIDER_COMMIT="$KSU_PROVIDER_COMMIT"
-  KSU_PROVIDER_VERSION="$KSU_PROVIDER_VERSION"
-  KSU_LAYOUT_RESOLVED="$KSU_LAYOUT_RESOLVED"
   KSU_HOOK_MODE="$KSU_HOOK_MODE_RESOLVED"
-else
-  ROOT_MANAGER="none"
-  KSU_PROVIDER="none"
-  KSU_REPO=""
-  KSU_REF=""
-  KSU_PROVIDER_COMMIT="none"
-  KSU_PROVIDER_VERSION="none"
-  KSU_LAYOUT_RESOLVED="none"
 fi
 
-if [[ "$ENABLE_SUSFS" == "true" ]]; then
-  KSU_SUSFS_REQUIRED=true
-
-  if [[ "$KSU_REQUIRED" != "true" || "$KSU_PROVIDER" == "none" ]]; then
-    fail "ENABLE_SUSFS=true requires a root provider"
-  fi
-
-  if ! SOURCE_DIR="$SRC_DIR" \
-       WORK_DIR="$WORK" \
-       KERNEL_VERSION="$DETECTED_KERNEL_VERSION" \
-       ROOT_MANAGER="$KSU_PROVIDER" \
-       ENABLE_SUSFS="$ENABLE_SUSFS" \
-       SUSFS_REF="$SUSFS_REF" \
-       "$SCRIPT_DIR/apply_susfs.sh"; then
-    fail "SUSFS integration"
-  fi
-
+SUSFS_COMMIT=none SUSFS_VERSION=none SUSFS_SOURCE=none
+if is_true "$ENABLE_SUSFS"; then
+  ENABLE_SUSFS=true
+  run_helper apply_susfs.sh \
+    SOURCE_DIR="$SRC_DIR" WORK_DIR="$WORK" KERNEL_VERSION="$KMM" ROOT_MANAGER="$KSU_PROVIDER" \
+    ENABLE_SUSFS=true SUSFS_REF="$SUSFS_REF" KSU_DIR="${KSU_DIR:-}" || fail "SUSFS integration"
   source "$WORK/susfs.env"
 else
-  SUSFS_COMMIT="none"
-  SUSFS_VERSION="none"
-  SUSFS_SOURCE="none"
+  ENABLE_SUSFS=false
 fi
 
-
 # ------------------------------------------------------------
-# Modular patch registry
-#
-# Source fixes live under patches/ and are selected by device,
-# kernel version, root manager, and upstream profile.
+# Modular patch registry (source phase)
 # ------------------------------------------------------------
-
-
-if [[ "$ENABLE_KSU" == "true" ]]; then
-  ROOT_MANAGER="${KSU_PROVIDER:-none}"
-else
-  ROOT_MANAGER="none"
-fi
-
+PATCH_ENV=(
+  SOURCE_DIR="$SRC_DIR" DEVICE="$DEVICE" KERNEL_VERSION="$KMM" KERNEL_REPO="$KERNEL_REPO"
+  PATCH_PROFILE="$PATCH_PROFILE" UPSTREAM_PROFILE="$UPSTREAM_PROFILE"
+  ROOT_MANAGER="$KSU_PROVIDER" KSU_REQUIRED="$KSU_REQUIRED" KSU_PREINTEGRATED="$KSU_PREINTEGRATED"
+  ENABLE_SUSFS="$ENABLE_SUSFS" KSU_SUSFS_REQUIRED="$ENABLE_SUSFS" LTO_PLUS="$LTO_PLUS"
+)
 ci_phase "config-patches"
+run_helper apply_patch_series.sh "${PATCH_ENV[@]}" PHASE=source || fail "source patch series"
 progress_update 12 "config" "patch selection complete"
-if ! SOURCE_DIR="$SRC_DIR" \
-     DEVICE="$DEVICE" \
-     KERNEL_VERSION="$DETECTED_KERNEL_VERSION" \
-     PATCH_PROFILE="$PATCH_PROFILE" \
-     UPSTREAM_PROFILE="$UPSTREAM_PROFILE" \
-     ROOT_MANAGER="$ROOT_MANAGER" \
-     KSU_REQUIRED="$KSU_REQUIRED" \
-     KSU_SUSFS_REQUIRED="$KSU_SUSFS_REQUIRED" \
-     PHASE="source" \
-     "$SCRIPT_DIR/apply_patch_series.sh" 2>&1 | tee -a "$BUILD_LOG"; then
-  fail "source patch series"
-fi
 
 # ------------------------------------------------------------
-# Toolchain resolution
+# Toolchain
 # ------------------------------------------------------------
-
 TOOLCHAIN_ENV="$WORK/toolchain.env"
-
-TOOLCHAIN="$TOOLCHAIN" \
-TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" \
-ARCH="$DETECTED_ARCH" \
-CLANG_URL="$CLANG_URL" \
-GCC_URL="$GCC_URL" \
-"$SCRIPT_DIR/toolchain_resolver.sh" \
-  "$SRC_DIR" "$WORK" \
-  > "$TOOLCHAIN_ENV" \
-  2> >(tee -a "$BUILD_LOG" >&2) || fail "toolchain resolution"
-
+TOOLCHAIN="$TOOLCHAIN" TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" ARCH="$DETECTED_ARCH" \
+CLANG_URL="$CLANG_URL" GCC_URL="$GCC_URL" \
+  bash "$SCRIPT_DIR/toolchain_resolver.sh" "$SRC_DIR" "$WORK" \
+  > "$TOOLCHAIN_ENV" 2> >(tee -a "$BUILD_LOG" >&2) || fail "toolchain resolution"
 source "$TOOLCHAIN_ENV"
 progress_update 24 "toolchain" "$RESOLVED_TOOLCHAIN $RESOLVED_TOOLCHAIN_VERSION"
 
-# ------------------------------------------------------------
-# Sanitize inherited compiler overrides.
-#
-# Kernel Makefile selects the actual compiler when LLVM=1.
-# Environment values such as CC=autogcc or CROSS_COMPILE=auto
-# must not override that logic.
-# ------------------------------------------------------------
+# Inherited compiler overrides must not leak into Kbuild.
+unset CC CXX CPP LD AS AR NM OBJCOPY OBJDUMP READELF OBJSIZE STRIP HOSTCC HOSTCXX MAKEFLAGS MAKEOVERRIDES
+[[ -n "${RESOLVED_TOOLCHAIN_BIN:-}" ]] && export PATH="$RESOLVED_TOOLCHAIN_BIN:$PATH"
 
-unset CC CXX CPP LD AS AR NM OBJCOPY OBJDUMP READELF OBJSIZE STRIP
-unset HOSTCC HOSTCXX
-unset MAKEFLAGS MAKEOVERRIDES
-
-# "auto" is a CI selector, not a valid compiler prefix.
-if [[ "${CROSS_COMPILE:-}" == "auto" ]]; then
-  unset CROSS_COMPILE
-fi
-
-# Empty ARM32 prefix is valid; keep it defined for set -u safety.
-if [[ "${CROSS_COMPILE_ARM32:-}" == "auto" ]]; then
-  CROSS_COMPILE_ARM32=""
-fi
-
-if [[ "${CLANG_TRIPLE:-}" == "auto" ]]; then
-  unset CLANG_TRIPLE
-fi
-
-echo "[toolchain] sanitized environment" >&2
-echo "[toolchain] clang=$(command -v clang || true)" >&2
-echo "[toolchain] ld.lld=$(command -v ld.lld || true)" >&2
-echo "[toolchain] aarch64-gcc=$(command -v aarch64-linux-gnu-gcc || true)" >&2
-echo "[toolchain] arm32-gcc=$(command -v arm-linux-gnueabi-gcc || true)" >&2
-
-if [[ -n "${RESOLVED_TOOLCHAIN_BIN:-}" ]]; then
-  export PATH="${RESOLVED_TOOLCHAIN_BIN}:$PATH"
-fi
-
-export PATH
-
-if [[ -n "${CROSS_COMPILE:-}" && "$CROSS_COMPILE" != auto ]]; then
+if [[ -n "$CROSS_COMPILE" && "$CROSS_COMPILE" != auto ]]; then
   CROSS_DEFAULT="$CROSS_COMPILE"
 else
   CROSS_DEFAULT="$RESOLVED_CROSS_DEFAULT"
 fi
-
 CLANG_TRIPLE="${RESOLVED_CLANG_TRIPLE:-}"
-
-# Toolchain resolver outputs are single-line Make variables. Normalize any
-# accidental CR/LF contamination so one compiler setting cannot become a
-# second unlabeled Make argument.
-CLANG_TRIPLE="$(printf '%s' "$CLANG_TRIPLE" | tr -d '\r' | awk 'NR == 1 {print; exit}')"
-CROSS_DEFAULT="$(printf '%s' "$CROSS_DEFAULT" | tr -d '\r' | awk 'NR == 1 {print; exit}')"
-CROSS_COMPILE_ARM32="$(printf '%s' "$CROSS_COMPILE_ARM32" | tr -d '\r' | awk 'NR == 1 {print; exit}')"
-
-# The Harness image installs the Debian ARM32 cross compiler. For this
-# ARM64 Android 4.19 tree, provide the 32-bit prefix when the selected
-# toolchain profile did not specify one.
-if [[ "$DETECTED_ARCH" == "arm64" && -z "$CROSS_COMPILE_ARM32" ]]; then
-  if command -v arm-linux-gnueabi-gcc >/dev/null 2>&1; then
-    CROSS_COMPILE_ARM32="arm-linux-gnueabi-"
-  fi
+[[ "$CROSS_COMPILE_ARM32" == auto ]] && CROSS_COMPILE_ARM32=""
+if [[ "$DETECTED_ARCH" == arm64 && -z "$CROSS_COMPILE_ARM32" ]] && command -v arm-linux-gnueabi-gcc >/dev/null 2>&1; then
+  CROSS_COMPILE_ARM32="arm-linux-gnueabi-"
 fi
-
-echo "[toolchain] normalized CLANG_TRIPLE=$(printf '%q' "$CLANG_TRIPLE")" >&2
-echo "[toolchain] normalized CROSS_COMPILE=$(printf '%q' "$CROSS_DEFAULT")" >&2
-echo "[toolchain] normalized CROSS_COMPILE_ARM32=$(printf '%q' "$CROSS_COMPILE_ARM32")" >&2
 
 LLVM_VALUE="${RESOLVED_LLVM:-1}"
-LLVM_IAS_VALUE="${RESOLVED_LLVM_IAS:-1}"
-
+LLVM_IAS_VALUE="${RESOLVED_LLVM_IAS:-0}"
 [[ "$LLVM" != auto ]] && LLVM_VALUE="$LLVM"
 [[ "$LLVM_IAS" != auto ]] && LLVM_IAS_VALUE="$LLVM_IAS"
+is_true "$LLVM_VALUE" && LLVM_VALUE=1 || LLVM_VALUE=0
+is_true "$LLVM_IAS_VALUE" && LLVM_IAS_VALUE=1 || LLVM_IAS_VALUE=0
+
+# ccache (shared CCACHE_DIR lets KernelSU variants reuse the vanilla objects).
+CCACHE_PREFIX=""
+if is_true "$USE_CCACHE" && command -v ccache >/dev/null 2>&1; then
+  export CCACHE_DIR="${CCACHE_DIR:-$WORK/.ccache}"
+  export CCACHE_BASEDIR="${CCACHE_BASEDIR:-$WORK}"
+  export CCACHE_NOHASHDIR=true CCACHE_COMPILERCHECK=content
+  export KBUILD_BUILD_TIMESTAMP="${KBUILD_BUILD_TIMESTAMP:-$(git -C "$SRC_DIR" log -1 --format=%cd --date=rfc2822)}"
+  ccache -M "${CCACHE_MAXSIZE:-5G}" >/dev/null 2>&1 || true
+  CCACHE_PREFIX="ccache "
+fi
 
 # ------------------------------------------------------------
-# Build command
+# Make command
+#
+# Kernels with LLVM=1 support (5.7+, or backported) select every LLVM tool
+# themselves. Older trees (4.4/4.9/4.14/4.19) need CC=clang explicitly; 4.19
+# can also use LLVM binutils, while 4.4-4.14 keep GNU binutils from CROSS_COMPILE.
 # ------------------------------------------------------------
-
-declare -a MAKE_BASE
-
-MAKE_BASE=(
-  make
-  -j"$JOBS"
-  O="$OUT"
-  ARCH="$DETECTED_ARCH"
-)
-
-if [[ "$LLVM_VALUE" == 1 || "$LLVM_VALUE" == true ]]; then
-  MAKE_BASE+=(LLVM=1)
+MAKE_CMD=(make -j"$JOBS" O="$OUT" ARCH="$DETECTED_ARCH")
+if [[ "$LLVM_VALUE" == 1 ]]; then
+  if grep -qE '\$\(LLVM\)' "$SRC_DIR/Makefile"; then
+    MAKE_CMD+=(LLVM=1)
+    [[ "$LLVM_IAS_VALUE" == 1 ]] && MAKE_CMD+=(LLVM_IAS=1)
+    [[ -n "$CCACHE_PREFIX" ]] && MAKE_CMD+=(CC="${CCACHE_PREFIX}clang")
+  else
+    MAKE_CMD+=(CC="${CCACHE_PREFIX}clang")
+    if kernel_ge "$KMM" 4 19; then
+      MAKE_CMD+=(LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip)
+    fi
+  fi
+  [[ -n "$CLANG_TRIPLE" ]] && MAKE_CMD+=(CLANG_TRIPLE="$CLANG_TRIPLE")
+elif [[ -n "$CCACHE_PREFIX" ]]; then
+  MAKE_CMD+=(CC="${CCACHE_PREFIX}${CROSS_DEFAULT}gcc")
 fi
-
-if [[ "$LLVM_IAS_VALUE" == 1 || "$LLVM_IAS_VALUE" == true ]]; then
-  MAKE_BASE+=(LLVM_IAS=1)
-fi
-
-# CLANG_TRIPLE is for the LLVM driver. Keep it separate from
-# CROSS_COMPILE and CROSS_COMPILE_ARM32.
-if [[ -n "$CLANG_TRIPLE" && "$LLVM_VALUE" == 1 ]]; then
-  MAKE_BASE+=(CLANG_TRIPLE="$CLANG_TRIPLE")
-fi
-
-if [[ -n "$CROSS_DEFAULT" ]]; then
-  MAKE_BASE+=(CROSS_COMPILE="$CROSS_DEFAULT")
-fi
-
-if [[ -n "$CROSS_COMPILE_ARM32" && "$CROSS_COMPILE_ARM32" != auto ]]; then
-  MAKE_BASE+=(CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32")
-fi
-
+[[ -n "$CROSS_DEFAULT" ]] && MAKE_CMD+=(CROSS_COMPILE="$CROSS_DEFAULT")
+[[ -n "$CROSS_COMPILE_ARM32" ]] && MAKE_CMD+=(CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" CROSS_COMPILE_COMPAT="$CROSS_COMPILE_ARM32")
+# GCC 10+ defaults to -fno-common, which breaks the dtc lexer in older trees.
+kernel_ge "$KMM" 5 4 || MAKE_CMD+=(HOSTCC="gcc -fcommon")
 read -r -a EXTRA_ARGS <<< "$EXTRA_MAKE_ARGS"
+MAKE_CMD+=("${EXTRA_ARGS[@]}")
 
-MAKE_CMD=("${MAKE_BASE[@]}" "${EXTRA_ARGS[@]}")
-
+VARIANT_LABEL="$(variant_label "$ROOT_VARIANT")"
 MID="$(tg_msg "🚀 <b>Universal Kernel Build</b>
-📱 Device: <code>$DEVICE</code>
-🏗 ARCH: <code>$DETECTED_ARCH</code>
-🐧 Kernel: <code>${DETECTED_KERNEL_VERSION}</code>
+📱 Device: <code>$DEVICE</code> | 🔐 <code>$VARIANT_LABEL</code>
+🐧 Kernel: <code>$DETECTED_KERNEL_FULL_VERSION</code> (<code>$DETECTED_ARCH</code>)
 🌿 Branch: <code>$KERNEL_BRANCH</code>
 ⚙️ Defconfig: <code>$DETECTED_DEFCONFIG</code>
 🧩 Fragment: <code>${DETECTED_FRAGMENT:-none}</code>
-🛠 Toolchain: <code>$RESOLVED_TOOLCHAIN</code> <code>${RESOLVED_TOOLCHAIN_VERSION}</code>
+🛠 Toolchain: <code>$RESOLVED_TOOLCHAIN $RESOLVED_TOOLCHAIN_VERSION</code>
 🧵 Jobs: <code>$JOBS</code>
-🔀 CLANG_TRIPLE: <code>${CLANG_TRIPLE:-none}</code>
-🔧 CROSS_COMPILE: <code>${CROSS_DEFAULT:-none}</code>
-🔧 CROSS_COMPILE_ARM32: <code>${CROSS_COMPILE_ARM32:-none}</code>
-🔐 KernelSU: <code>${KSU_PROVIDER:-none}</code>
-📦 KSU ref: <code>${KSU_REF:-none}</code>
 🔗 <a href=\"$RUN_URL\">CI log</a>")"
 
-printf 'device=%s\n' "$DEVICE" > "$ARTIFACTS/build-info.txt"
-printf 'arch=%s\n' "$DETECTED_ARCH" >> "$ARTIFACTS/build-info.txt"
-printf 'kernel_version=%s\n' "$DETECTED_KERNEL_VERSION" >> "$ARTIFACTS/build-info.txt"
-printf 'ref_type=%s\n' "$KERNEL_REF_TYPE" >> "$ARTIFACTS/build-info.txt"
-printf 'ref=%s\n' "$KERNEL_BRANCH" >> "$ARTIFACTS/build-info.txt"
-printf 'commit=%s\n' "$COMMIT" >> "$ARTIFACTS/build-info.txt"
-printf 'commit_sha=%s\n' "$COMMIT_SHA" >> "$ARTIFACTS/build-info.txt"
-printf 'defconfig=%s\n' "$DETECTED_DEFCONFIG" >> "$ARTIFACTS/build-info.txt"
-printf 'fragment=%s\n' "${DETECTED_FRAGMENT:-}" >> "$ARTIFACTS/build-info.txt"
-printf 'toolchain=%s\n' "$RESOLVED_TOOLCHAIN" >> "$ARTIFACTS/build-info.txt"
-printf 'toolchain_version=%s\n' "$RESOLVED_TOOLCHAIN_VERSION" >> "$ARTIFACTS/build-info.txt"
-printf 'llvm=%s\n' "$LLVM_VALUE" >> "$ARTIFACTS/build-info.txt"
-printf 'llvm_ias=%s\n' "$LLVM_IAS_VALUE" >> "$ARTIFACTS/build-info.txt"
-printf 'clang_triple=%s\n' "$CLANG_TRIPLE" >> "$ARTIFACTS/build-info.txt"
-printf 'cross_compile=%s\n' "$CROSS_DEFAULT" >> "$ARTIFACTS/build-info.txt"
-printf 'cross_compile_arm32=%s\n' "$CROSS_COMPILE_ARM32" >> "$ARTIFACTS/build-info.txt"
-printf 'scheduler_profile=%s\n' "$SCHEDULER_PROFILE" >> "$ARTIFACTS/build-info.txt"
-printf 'patch_profile=%s\n' "$PATCH_PROFILE" >> "$ARTIFACTS/build-info.txt"
-printf 'upstream_profile=%s\n' "$UPSTREAM_PROFILE" >> "$ARTIFACTS/build-info.txt"
-printf 'lto_plus=%s\n' "$LTO_PLUS" >> "$ARTIFACTS/build-info.txt"
-printf 'kernel_name=%s\n' "$KERNEL_NAME" >> "$ARTIFACTS/build-info.txt"
-printf 'build_user=%s\n' "$KBUILD_BUILD_USER" >> "$ARTIFACTS/build-info.txt"
-printf 'build_host=%s\n' "$KBUILD_BUILD_HOST" >> "$ARTIFACTS/build-info.txt"
-printf 'ksu_required=%s\n' "$KSU_REQUIRED" >> "$ARTIFACTS/build-info.txt"
-printf 'ksu_susfs_required=%s\n' "$KSU_SUSFS_REQUIRED" >> "$ARTIFACTS/build-info.txt"
-printf 'ksu_provider=%s\n' "$KSU_PROVIDER" >> "$ARTIFACTS/build-info.txt"
-printf 'ksu_repo=%s\n' "${KSU_REPO:-}" >> "$ARTIFACTS/build-info.txt"
-printf 'ksu_ref=%s\n' "${KSU_REF:-}" >> "$ARTIFACTS/build-info.txt"
-printf 'ksu_version=%s\n' "${KSU_PROVIDER_VERSION:-none}" >> "$ARTIFACTS/build-info.txt"
-printf 'ksu_commit=%s\n' "${KSU_PROVIDER_COMMIT:-none}" >> "$ARTIFACTS/build-info.txt"
-printf 'ksu_layout=%s\n' "$KSU_LAYOUT_RESOLVED" >> "$ARTIFACTS/build-info.txt"
-printf 'ksu_hook_mode=%s\n' "$KSU_HOOK_MODE" >> "$ARTIFACTS/build-info.txt"
-printf 'susfs_enabled=%s\n' "$ENABLE_SUSFS" >> "$ARTIFACTS/build-info.txt"
-printf 'susfs_source=%s\n' "$SUSFS_SOURCE" >> "$ARTIFACTS/build-info.txt"
-printf 'susfs_ref=%s\n' "$SUSFS_REF" >> "$ARTIFACTS/build-info.txt"
-printf 'susfs_commit=%s\n' "$SUSFS_COMMIT" >> "$ARTIFACTS/build-info.txt"
-printf 'susfs_version=%s\n' "$SUSFS_VERSION" >> "$ARTIFACTS/build-info.txt"
+for kv in \
+  "device=$DEVICE" "arch=$DETECTED_ARCH" "kernel_version=$KMM" "kernel_full_version=$DETECTED_KERNEL_FULL_VERSION" \
+  "kernel_repo=$KERNEL_REPO" "ref_type=$KERNEL_REF_TYPE" "ref=$KERNEL_BRANCH" "commit=$COMMIT" "commit_sha=$COMMIT_SHA" \
+  "ci_build_sha=$CI_BUILD_SHA" "build_profile=${BUILD_PROFILE:-$PROFILE_ID}" "kernel_family=$KERNEL_FAMILY" \
+  "dynamic_partition=$DYNAMIC_PARTITION" "gki=$GKI" "source_label=$SOURCE_LABEL" \
+  "defconfig=$DETECTED_DEFCONFIG" "fragment=${DETECTED_FRAGMENT:-}" \
+  "toolchain=$RESOLVED_TOOLCHAIN" "toolchain_version=$RESOLVED_TOOLCHAIN_VERSION" "compiler=$RESOLVED_COMPILER_STRING" \
+  "llvm=$LLVM_VALUE" "llvm_ias=$LLVM_IAS_VALUE" "clang_triple=$CLANG_TRIPLE" "cross_compile=$CROSS_DEFAULT" \
+  "cross_compile_arm32=$CROSS_COMPILE_ARM32" "ccache=${CCACHE_PREFIX:+true}" \
+  "scheduler_profile=$SCHEDULER_PROFILE" "patch_profile=$PATCH_PROFILE" "upstream_profile=$UPSTREAM_PROFILE" \
+  "lto_plus=$LTO_PLUS" "kernel_name=$KERNEL_NAME" "build_user=$KBUILD_BUILD_USER" "build_host=$KBUILD_BUILD_HOST" \
+  "root_variant=$ROOT_VARIANT" "ksu_preintegrated=$KSU_PREINTEGRATED" "ksu_provider=$KSU_PROVIDER" \
+  "ksu_repo=${KSU_REPO:-}" "ksu_ref=${KSU_REF:-}" "ksu_version=${KSU_PROVIDER_VERSION:-none}" \
+  "ksu_commit=${KSU_PROVIDER_COMMIT:-none}" "ksu_layout=${KSU_LAYOUT_RESOLVED:-none}" "ksu_hook_mode=$KSU_HOOK_MODE" \
+  "susfs_enabled=$ENABLE_SUSFS" "susfs_source=$SUSFS_SOURCE" "susfs_ref=$SUSFS_REF" \
+  "susfs_commit=$SUSFS_COMMIT" "susfs_version=$SUSFS_VERSION"; do
+  info "${kv%%=*}" "${kv#*=}"
+done
 
 echo "Kernel commit: $COMMIT" | tee -a "$BUILD_LOG"
 echo "Make command: ${MAKE_CMD[*]}" | tee -a "$BUILD_LOG"
@@ -617,7 +382,6 @@ echo "Make command: ${MAKE_CMD[*]}" | tee -a "$BUILD_LOG"
 # ------------------------------------------------------------
 # Configure
 # ------------------------------------------------------------
-
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
@@ -627,166 +391,72 @@ progress_update 30 "defconfig" "$DETECTED_DEFCONFIG"
 
 if [[ -n "$SELECTED_FRAGMENT" ]]; then
   if [[ -x "$SRC_DIR/scripts/kconfig/merge_config.sh" ]]; then
-    # IMPORTANT: use merge_config.sh only as a merge operation. The tree
-    # carries a vendor Kconfig that re-detects compiler capabilities, so the
-    # helper's internal bare `make alldefconfig` can accidentally resolve the
-    # config against host GCC even though the real build uses LLVM/Clang.
-    run_live "config-fragment-merge" \
-      "$SRC_DIR/scripts/kconfig/merge_config.sh" \
-      -m \
-      -O "$OUT" \
-      "$OUT/.config" \
-      "$SELECTED_FRAGMENT" || fail "config fragment merge"
-
-    # Resolve dependencies/defaults with the exact same make/toolchain
-    # command that will be used for the kernel build. This also prevents
-    # interactive Kconfig prompts from leaking into CI.
-    run_live "config-fragment-olddefconfig" "${MAKE_CMD[@]}" olddefconfig || fail "config fragment olddefconfig"
-progress_update 35 "config" "fragment resolved"
+    # merge only (-m); dependencies are resolved by olddefconfig with the real toolchain.
+    run_live "config-fragment-merge" "$SRC_DIR/scripts/kconfig/merge_config.sh" -m -O "$OUT" \
+      "$OUT/.config" "$SELECTED_FRAGMENT" || fail "config fragment merge"
   else
     cat "$SELECTED_FRAGMENT" >> "$OUT/.config"
-    run_live "fragment-olddefconfig" "${MAKE_CMD[@]}" olddefconfig || fail "fragment olddefconfig"
   fi
-elif [[ "$CONFIG_FRAGMENT" != none && "$CONFIG_FRAGMENT" != auto && -z "$SELECTED_FRAGMENT" ]]; then
+  run_live "config-fragment-olddefconfig" "${MAKE_CMD[@]}" olddefconfig || fail "config fragment olddefconfig"
+  progress_update 35 "config" "fragment resolved"
+elif [[ "$CONFIG_FRAGMENT" != none && "$CONFIG_FRAGMENT" != auto ]]; then
   fail "config fragment not resolved"
 fi
 
-# ------------------------------------------------------------
-# Optional config-side feature patches.
-# ------------------------------------------------------------
+run_helper apply_patch_series.sh "${PATCH_ENV[@]}" PHASE=config KERNEL_OUT="$OUT" || fail "config patch profile"
+run_live "config-resolve" "${MAKE_CMD[@]}" olddefconfig || fail "olddefconfig after config patches"
 
-if ! SOURCE_DIR="$SRC_DIR" \
-     DEVICE="$DEVICE" \
-     KERNEL_VERSION="$DETECTED_KERNEL_VERSION" \
-     PATCH_PROFILE="$PATCH_PROFILE" \
-     UPSTREAM_PROFILE="$UPSTREAM_PROFILE" \
-     ROOT_MANAGER="$ROOT_MANAGER" \
-     KSU_REQUIRED="$KSU_REQUIRED" \
-     KSU_SUSFS_REQUIRED="$KSU_SUSFS_REQUIRED" \
-     PHASE="config" \
-     KERNEL_OUT="$OUT" \
-     LTO_PLUS="$LTO_PLUS" \
-     "$SCRIPT_DIR/apply_patch_series.sh" 2>&1 | tee -a "$BUILD_LOG"; then
-  fail "config patch profile"
+# The selected provider/SUSFS symbols must survive config resolution.
+if [[ "$KSU_REQUIRED" == true ]]; then
+  grep -qE '^CONFIG_KSU=(y|m)' "$OUT/.config" || fail "CONFIG_KSU is not enabled after config resolution"
+else
+  ! grep -qE '^CONFIG_KSU=(y|m)' "$OUT/.config" || fail "vanilla variant still has CONFIG_KSU enabled"
 fi
-
-# Verify the selected provider/SUSFS symbols survived olddefconfig and the
-# source patch phase before entering the expensive compilation stage.
-if [[ "$KSU_REQUIRED" == "true" ]]; then
-  grep -qE '^CONFIG_KSU=(y|m)' "$OUT/.config" ||
-    fail "CONFIG_KSU is not enabled after config resolution"
-fi
-
-if [[ "$ENABLE_SUSFS" == "true" ]]; then
-  grep -qE '^CONFIG_KSU_SUSFS=y' "$OUT/.config" ||
-    fail "CONFIG_KSU_SUSFS is not enabled after config resolution"
+if [[ "$ENABLE_SUSFS" == true ]]; then
+  grep -qE '^CONFIG_KSU_SUSFS=(y|m)' "$OUT/.config" || fail "CONFIG_KSU_SUSFS is not enabled after config resolution"
 fi
 
 ci_phase "kernel-name"
-# Kernel name is intentionally independent from source patches.
-if ! CONFIG_FILE="$OUT/.config" \
-     KERNEL_NAME="$KERNEL_NAME"     KBUILD_BUILD_USER="$KBUILD_BUILD_USER"     KBUILD_BUILD_HOST="$KBUILD_BUILD_HOST"     BANNER_ROOT="$SCRIPT_DIR/../anykernel" \
-     "$SCRIPT_DIR/set_kernel_name.sh" 2>&1 | tee -a "$BUILD_LOG"; then
-  fail "kernel name"
-fi
+run_helper set_kernel_name.sh CONFIG_FILE="$OUT/.config" KERNEL_NAME="$KERNEL_NAME" || fail "kernel name"
+run_helper sync_localversion_files.sh KERNEL_SRC="$SRC_DIR" || fail "localversion sync"
 progress_update 41 "identity" "kernel name synchronized"
 
-# Mirror the source repository's localversion-cip/localversion-st mechanism.
-# Kbuild reads localversion* from the kernel source tree, not from the CI repo.
-if [[ ! -f "$SCRIPT_DIR/sync_localversion_files.sh" ]]; then
-  fail "localversion sync helper missing"
-fi
-
-# Harness may materialize this helper without its executable bit. Run it
-# explicitly through bash so the localversion stage is independent of archive
-# permission preservation.
-if ! bash "$SCRIPT_DIR/sync_localversion_files.sh" "$SRC_DIR" 2>&1 | tee -a "$BUILD_LOG"; then
-  fail "localversion sync"
-fi
-
-# ------------------------------------------------------------
-# Verify required KernelSU/SUSFS symbols AFTER config merge.
-# ------------------------------------------------------------
-
-if [[ "$KSU_REQUIRED" == true ]]; then
-  if ! grep -qE '^CONFIG_KSU=(y|m)' "$OUT/.config" 2>/dev/null; then
-    echo "ERROR: kernel source indicates KernelSU is required but final .config has CONFIG_KSU disabled." >&2
-    fail "KernelSU config disabled"
-  fi
-fi
-
-if [[ "$KSU_SUSFS_REQUIRED" == true ]]; then
-  if ! grep -qE '^CONFIG_KSU_SUSFS=(y|m)' "$OUT/.config" 2>/dev/null; then
-    echo "ERROR: kernel config requires SUSFS but final .config has CONFIG_KSU_SUSFS disabled." >&2
-    fail "SUSFS config disabled"
-  fi
-fi
-
-# ------------------------------------------------------------
-# Scheduler evidence (never modifies source config)
-# ------------------------------------------------------------
-
+# Scheduler evidence (reporting only; the source/defconfig stays authoritative).
 SCHEDULER_DETECTED="none"
-
-if grep -qE '^CONFIG_SCHED_HMP=y' "$OUT/.config" 2>/dev/null; then
+if grep -qE '^CONFIG_SCHED_HMP=y' "$OUT/.config"; then
   SCHEDULER_DETECTED="HMP"
+elif grep -qE '^CONFIG_SCHED_WALT=y' "$OUT/.config" && ! kernel_ge "$KMM" 4 14; then
+  SCHEDULER_DETECTED="EAS"
+elif grep -qE '^CONFIG_ENERGY_MODEL=y|^CONFIG_SCHED_TUNE=y|^CONFIG_SCHED_WALT=y|^CONFIG_UCLAMP_TASK=y' "$OUT/.config"; then
+  SCHEDULER_DETECTED="EAS"
 fi
-
-if grep -qE '^CONFIG_ENERGY_MODEL=y|^CONFIG_SCHED_TUNE=y' "$OUT/.config" 2>/dev/null; then
-  [[ "$SCHEDULER_DETECTED" == none ]] && SCHEDULER_DETECTED="EAS-capable"
-fi
-
-if grep -qE '^CONFIG_SCHED_WALT=y' "$OUT/.config" 2>/dev/null; then
-  [[ "$SCHEDULER_DETECTED" == none ]] && SCHEDULER_DETECTED="WALT"
-fi
-
-if [[ "$SCHEDULER_PROFILE" != auto && "$SCHEDULER_PROFILE" != none ]]; then
-  echo "Requested scheduler profile: $SCHEDULER_PROFILE" >> "$BUILD_LOG"
-fi
-
-echo "Detected scheduler evidence: $SCHEDULER_DETECTED" >> "$ARTIFACTS/build-info.txt"
-
-ci_phase "compile"
-progress_update 44 "compile" "preparing compile plan"
-tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
-📱 $DEVICE | 🏗 $DETECTED_ARCH
-⚙️ <code>$DETECTED_DEFCONFIG</code>
-🛠 <code>$RESOLVED_TOOLCHAIN $RESOLVED_TOOLCHAIN_VERSION</code>
-🧩 <code>${DETECTED_FRAGMENT:-no fragment}</code>
-📊 Scheduler: <code>$SCHEDULER_DETECTED</code>
-🔐 KSU: <code>$KSU_REQUIRED</code>
-🧵 Jobs: <code>$JOBS</code>"
+info scheduler "$SCHEDULER_DETECTED"
 
 # ------------------------------------------------------------
 # Compile
 # ------------------------------------------------------------
+ci_phase "compile"
+progress_update 44 "compile" "starting"
+tg_edit "$MID" "🔨 <b>Compiling kernel…</b>
+📱 $DEVICE | 🔐 $VARIANT_LABEL | 🏗 $DETECTED_ARCH
+⚙️ <code>$DETECTED_DEFCONFIG</code>
+🛠 <code>$RESOLVED_TOOLCHAIN $RESOLVED_TOOLCHAIN_VERSION</code>
+📊 Scheduler: <code>$SCHEDULER_DETECTED</code>
+🧵 Jobs: <code>$JOBS</code>"
 
-# Never run an unrestricted `make -n` before the real build.
-# On large Android 4.19 trees this can spend minutes expanding the full
-# command graph before the compiler gets a chance to start. Use a lightweight
-# source-file estimate for the progress denominator and derive actual progress
-# from observed Kbuild CC/AS actions.
-COMPILE_PLAN="$WORK/compile-plan.log"
-COMPILE_TOTAL="$(git -C "$SRC_DIR" ls-files -z -- '*.c' '*.S' '*.s' 2>/dev/null | tr -cd '\0' | wc -c | tr -d ' ')"
-[[ "$COMPILE_TOTAL" =~ ^[0-9]+$ ]] || COMPILE_TOTAL=0
-printf 'compile_plan_mode=source-estimate\n' >> "$ARTIFACTS/build-info.txt"
-printf 'compile_plan_total=%s\n' "$COMPILE_TOTAL" >> "$ARTIFACTS/build-info.txt"
-printf '[CI-COMPILE] telemetry_total=source-estimate:%s\n' "$COMPILE_TOTAL" | tee -a "$BUILD_LOG"
-
+# Progress denominator: source-file estimate (never an unrestricted `make -n`).
+COMPILE_TOTAL="$(git -C "$SRC_DIR" ls-files -- '*.c' '*.S' '*.s' 2>/dev/null | wc -l | tr -d ' ')"
+info compile_plan_total "$COMPILE_TOTAL"
 rm -f "$WORK/.stop-compile-telemetry"
-"$COMPILE_PROGRESS_SCRIPT" "$BUILD_LOG" "$COMPILE_TOTAL" "$WORK" "$PROGRESS_SCRIPT" &
+bash "$SCRIPT_DIR/compile_progress.sh" "$BUILD_LOG" "$COMPILE_TOTAL" "$WORK" "$PROGRESS_SCRIPT" &
 COMPILE_TELEMETRY_PID=$!
 
-set +e
-if [[ -n "$KERNEL_TARGET" ]]; then
-  run_live "compile" "${MAKE_CMD[@]}" "$KERNEL_TARGET"
-  COMPILE_RC=$?
+# `if` keeps the ERR trap from firing so the telemetry cleanup below always runs.
+if run_live "compile" "${MAKE_CMD[@]}" ${KERNEL_TARGET:+"$KERNEL_TARGET"}; then
+  COMPILE_RC=0
 else
-  run_live "compile" "${MAKE_CMD[@]}"
   COMPILE_RC=$?
 fi
-set -e
-
 touch "$WORK/.stop-compile-telemetry"
 kill "$COMPILE_TELEMETRY_PID" 2>/dev/null || true
 wait "$COMPILE_TELEMETRY_PID" 2>/dev/null || true
@@ -796,7 +466,75 @@ if (( COMPILE_RC != 0 )); then
   progress_update 45 "compile" "kernel compilation failed" failure
   fail "compile"
 fi
-
 progress_update 90 "compile" "kernel compilation complete"
 
+# ------------------------------------------------------------
+# Collect artifacts
+# ------------------------------------------------------------
+ci_phase "artifacts"
+BOOT_DIR="$OUT/arch/$DETECTED_ARCH/boot"
+found_image=false
+for img in Image.gz-dtb Image-dtb Image.gz Image.lz4 Image zImage-dtb zImage dtbo.img dtb.img; do
+  if [[ -f "$BOOT_DIR/$img" ]]; then
+    cp -f "$BOOT_DIR/$img" "$ARTIFACTS/$img"
+    [[ "$img" == dtb* ]] || found_image=true
+  fi
+done
+[[ "$found_image" == true ]] || fail "no kernel image produced in $BOOT_DIR"
+# Separate DTB for trees that do not append it to the image.
+if [[ ! -f "$ARTIFACTS/Image.gz-dtb" && ! -f "$ARTIFACTS/Image-dtb" && -d "$BOOT_DIR/dts" ]]; then
+  mapfile -t DTBS < <(find "$BOOT_DIR/dts" -name "*${DEVICE}*.dtb" | sort)
+  ((${#DTBS[@]})) && cat "${DTBS[@]}" > "$ARTIFACTS/dtb"
+fi
+cp -f "$OUT/.config" "$ARTIFACTS/kernel.config"
+[[ -f "$OUT/System.map" ]] && cp -f "$OUT/System.map" "$ARTIFACTS/System.map"
 
+KERNEL_RELEASE="$(cat "$OUT/include/config/kernel.release" 2>/dev/null || true)"
+info kernel_release "$KERNEL_RELEASE"
+info duration_seconds "$(( $(date +%s) - START ))"
+
+# Per-variant changelog is part of every build artifact.
+CHANGELOG="$ARTIFACTS/changelog.md"
+BUILD_INFO="$INFO" SOURCE_DIR="$SRC_DIR" VARIANT="$ROOT_VARIANT" OUT_FILE="$CHANGELOG" \
+  bash "$SCRIPT_DIR/generate_changelog.sh" single
+
+ARCHIVE_NAME="Kernel-$DEVICE-$KMM-$ROOT_VARIANT-$(date -u +%Y%m%d).tar.gz"
+ARCHIVE_TMP="$WORK/$ARCHIVE_NAME"
+ARCHIVE="$ARTIFACTS/$ARCHIVE_NAME"
+rm -f "$ARCHIVE_TMP" "$ARCHIVE"
+tar -czf "$ARCHIVE_TMP" -C "$ARTIFACTS" .
+cp -f "$ARCHIVE_TMP" "$ARCHIVE"
+rm -f "$ARCHIVE_TMP"
+progress_update 94 "artifacts" "collected"
+
+# ------------------------------------------------------------
+# AnyKernel3 package
+# ------------------------------------------------------------
+ANYKERNEL_ZIP=""
+if is_true "$PACKAGE_ANYKERNEL"; then
+  ci_phase "anykernel"
+  AK_ENV="$WORK/anykernel.env"
+  WORK_DIR="$WORK" ARTIFACT_DIR="$ARTIFACTS" OUTPUT_DIR="$ARTIFACTS" DEVICE="$DEVICE" KERNEL_VERSION="$KMM" \
+  ANYKERNEL_PROFILE="$ANYKERNEL_PROFILE" ROOT_VARIANT="$ROOT_VARIANT" KERNEL_NAME="$KERNEL_NAME" \
+  KERNEL_RELEASE="$KERNEL_RELEASE" SCHEDULER="$SCHEDULER_DETECTED" TOOLCHAIN="$RESOLVED_COMPILER_STRING" \
+  SOURCE="$(basename "$KERNEL_REPO" .git)" ANYKERNEL3_REPO="$ANYKERNEL3_REPO" ANYKERNEL3_REF="$ANYKERNEL3_REF" \
+    bash "$SCRIPT_DIR/build_anykernel.sh" > "$AK_ENV" 2> >(tee -a "$BUILD_LOG" >&2) || fail "AnyKernel3 packaging"
+  source "$AK_ENV"
+  info anykernel_profile "$ANYKERNEL_PROFILE"
+  info anykernel_zip "$(basename "$ANYKERNEL_ZIP")"
+  info anykernel_sha256 "$ANYKERNEL_SHA256"
+fi
+
+DURATION=$(( $(date +%s) - START ))
+progress_update 100 "done" "$VARIANT_LABEL ready" success
+tg_edit "$MID" "✅ <b>Kernel build selesai</b>
+📱 $DEVICE | 🔐 $VARIANT_LABEL
+🐧 <code>${KERNEL_RELEASE:-$KMM}</code> | 📊 $SCHEDULER_DETECTED
+📦 <code>$(basename "${ANYKERNEL_ZIP:-$ARCHIVE}")</code>
+⏱ $(fmt_dur "$DURATION")
+🔗 <a href=\"$RUN_URL\">CI log</a>"
+if is_true "${TG_SEND_ARTIFACTS:-false}" && [[ -n "$ANYKERNEL_ZIP" ]]; then
+  tg_file "$ANYKERNEL_ZIP" "📦 <code>$(basename "$ANYKERNEL_ZIP")</code>"
+fi
+
+echo "[build] OK $VARIANT_LABEL kernel=${KERNEL_RELEASE:-$KMM} zip=${ANYKERNEL_ZIP:-none} ($(fmt_dur "$DURATION"))" | tee -a "$BUILD_LOG"

@@ -1,182 +1,106 @@
 #!/usr/bin/env bash
+# Package one flashable AnyKernel3 ZIP from build artifacts.
+#
+# Inputs (environment):
+#   ARTIFACT_DIR       directory with the kernel image(s) and build-info.txt
+#   DEVICE KERNEL_VERSION ANYKERNEL_PROFILE ROOT_VARIANT
+#   KERNEL_NAME KERNEL_RELEASE SCHEDULER TOOLCHAIN KBUILD_BUILD_USER KBUILD_BUILD_HOST SOURCE
+#   ANYKERNEL3_REPO    "local" (default, ./anykernel) or a git URL of a Zairenkai-layout AnyKernel3 fork
+#   ANYKERNEL3_REF     branch/tag/commit when ANYKERNEL3_REPO is a URL
+#
+# stdout: ANYKERNEL_ZIP / ANYKERNEL_PROFILE / ANYKERNEL_SHA256 / ANYKERNEL3_COMMIT assignments.
 set -Eeuo pipefail
-
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-SELECTOR="$SCRIPT_DIR/select_anykernel_profile.sh"
-BANNER_RENDERER="$SCRIPT_DIR/render_banner.sh"
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib/common.sh"
+CI_LOG_TAG=anykernel
 
 WORK_DIR="${WORK_DIR:-$PWD/work}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-$WORK_DIR/artifacts}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ARTIFACT_DIR}"
 DEVICE="${DEVICE:-generic}"
 KERNEL_VERSION="${KERNEL_VERSION:-}"
-ROM_FAMILY="${ROM_FAMILY:-oss}"
-KERNEL_NAME="${KERNEL_NAME:-Zairenkai}"
-KERNEL_CODENAME_FILE="${KERNEL_CODENAME_FILE:-$ROOT_DIR/kernel-codename}"
-KERNEL_BUILD_FILE="${KERNEL_BUILD_FILE:-$ROOT_DIR/kernel-build}"
-ANYKERNEL_PROFILE_REQUESTED="${ANYKERNEL_PROFILE:-auto}"
-ANYKERNEL3_REPO="${ANYKERNEL3_REPO:-https://github.com/osm0sis/AnyKernel3.git}"
-ANYKERNEL3_REF_REQUESTED="${ANYKERNEL3_REF:-}"
-KERNEL_IMAGE="${KERNEL_IMAGE:-}"
-DTBO_IMAGE="${DTBO_IMAGE:-$ARTIFACT_DIR/dtbo.img}"
-MODULES_ARCHIVE="${MODULES_ARCHIVE:-$ARTIFACT_DIR/modules.tar.gz}"
-VERSION_TEXT="${VERSION_TEXT:-}"
+VARIANT="$(normalize_variant "${ROOT_VARIANT:-vanilla}")" || ci_die "invalid ROOT_VARIANT=${ROOT_VARIANT:-}"
+ANYKERNEL3_REPO="${ANYKERNEL3_REPO:-local}"
+ANYKERNEL3_REF="${ANYKERNEL3_REF:-master}"
 
-log() { printf '[anykernel] %s\n' "$*"; }
-die() { printf '[anykernel] ERROR: %s\n' "$*" >&2; exit 1; }
+[[ -d "$ARTIFACT_DIR" ]] || ci_die "artifact directory not found: $ARTIFACT_DIR"
 
-[[ -x "$SELECTOR" ]] || die "missing selector: $SELECTOR"
-[[ -d "$ARTIFACT_DIR" ]] || die "artifact directory not found: $ARTIFACT_DIR"
-
-export PROFILE_DIR="$ROOT_DIR/anykernel/profiles"
-PROFILE_FILE="$(DEVICE="$DEVICE" KERNEL_VERSION="$KERNEL_VERSION" ROM_FAMILY="$ROM_FAMILY" ANYKERNEL_PROFILE="$ANYKERNEL_PROFILE_REQUESTED" "$SELECTOR")"
+PROFILE_FILE="$(DEVICE="$DEVICE" KERNEL_VERSION="$KERNEL_VERSION" ANYKERNEL_PROFILE="${ANYKERNEL_PROFILE:-auto}" \
+  "$CI_ROOT/scripts/select_anykernel_profile.sh")"
 # shellcheck source=/dev/null
 source "$PROFILE_FILE"
+: "${PROFILE_ID:?PROFILE_ID missing in $PROFILE_FILE}"
+: "${KERNEL_IMAGES:?KERNEL_IMAGES missing in $PROFILE_FILE}"
 
-: "${PROFILE_ID:?PROFILE_ID missing}"
-: "${DEVICE_NAMES:?DEVICE_NAMES missing}"
-: "${BLOCK:?BLOCK missing}"
-: "${IS_SLOT_DEVICE:?IS_SLOT_DEVICE missing}"
-: "${RAMDISK_COMPRESSION:?RAMDISK_COMPRESSION missing}"
-: "${PATCH_VBMETA_FLAG:?PATCH_VBMETA_FLAG missing}"
-
-REF="${ANYKERNEL3_REF_REQUESTED:-${ANYKERNEL3_REF:-master}}"
-AK_WORK="$WORK_DIR/anykernel-$PROFILE_ID"
+AK_WORK="$WORK_DIR/anykernel-$PROFILE_ID-$VARIANT"
 rm -rf "$AK_WORK"
-mkdir -p "$AK_WORK" "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR"
 
-log "profile=$PROFILE_ID"
-log "device=$DEVICE"
-log "kernel=$KERNEL_VERSION"
-log "rom=$ROM_FAMILY"
-log "AnyKernel3=$REF"
-
-if ! git clone --depth=1 --filter=blob:none "$ANYKERNEL3_REPO" "$AK_WORK" >/dev/null 2>&1; then
-  die "unable to clone $ANYKERNEL3_REPO"
-fi
-if ! git -C "$AK_WORK" checkout --quiet "$REF" >/dev/null 2>&1; then
-  git -C "$AK_WORK" fetch --depth=1 origin "$REF" >/dev/null 2>&1 || die "unable to fetch AnyKernel3 ref $REF"
-  git -C "$AK_WORK" checkout --quiet "$REF" || die "unable to checkout AnyKernel3 ref $REF"
-fi
-UPSTREAM_COMMIT="$(git -C "$AK_WORK" rev-parse HEAD)"
-KERNEL_CODENAME="$(sed -n '1p' "$KERNEL_CODENAME_FILE" 2>/dev/null | tr -d '\r' || true)"
-KERNEL_BUILD="$(sed -n '1p' "$KERNEL_BUILD_FILE" 2>/dev/null | tr -d '\r' || true)"
-[[ -n "$KERNEL_CODENAME" ]] || KERNEL_CODENAME="VEGA"
-[[ -n "$KERNEL_BUILD" ]] || KERNEL_BUILD="1"
-BUILD_LABEL="${KERNEL_NAME}-${KERNEL_CODENAME}${KERNEL_BUILD}"
-
-if [[ -z "$KERNEL_IMAGE" ]]; then
-  for candidate in \
-    "$ARTIFACT_DIR/Image" \
-    "$ARTIFACT_DIR/Image.gz" \
-    "$ARTIFACT_DIR/Image.lz4" \
-    "$ARTIFACT_DIR/Image.gz-dtb" \
-    "$ARTIFACT_DIR/Image-dtb" \
-    "$ARTIFACT_DIR/zImage"; do
-    if [[ -f "$candidate" ]]; then
-      KERNEL_IMAGE="$candidate"
-      break
+case "$ANYKERNEL3_REPO" in
+  local|vendored|"")
+    cp -a "$CI_ROOT/anykernel" "$AK_WORK"
+    AK_COMMIT="$(git -C "$CI_ROOT" rev-parse --short HEAD 2>/dev/null || echo local)"
+    ;;
+  *)
+    git_fetch_ref "$ANYKERNEL3_REPO" "$ANYKERNEL3_REF" "$AK_WORK" || ci_die "unable to fetch $ANYKERNEL3_REPO@$ANYKERNEL3_REF"
+    AK_COMMIT="$(git -C "$AK_WORK" rev-parse --short HEAD)"
+    rm -rf "$AK_WORK/.git"
+    # Upstream osm0sis/AnyKernel3 has no Zairenkai templates: overlay them.
+    if [[ ! -x "$AK_WORK/ci-patch.sh" ]]; then
+      cp -a "$CI_ROOT/anykernel/"{anykernel.sh,banner,ci-patch.sh,version.conf,profiles} "$AK_WORK/"
     fi
-  done
-fi
-[[ -f "$KERNEL_IMAGE" ]] || die "kernel image not found"
+    ;;
+esac
 
-# Remove upstream sample payloads; keep the official AnyKernel3 backend and installer.
-rm -f "$AK_WORK/Image" "$AK_WORK/Image.gz" "$AK_WORK/Image.lz4" "$AK_WORK/Image.gz-dtb" "$AK_WORK/Image-dtb" "$AK_WORK/zImage" "$AK_WORK/dtbo.img" "$AK_WORK/version"
-rm -rf "$AK_WORK/.git"
-
-cp -f "$KERNEL_IMAGE" "$AK_WORK/$(basename "$KERNEL_IMAGE")"
-if [[ "${FLASH_DTBO:-0}" == "1" && -f "$DTBO_IMAGE" ]]; then
-  cp -f "$DTBO_IMAGE" "$AK_WORK/dtbo.img"
-fi
-if [[ "${DO_MODULES:-0}" == "1" && -f "$MODULES_ARCHIVE" ]]; then
-  mkdir -p "$AK_WORK/modules/system/lib/modules"
-  tar -xzf "$MODULES_ARCHIVE" -C "$AK_WORK/modules/system/lib/modules" || die "module extraction failed"
-fi
-
-# Render the CI-owned Zairenkai banner variant based on the resolved provider.
-BANNER_PROFILE="$PROFILE_ID" ROOT_PROVIDER="$ROOT_PROVIDER" BUILD_LABEL="$BUILD_LABEL" KERNEL_RELEASE="$KERNEL_RELEASE" TOOLCHAIN="$TOOLCHAIN" KBUILD_BUILD_USER="$KBUILD_BUILD_USER" KBUILD_BUILD_HOST="$KBUILD_BUILD_HOST" "$BANNER_RENDERER" "$AK_WORK/banner"
-
-if [[ -n "$VERSION_TEXT" ]]; then
-  printf '%s\n' "$VERSION_TEXT" > "$AK_WORK/version"
-elif [[ -f "$ARTIFACT_DIR/build-info.txt" ]]; then
-  cp -f "$ARTIFACT_DIR/build-info.txt" "$AK_WORK/version"
-else
-  cat > "$AK_WORK/version" <<EOF_VERSION
-profile=$PROFILE_ID
-device=$DEVICE
-kernel_version=${KERNEL_VERSION:-unknown}
-rom_family=$ROM_FAMILY
-anykernel3_commit=$UPSTREAM_COMMIT
-EOF_VERSION
-fi
-
-DEVICE_PROPS=""
-index=1
-for name in $DEVICE_NAMES; do
-  DEVICE_PROPS+="device.name${index}=${name}"$'\n'
-  index=$((index + 1))
-  [[ $index -gt 8 ]] && break
+# Drop sample payloads, then copy the first kernel image the profile accepts.
+for img in Image Image.gz Image.lz4 Image.gz-dtb Image-dtb zImage zImage-dtb dtb dtbo.img; do
+  rm -f "$AK_WORK/$img"
 done
+KERNEL_IMAGE=""
+for img in $KERNEL_IMAGES; do
+  if [[ -f "$ARTIFACT_DIR/$img" ]]; then
+    KERNEL_IMAGE="$img"
+    cp -f "$ARTIFACT_DIR/$img" "$AK_WORK/$img"
+    break
+  fi
+done
+[[ -n "$KERNEL_IMAGE" ]] || ci_die "no kernel image for $PROFILE_ID in $ARTIFACT_DIR (wanted: $KERNEL_IMAGES)"
+# Separate DTB (when the kernel image has none appended) and optional DTBO.
+if [[ "$KERNEL_IMAGE" != *-dtb && -f "$ARTIFACT_DIR/dtb" && "${GKI:-0}" != 1 ]]; then
+  cp -f "$ARTIFACT_DIR/dtb" "$AK_WORK/dtb"
+fi
+if [[ "${FLASH_DTBO:-0}" == 1 && -f "$ARTIFACT_DIR/dtbo.img" ]]; then
+  cp -f "$ARTIFACT_DIR/dtbo.img" "$AK_WORK/dtbo.img"
+fi
 
-cat > "$AK_WORK/anykernel.sh" <<EOF_AK
-#!/sbin/sh
+CODENAME="$(read_value_file "$CI_ROOT/kernel-codename")"
+BUILD_NUM="$(read_value_file "$CI_ROOT/kernel-build")"
+KERNEL_NAME="${KERNEL_NAME:-$(read_value_file "$CI_ROOT/kernel-name")}"
+KERNEL_NAME="${KERNEL_NAME#-}"
+KERNEL_NAME="${KERNEL_NAME:-Zairenkai}"
+CODENAME="${CODENAME:-VEGA}"
+BUILD_NUM="${BUILD_NUM:-1}"
+BUILD_LABEL="${KERNEL_NAME}-${CODENAME}${BUILD_NUM}"
 
-properties() { '
-kernel.string=$KERNEL_STRING
-do.devicecheck=$DO_DEVICECHECK
-do.modules=$DO_MODULES
-do.systemless=$DO_SYSTEMLESS
-do.cleanup=1
-do.cleanuponabort=0
-${DEVICE_PROPS}supported.versions=
-supported.patchlevels=
-supported.vendorpatchlevels=
-'; }
+KERNEL_NAME="$KERNEL_NAME" KERNEL_CODENAME="$CODENAME" KERNEL_BUILD="$BUILD_NUM" BUILD_LABEL="$BUILD_LABEL" \
+KERNEL_RELEASE="${KERNEL_RELEASE:-}" SCHEDULER="${SCHEDULER:-}" TOOLCHAIN="${TOOLCHAIN:-}" \
+BUILD_USER="${KBUILD_BUILD_USER:-}" BUILD_HOST="${KBUILD_BUILD_HOST:-}" SOURCE="${SOURCE:-}" \
+  bash "$AK_WORK/ci-patch.sh" --profile "$PROFILE_ID" --variant "$VARIANT" --dir "$AK_WORK" >&2
 
-BLOCK=$BLOCK;
-IS_SLOT_DEVICE=$IS_SLOT_DEVICE;
-RAMDISK_COMPRESSION=$RAMDISK_COMPRESSION;
-PATCH_VBMETA_FLAG=$PATCH_VBMETA_FLAG;
-NO_MAGISK_CHECK=${NO_MAGISK_CHECK:-0};
-FLASH_DTBO=${FLASH_DTBO:-0};
+[[ -f "$ARTIFACT_DIR/build-info.txt" ]] && cp -f "$ARTIFACT_DIR/build-info.txt" "$AK_WORK/version"
+rm -rf "$AK_WORK/ci-patch.sh" "$AK_WORK/build.sh" "$AK_WORK/version.conf" "$AK_WORK/README.md" \
+       "$AK_WORK/CI.md" "$AK_WORK/profiles" "$AK_WORK/images" "$AK_WORK/out"
 
-. tools/ak3-core.sh;
-
-ui_print " ";
-ui_print "CI-Build Custom AnyKernel3";
-ui_print "Profile : $PROFILE_ID";
-ui_print "Device  : $DEVICE";
-ui_print "Kernel  : ${KERNEL_VERSION:-unknown}";
-ui_print "Version : $BUILD_LABEL";
-ui_print "ROM     : $ROM_FAMILY";
-ui_print " ";
-
-split_boot;
-
-if [ -f dtbo.img ] && [ "$FLASH_DTBO" = 1 ]; then
-    ui_print "Flashing DTBO...";
-    flash_dtbo;
-fi;
-
-write_boot;
-
-ui_print " ";
-ui_print "Kernel installation completed.";
-EOF_AK
-chmod 755 "$AK_WORK/anykernel.sh"
-
-ZIP="$OUTPUT_DIR/${BUILD_LABEL}-${DEVICE}-AnyKernel3.zip"
+# Lavender 4.4 ships HMP and EAS builds; keep the scheduler in the file name.
+SCHED_TAG=""
+if [[ "$(wc -w <<< "${SCHEDULERS:-}")" -gt 1 && -n "${SCHEDULER:-}" && "${SCHEDULER}" != none ]]; then
+  SCHED_TAG="-${SCHEDULER}"
+fi
+ZIP="$OUTPUT_DIR/${BUILD_LABEL}-${DEVICE}-${KERNEL_FAMILY}${SCHED_TAG}-$(variant_label "$VARIANT")-$(date -u +%Y%m%d).zip"
 rm -f "$ZIP"
-(
-  cd "$AK_WORK"
-  zip -r9 "$ZIP" . -x '*.git/*' '*.git*' >/dev/null
-)
-unzip -t "$ZIP" >/dev/null
+(cd "$AK_WORK" && zip -r9 -q "$ZIP" . -x '*.git*')
+unzip -tq "$ZIP" >/dev/null
 SHA="$(sha256sum "$ZIP" | cut -d' ' -f1)"
 
-log "created=$(basename "$ZIP")"
-log "sha256=$SHA"
-log "AnyKernel3 commit=$UPSTREAM_COMMIT"
-printf 'ANYKERNEL_ZIP=%s\nANYKERNEL_PROFILE=%s\nANYKERNEL_SHA256=%s\nANYKERNEL3_COMMIT=%s\n' "$ZIP" "$PROFILE_ID" "$SHA" "$UPSTREAM_COMMIT"
+ci_log "created=$(basename "$ZIP") sha256=$SHA profile=$PROFILE_ID image=$KERNEL_IMAGE ak3=$AK_COMMIT"
+printf 'ANYKERNEL_ZIP=%q\nANYKERNEL_PROFILE=%q\nANYKERNEL_SHA256=%q\nANYKERNEL3_COMMIT=%q\n' \
+  "$ZIP" "$PROFILE_ID" "$SHA" "$AK_COMMIT"

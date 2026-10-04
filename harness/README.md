@@ -1,43 +1,43 @@
 # Harness CI
 
-This directory contains Harness Pipeline YAML files.
+The Harness kernel pipeline is the same build implementation used by GitHub Actions and local execution.
 
-## Pipelines
+## Kernel pipeline
 
-- `kernel-pipeline.yaml` — universal kernel build; runs on Harness Cloud.
-- `rom-pipeline.yaml` — Android ROM build; runs through a self-managed Harness Docker Runner.
-
-## Project settings used by the current CI Build project
-
-```yaml
-orgIdentifier: default
-projectIdentifier: ci_build
-connectorRef: github_connector
-```
-
-## Required Harness secrets
-
-Create these encrypted text secrets in the project:
-
-- `tg_bot_token`
-- `tg_chat_id`
-
-## Remote Pipeline setup
-
-For a Remote Pipeline, store the pipeline YAML in this directory and configure Harness to use:
+Use `harness/kernel-pipeline.yaml` as a Remote Pipeline. The important variables are:
 
 ```text
-Repository: FebriCahyaa/ci-build
-Path:
-  harness/kernel-pipeline.yaml
+BUILD_PROFILE   = lavender-4.4 | lavender-4.19 | garnet-gki
+ROOT_VARIANTS   = vanilla,kernelsu-next,resukisu | subset | all
+PUBLISH_RELEASE = false | true
 ```
 
-or:
+The remaining variables are optional build overrides and are intentionally aligned with the GitHub Actions bridge.
+
+The pipeline:
 
 ```text
-Repository: FebriCahyaa/ci-build
-Path:
-  harness/rom-pipeline.yaml
+ci-build checkout
+   -> dependency installation
+   -> target profile resolution
+   -> one kernel source seed
+   -> 3 root variants
+   -> AnyKernel3 + changelog
+   -> optional GitHub release
 ```
 
-The pipeline's own codebase is the `ci-build` repository. The kernel pipeline then clones the selected `KERNEL_REPO` and builds it according to the supplied parameters.
+## GitHub bridge
+
+`.github/workflows/harness-kernel.yml` triggers `Universal_Kernel_Build`, monitors the execution, and relays the release to Telegram when requested.
+
+Required Harness secret:
+
+```text
+github_token
+```
+
+Telegram credentials are only needed for Telegram notification/relay behavior.
+
+## ROM pipeline
+
+`harness/rom-pipeline.yaml` remains separate because AOSP/ROM builds require a self-managed runner with substantially more disk and memory than the universal kernel pipeline.

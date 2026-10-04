@@ -9,6 +9,9 @@ KSU_REPO="${KSU_REPO:-}"
 KSU_REF="${KSU_REF:-auto}"
 ENABLE_SUSFS="${ENABLE_SUSFS:-false}"
 KSU_HOOK_MODE="${KSU_HOOK_MODE:-auto}"
+KSU_NEXT_LEGACY_REF="${KSU_NEXT_LEGACY_REF:-v1.1.1}"
+KSU_NEXT_GKI_REF="${KSU_NEXT_GKI_REF:-v3.4.0}"
+RESUKISU_REF_DEFAULT="${RESUKISU_REF_DEFAULT:-v4.2.0-rc3}"
 
 fail() { echo "[root-manager] ERROR: $*" >&2; exit 1; }
 log() { echo "[root-manager] $*" >&2; }
@@ -46,7 +49,11 @@ case "$ROOT_MANAGER" in
     PROVIDER="kernelsu-next"
     PROVIDER_REPO="${KSU_REPO:-https://github.com/KernelSU-Next/KernelSU-Next}"
     if [[ "$KSU_REF" == "auto" || -z "$KSU_REF" ]]; then
-      PROVIDER_REF="v3.4.0"
+      if [[ "$KERNEL_MAJOR" -gt 5 || ( "$KERNEL_MAJOR" -eq 5 && "$KERNEL_MINOR" -ge 10 ) ]]; then
+        PROVIDER_REF="$KSU_NEXT_GKI_REF"
+      else
+        PROVIDER_REF="$KSU_NEXT_LEGACY_REF"
+      fi
     else
       PROVIDER_REF="$KSU_REF"
     fi
@@ -55,7 +62,7 @@ case "$ROOT_MANAGER" in
     PROVIDER="resukisu"
     PROVIDER_REPO="${KSU_REPO:-https://github.com/ReSukiSU/ReSukiSU}"
     if [[ "$KSU_REF" == "auto" || -z "$KSU_REF" ]]; then
-      PROVIDER_REF="main"
+      PROVIDER_REF="$RESUKISU_REF_DEFAULT"
     else
       PROVIDER_REF="$KSU_REF"
     fi

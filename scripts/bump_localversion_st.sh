@@ -2,7 +2,8 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/lib/common.sh"
+REPO_ROOT="$CI_ROOT"
 FILE="${LOCALVERSION_ST_FILE:-$REPO_ROOT/localversion-st}"
 CODENAME_FILE="${KERNEL_CODENAME_FILE:-$REPO_ROOT/kernel-codename}"
 BUILD_FILE="${KERNEL_BUILD_FILE:-$REPO_ROOT/kernel-build}"
@@ -34,16 +35,9 @@ while (($#)); do
   esac
 done
 
-current=""
-if [[ -f "$FILE" ]]; then
-  current="$(sed -e 's/\r$//' -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$FILE" | head -n1)"
-fi
-if [[ -z "$CODENAME" && -f "$CODENAME_FILE" ]]; then
-  CODENAME="$(sed -e 's/\r$//' -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$CODENAME_FILE" | head -n1)"
-fi
-if [[ -z "$BUILD" && -f "$BUILD_FILE" ]]; then
-  BUILD="$(sed -e 's/\r$//' -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$BUILD_FILE" | head -n1)"
-fi
+current="$(read_value_file "$FILE")"
+[[ -n "$CODENAME" ]] || CODENAME="$(read_value_file "$CODENAME_FILE")"
+[[ -n "$BUILD" ]] || BUILD="$(read_value_file "$BUILD_FILE")"
 
 if [[ "$BUMP" == true ]]; then
   [[ -n "$current" ]] || { echo "ERROR: cannot bump missing/empty $FILE" >&2; exit 1; }

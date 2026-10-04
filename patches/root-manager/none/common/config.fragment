@@ -1,0 +1,3 @@
+# Vanilla variant: keep a pre-integrated root provider compiled out.
+# CONFIG_KSU is not set
+# CONFIG_KSU_SUSFS is not set

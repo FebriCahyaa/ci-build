@@ -3,37 +3,37 @@ name: Build Kernel
 on:
   workflow_dispatch:
     inputs:
-      kernel_repo:
-        description: "Kernel repository URL"
-        required: true
-        type: string
-        default: "https://github.com/pix106/android_kernel_xiaomi_sdm660_southwest-ng"
-      kernel_branch:
-        description: "Kernel branch, tag, or ref"
-        required: true
-        type: string
-        default: "main"
-      device:
-        description: "Device/codename label"
-        required: true
-        type: string
-        default: "lavender"
-      arch:
-        description: "Architecture (auto, arm64, arm, x86, ...)"
+      build_profile:
+        description: "Canonical target profile"
         required: true
         type: choice
-        options: [auto, arm64, arm, x86, riscv]
-        default: auto
-      defconfig:
-        description: "Kernel defconfig target (auto = detect)"
+        options: [lavender-4.4, lavender-4.19, garnet-gki]
+        default: lavender-4.4
+      variants:
+        description: "Root variants: vanilla,kernelsu-next,resukisu or all"
         required: true
         type: string
-        default: "auto"
-      config_fragment:
-        description: "Config fragment (auto = detect device fragment, none = disable)"
-        required: true
+        default: vanilla,kernelsu-next,resukisu
+      kernel_repo_override:
+        description: "Optional kernel repository override"
+        required: false
         type: string
-        default: "auto"
+        default: ""
+      kernel_ref_override:
+        description: "Optional kernel branch/tag/commit override"
+        required: false
+        type: string
+        default: ""
+      defconfig_override:
+        description: "Optional defconfig override"
+        required: false
+        type: string
+        default: ""
+      config_fragment_override:
+        description: "Optional config fragment override; none disables"
+        required: false
+        type: string
+        default: ""
       jobs:
         description: "Parallel jobs; 0 = auto"
         required: true
@@ -46,21 +46,16 @@ on:
         options: [auto, aosp, proton, neutron, llvm, gcc, system]
         default: auto
       toolchain_version:
-        description: "Toolchain revision/tag (auto = source-compatible resolver)"
+        description: "Toolchain revision/tag"
         required: true
         type: string
-        default: "auto"
+        default: auto
       llvm_ias:
         description: "LLVM IAS mode"
         required: true
         type: choice
         options: [auto, "0", "1"]
         default: auto
-      cross_compile:
-        description: "CROSS_COMPILE prefix (auto = detected)"
-        required: false
-        type: string
-        default: "auto"
       clang_url:
         description: "Optional custom Clang archive URL"
         required: false
@@ -71,163 +66,201 @@ on:
         required: false
         type: string
         default: ""
-      apt_packages:
-        description: "Optional extra apt packages"
-        required: false
-        type: string
-        default: ""
       extra_make_args:
         description: "Optional extra make arguments"
         required: false
         type: string
         default: ""
-      enable_ksu:
-        description: "KernelSU provider"
-        required: true
-        type: choice
-        options: [false, true, kernelsu-next, resukisu]
-        default: false
-      ksu_ref:
-        description: "KernelSU provider branch/tag/commit"
-        required: false
-        type: string
-        default: "main"
       patch_profile:
-        description: "Modular source patch profile"
+        description: "Modular patch profile (auto/none/custom)"
         required: true
         type: string
-        default: "none"
+        default: auto
       upstream_profile:
-        description: "Upstream patch profile"
+        description: "Upstream patch profile (auto/none/custom)"
         required: true
         type: string
-        default: "none"
+        default: auto
       lto_plus:
         description: "Optional LTO+ feature profile"
         required: true
-        type: choice
-        options: [false, true]
-        default: false
-      kernel_name:
-        description: "Kernel display name (maps to localversion-cip)"
-        required: false
-        type: string
-        default: ""
-      package_anykernel:
-        description: "Package an AnyKernel3 ZIP"
-        required: true
         type: boolean
         default: false
+      ksu_ref:
+        description: "Root provider ref; auto selects profile-safe ref"
+        required: true
+        type: string
+        default: auto
+      package_anykernel:
+        description: "Package AnyKernel3 ZIPs"
+        required: true
+        type: boolean
+        default: true
       rom_family:
-        description: "ROM family for AnyKernel profile selection"
+        description: "ROM family metadata"
         required: true
         type: choice
         options: [auto, oss, hyperos, miui, custom-android, legacy]
         default: auto
       anykernel_profile:
-        description: "AnyKernel profile (auto = device/kernel/ROM detection)"
+        description: "AnyKernel profile; auto uses target registry"
         required: true
         type: string
-        default: "auto"
+        default: auto
       anykernel3_ref:
-        description: "AnyKernel3 branch, tag, or commit"
+        description: "AnyKernel3 ref when external repo is used"
         required: true
         type: string
-        default: "master"
+        default: master
+      kernel_name:
+        description: "Kernel display name"
+        required: false
+        type: string
+        default: ""
+      apt_packages:
+        description: "Optional extra apt packages"
+        required: false
+        type: string
+        default: ""
+      release:
+        description: "Create/update GitHub Release"
+        required: true
+        type: boolean
+        default: false
+      release_tag:
+        description: "Optional release tag; default is profile + run number"
+        required: false
+        type: string
+        default: ""
+
 permissions:
-  contents: read
+  contents: write
+
+env:
+  CI_BUILD_SHA: ${{ github.sha }}
+  GH_REPOSITORY: ${{ github.repository }}
 
 jobs:
   build:
+    name: ${{ inputs.build_profile }} / ${{ matrix.variant }}
+    if: inputs.variants == 'all' || contains(inputs.variants, matrix.variant)
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        variant: [vanilla, kernelsu-next, resukisu]
     steps:
       - name: Checkout CI repository
         uses: actions/checkout@v4
 
-      - name: Dependencies
+      - name: Install dependencies
+        env:
+          APT_PACKAGES: ${{ inputs.apt_packages }}
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            bc bison flex libssl-dev libelf-dev clang lld llvm \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-            build-essential cpio git curl python3 zip xz-utils zstd \
-            ca-certificates tar gzip ${{ inputs.apt_packages }}
+          bash scripts/install_deps.sh
+
+      - name: Validate profile contract
+        env:
+          BUILD_PROFILE: ${{ inputs.build_profile }}
+        run: |
+          set -euo pipefail
+          eval "$(BUILD_PROFILE="$BUILD_PROFILE" bash scripts/resolve_build_profile.sh)"
+          printf 'PROFILE_ID=%s\nPROFILE_DEVICE=%s\nPROFILE_KERNEL_FAMILY=%s\nPROFILE_KERNEL_REPO=%s\nPROFILE_DEFCONFIG=%s\nPROFILE_ANYKERNEL_PROFILE=%s\n' \
+            "$PROFILE_ID" "$PROFILE_DEVICE" "$PROFILE_KERNEL_FAMILY" "$PROFILE_KERNEL_REPO" "$PROFILE_DEFCONFIG" "$PROFILE_ANYKERNEL_PROFILE"
 
       - name: Build kernel
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
-          KERNEL_REPO: ${{ inputs.kernel_repo }}
-          KERNEL_BRANCH: ${{ inputs.kernel_branch }}
-          KERNEL_REF_TYPE: auto
-          DEVICE: ${{ inputs.device }}
-          ARCH: ${{ inputs.arch }}
-          DEFCONFIG: ${{ inputs.defconfig }}
-          CONFIG_FRAGMENT: ${{ inputs.config_fragment }}
+          CI_BUILD_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BUILD_PROFILE: ${{ inputs.build_profile }}
+          ROOT_VARIANT: ${{ matrix.variant }}
+          VARIANTS: ${{ inputs.variants }}
+          KERNEL_REPO: ${{ inputs.kernel_repo_override }}
+          KERNEL_BRANCH: ${{ inputs.kernel_ref_override }}
+          DEFCONFIG: ${{ inputs.defconfig_override }}
+          CONFIG_FRAGMENT: ${{ inputs.config_fragment_override }}
           JOBS: ${{ inputs.jobs }}
           TOOLCHAIN: ${{ inputs.toolchain }}
           TOOLCHAIN_VERSION: ${{ inputs.toolchain_version }}
           LLVM_IAS: ${{ inputs.llvm_ias }}
-          CROSS_COMPILE: ${{ inputs.cross_compile }}
-          CROSS_COMPILE_ARM32: ""
           CLANG_URL: ${{ inputs.clang_url }}
           GCC_URL: ${{ inputs.gcc_url }}
-          APT_PACKAGES: ${{ inputs.apt_packages }}
           EXTRA_MAKE_ARGS: ${{ inputs.extra_make_args }}
-          SCHEDULER_PROFILE: auto
           PATCH_PROFILE: ${{ inputs.patch_profile }}
           UPSTREAM_PROFILE: ${{ inputs.upstream_profile }}
           LTO_PLUS: ${{ inputs.lto_plus }}
-          KERNEL_NAME: ${{ inputs.kernel_name }}
-          ENABLE_KSU: ${{ inputs.enable_ksu }}
           KSU_REF: ${{ inputs.ksu_ref }}
           PACKAGE_ANYKERNEL: ${{ inputs.package_anykernel }}
           ROM_FAMILY: ${{ inputs.rom_family }}
           ANYKERNEL_PROFILE: ${{ inputs.anykernel_profile }}
-          ANYKERNEL3_REPO: https://github.com/osm0sis/AnyKernel3
           ANYKERNEL3_REF: ${{ inputs.anykernel3_ref }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          KERNEL_NAME: ${{ inputs.kernel_name }}
+          APT_PACKAGES: ${{ inputs.apt_packages }}
+          INSTALL_SHELLCHECK: "false"
         run: |
           set -euo pipefail
-          chmod +x \
-            scripts/build_kernel.sh \
-            scripts/detect_defconfig.sh \
-            scripts/toolchain_resolver.sh \
-            scripts/apply_patch_series.sh \
-            scripts/set_kernel_name.sh \
-            scripts/sync_localversion_files.sh \
-            scripts/bump_localversion_st.sh
+          bash scripts/build_kernel.sh
 
-          case "${ENABLE_KSU}" in
-            false)
-              export ENABLE_KSU=false
-              export KSU_PROVIDER=auto
-              ;;
-            true)
-              export ENABLE_KSU=true
-              export KSU_PROVIDER=auto
-              ;;
-            kernelsu-next|resukisu)
-              export ENABLE_KSU=true
-              export KSU_PROVIDER="${ENABLE_KSU}"
-              ;;
-            *)
-              echo "ERROR: unsupported enable_ksu=${ENABLE_KSU}" >&2
-              exit 2
-              ;;
-          esac
-
-          ./scripts/build_kernel.sh
-
-      - name: Upload kernel artifacts
-        if: success()
+      - name: Upload variant artifacts
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: kernel-${{ inputs.device }}
+          name: kernel-${{ inputs.build_profile }}-${{ matrix.variant }}
           path: |
-            work/Kernel-${{ inputs.device }}-*.tar.gz
-            work/artifacts/Kernel-${{ inputs.device }}-*-AnyKernel3.zip
-          if-no-files-found: warn
+            work/artifacts/**
+            work/error_tail.log
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Release ${{ inputs.build_profile }}
+    needs: build
+    if: needs.build.result == 'success' && inputs.release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout CI repository
+        uses: actions/checkout@v4
+
+      - name: Install minimal release tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends curl python3 zip
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release/artifacts
+
+      - name: Assemble release
+        env:
+          BUILD_PROFILE: ${{ inputs.build_profile }}
+        run: |
+          set -euo pipefail
+          mkdir -p release/assets
+          find release/artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp -f {} release/assets/ \;
+          test -n "$(find release/assets -type f -print -quit)"
+          INFO_ROOT="release/artifacts" OUT_FILE="release/CHANGELOG.md" bash scripts/generate_changelog.sh aggregate
+          printf '%s\n' "$(git log -1 --pretty='%h %s')" >> release/CHANGELOG.md
+          cp -f release/CHANGELOG.md release/assets/CHANGELOG.md
+          (cd release/assets && sha256sum *.tar.gz *.zip CHANGELOG.md > SHA256SUMS)
+          cp -f release/assets/SHA256SUMS release/SHA256SUMS
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag != '' && inputs.release_tag || format('zairenkai-{0}-run-{1}', inputs.build_profile, github.run_number) }}
+          RELEASE_NAME: Zairenkai ${{ inputs.build_profile }}
+          RELEASE_BODY_FILE: release/CHANGELOG.md
+          RELEASE_DRAFT: "false"
+          RELEASE_PRERELEASE: "false"
+          ASSET_DIR: release/assets
+        run: |
+          set -euo pipefail
+          bash scripts/publish_ci_release.sh

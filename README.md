@@ -1,300 +1,136 @@
-# CI-Build (Kernel + Custom ROM)
+# Zairenkai CI-Build
 
-## Struktur
-- `.github/workflows/kernel.yml` — build kernel + zip AnyKernel3 (opsi KernelSU, GitHub Release)
-- `.github/workflows/rom.yml` — build custom ROM (wajib self-hosted runner untuk AOSP)
-- `scripts/` — logika build + helper Telegram (dipakai bersama oleh GitHub Actions & Harness)
-- `harness/` — pipeline YAML Harness
+Universal Android kernel CI for the current Zairenkai targets:
 
-## Setup Telegram
-1. @BotFather -> `/newbot` -> simpan token.
-2. Tambahkan bot ke grup/channel (admin untuk channel), ambil chat id.
-3. GitHub: Settings -> Secrets and variables -> Actions: `TG_BOT_TOKEN`, `TG_CHAT_ID` (opsional `TG_TOPIC_ID`).
-4. Harness: buat Secret `tg_bot_token` dan `tg_chat_id`.
+| Profile | Kernel | Target behavior |
+|---|---|---|
+| `lavender-4.4` | Linux 4.4 | HMP/EAS, legacy + Dynamic Partition compatible |
+| `lavender-4.19` | Linux 4.19 | Dynamic Partition compatible |
+| `garnet-gki` | Linux 5.10 GKI | A/B boot, Dynamic Partition ROM compatible |
+
+The default release matrix produces exactly three root variants:
+
+```text
+vanilla
+kernelsu-next
+resukisu
+```
+
+The shared `scripts/` layer is the single build implementation for GitHub Actions, Harness, and local execution. Toolchain metadata, progress telemetry, archive creation, and provider selection are validated by CI before release. Target details live in `profiles/targets/`; AnyKernel flash packaging details live in `anykernel/profiles/`.
+
+## Architecture
+
+```text
+profiles/targets/<target>.conf
+              │
+              ▼
+      resolve_build_profile.sh
+              │
+       ┌──────┴──────┐
+       │             │
+ GitHub matrix   Harness/local matrix
+       │             │
+       └──────┬──────┘
+              ▼
+       build_kernel.sh
+              │
+     ┌────────┼─────────┐
+     ▼        ▼         ▼
+ vanilla  KernelSU-Next ReSukiSU
+     │        │         │
+     └────────┼─────────┘
+              ▼
+     AnyKernel3 + changelog
+              │
+              ▼
+          Release
+```
 
 ## GitHub Actions
-- Actions -> pilih workflow -> Run workflow -> isi input.
-- Kernel muat di runner GitHub gratis. Fork AnyKernel3 dan sesuaikan `anykernel.sh` untuk device.
-- ROM: runner GitHub (disk terbatas, maks 6 jam) tidak cukup untuk AOSP. Pasang self-hosted runner
-  (Settings -> Actions -> Runners) di mesin 32GB+ RAM, 300GB+ SSD, lalu pakai label `self-hosted`.
-- Bot Telegram dibatasi 50MB per file: zip kernel dikirim langsung, ROM dikirim berupa link (set variable
-  `RCLONE_REMOTE`, mis. `gdrive:ROM`, dan konfigurasikan rclone di mesin runner).
+
+Run `Build Kernel` and choose one canonical profile. `variants` accepts comma- or space-separated values or `all`; the normal default is all three release variants.
+
+The workflow has 25 `workflow_dispatch` inputs, within GitHub's limit. Release creation is opt-in. A successful release contains:
+
+- one kernel archive per root variant
+- one AnyKernel3 ZIP per root variant
+- `CHANGELOG.md`
+- `SHA256SUMS`
+
+Release tags default to `zairenkai-<profile>-run-<run_number>` and are non-prerelease, so reruns with a custom tag update the existing release rather than creating a duplicate.
 
 ## Harness
 
-The repository contains reusable Harness Pipeline YAML under `harness/`.
+`harness/kernel-pipeline.yaml` is the reusable Harness Cloud pipeline. It uses the same profile registry and calls `scripts/build_variants.sh`, which prepares one pristine kernel source seed and shares ccache across its three variants.
 
-### Project configuration
+`.github/workflows/harness-kernel.yml` is the GitHub-to-Harness bridge and keeps its workflow inputs under 25. The bridge monitors the Harness execution and can relay the resulting release to Telegram.
 
-```text
-Organization        : default
-Project Identifier  : ci_build
-GitHub Connector    : github_connector
-```
-
-### Secrets
-
-Create these encrypted text secrets in the Harness project:
+Required Harness secret for release publishing:
 
 ```text
-tg_bot_token
-tg_chat_id
+Secret identifier: github_token
 ```
 
-### Universal kernel pipeline
+Telegram secrets are optional unless Telegram notifications are enabled.
 
-Use `harness/kernel-pipeline.yaml` as a Remote Pipeline. It is parameterized for:
+## Local execution
 
-- repository and branch/ref
-- architecture
-- defconfig
-- parallel jobs
-- LLVM/LLVM IAS
-- cross compiler prefixes
-- optional external Clang tarball
-- optional additional apt packages for non-ARM or custom toolchains
-- optional KernelSU
-- optional AnyKernel3 packaging
-- extra `make` arguments
-
-The build script is shared with GitHub Actions in `scripts/build_kernel.sh`.
-
-### ROM pipeline
-
-Use `harness/rom-pipeline.yaml` with a self-managed Harness Docker Runner. It uses `ubuntu:22.04` and installs the AOSP dependencies inside the same build step, then invokes `scripts/build_rom.sh`.
-
-## AWS (kredit $200) sebagai runner ROM
-1. Upgrade akun ke Paid plan (kredit tetap berlaku), ajukan kenaikan quota vCPU (On-Demand/Spot) di Service Quotas,
-   pasang AWS Budgets.
-2. Di PC/Termux: pasang `aws` CLI + `gh` CLI, lalu `aws configure` dan `gh auth login`.
-3. `GH_REPO=USER/ci-build TG_BOT_TOKEN=... TG_CHAT_ID=... ./aws/launch_ec2.sh`
-   (variabel opsional: `REGION`, `TYPE`, `DISK`, `SPOT`, `IDLE_MINUTES`, `MAX_HOURS`, `KEY_NAME`).
-4. Setelah runner muncul di GitHub (Settings -> Actions -> Runners), jalankan workflow "Build Custom ROM"
-   dengan `runner: self-hosted`.
-5. Server mati sendiri setelah 1 job selesai, idle `IDLE_MINUTES`, atau umur `MAX_HOURS`.
-   Dengan `terminate` ccache ikut hilang; pakai `SPOT=false BEHAVIOR=stop` bila ingin menyimpan cache (disk tetap ditagih).
-
-# CI-Build update
-
-Files are ready to replace in `FebriCahyaa/ci-build`:
-
-- `harness/kernel-pipeline.yaml`
-- `scripts/build_kernel.sh`
-- `.github/workflows/harness-kernel.yml`
-
-Key changes:
-- Harness stage no longer asks for a Codebase checkout, avoiding the manual-codebase branch/commit error.
-- Harness clones `ci-build` explicitly to obtain the build script, then clones the requested kernel repository.
-- Universal toolchain mode: `auto`, `clang`, `gcc`.
-- Kernel-version detection and architecture auto-detection.
-- Supports old 4.x kernels (including 4.4/4.19) and modern 5.x/GKI kernels such as Garnet workflows.
-- Optional custom Clang/GCC tarballs.
-- Scheduler profile is reporting-only: the source/defconfig remains authoritative for EAS/HMP.
-- Artifact collection covers Image, compressed images, dt/dtbo, modules, vmlinux, System.map, and config.
-- GitHub Actions uses the current Harness pipeline identifier and sends runtime variables with safe JSON construction.
-
-Suggested commit:
-`feat(ci): support universal 4.x and 5.x kernel builds via Harness`
-
-## Kernel CI hardening
-
-The kernel builder is shared by GitHub Actions and Harness Cloud. The intended execution path is:
-
-```text
-GitHub Actions inputs
-        |
-        v
-Harness API
-        |
-        v
-Harness Cloud
-        |
-        v
-ci-build/scripts/build_kernel.sh
-        |
-        +--> external kernel repository
-        +--> auto ARCH / defconfig / fragment
-        +--> resolved toolchain
-        +--> kernel artifacts
-```
-
-Kernel refs support `auto`, `branch`, `tag`, and `commit`. In `auto` mode, a 40- or 64-character hexadecimal ref is treated as a commit and any other ref is treated as a branch/tag ref.
-
-The toolchain resolver now returns the selected compiler directory to the caller, so downloaded AOSP, Proton, Neutron, and custom toolchains are actually placed first on `PATH` during compilation. The selected LLVM and LLVM IAS mode is also propagated from the resolver.
-
-The validation workflow checks Bash syntax, ShellCheck errors, and YAML parseability before a kernel build is attempted.
-
-
-## Custom AnyKernel3
-
-Kernel packaging uses reusable profiles under `anykernel/profiles/`:
-
-- `lavender-4.4`
-- `lavender-4.19`
-- `garnet-oss`
-- `garnet-hyperos`
-
-Set `ANYKERNEL_PROFILE=auto` to select a profile from the device, kernel version, and ROM family. Set `ANYKERNEL3_REF` to a branch, tag, or commit to pin the AnyKernel3 backend revision. The backend is fetched at packaging time; it is not vendored into this repository.
-
-Profile selection is packaging metadata only and does not guarantee boot or flashing compatibility. Validate the exact boot format, AVB/vbmeta state, slot behavior, rollback requirements, kernel, DTBO, and target ROM before flashing.
-
-
-## Modular kernel patch registry
-
-Kernel source fixes are maintained under `patches/` instead of being embedded
-in `scripts/build_kernel.sh`.
-
-```text
-patches/
-├── devices/lavender/4.19/
-├── root-manager/{kernelsu,kernelsu-next,resukisu}/4.19/
-├── upstream/codelinaro/sdm660-4.19/
-├── upstream/linux-stable/4.19/
-└── features/lto-plus/lavender-4.19/
-```
-
-The build selects device, root-manager, and upstream patch series automatically.
-Patches are idempotent and report `ALREADY APPLIED` when the source already
-contains the change.
-
-Optional environment variables:
-
-```text
-PATCH_PROFILE=auto
-UPSTREAM_PROFILE=auto
-LTO_PLUS=false
-KERNEL_NAME=""
-```
-
-`KERNEL_NAME` resolves to the CI repository's `kernel-name` and is written to
-`localversion-cip`. The generated `CONFIG_LOCALVERSION` is cleared so the
-source-style `localversion*` files remain authoritative.
-
-Harness also exposes `PATCH_PROFILE`, `UPSTREAM_PROFILE`, `LTO_PLUS`, and
-`KERNEL_NAME` as pipeline variables.
-
-### Install the modular patch registry
-
-From a checkout containing this bundle:
+Use the unified trigger helper:
 
 ```bash
-./scripts/install_modular_patch_registry.sh /path/to/ci-build
+./scripts/start_local_ci.sh
 ```
 
-The installer backs up modified files under `.ci-build-backup-YYYYMMDD-HHMMSS/`.
-
-## Kernel name and codename
-
-This repository mirrors the SouthWest-NG source's `localversion-cip` /
-`localversion-st` mechanism. The first Zairenkai build is configured as:
-
-```text
-kernel-name    = Zairenkai
-localversion-cip = -Zairenkai
-kernel-codename = VEGA
-kernel-build    = 1
-localversion-st  = -VEGA1
-```
-
-During a build, `scripts/set_kernel_name.sh` keeps `kernel-name` and
-`localversion-cip` aligned, then `scripts/sync_localversion_files.sh` copies
-`localversion-cip` and `localversion-st` into the kernel source tree.
-The resulting Kbuild release suffix is therefore `-Zairenkai-VEGA1` before
-any source-controlled SCM suffix is added.
-
-To bump the codename build number:
-
-```bash
-./scripts/bump_localversion_st.sh --bump
-```
-
-To explicitly set the first build:
-
-```bash
-./scripts/bump_localversion_st.sh --codename VEGA --build 1
-```
-
-## Local trigger
-
-The `kernel.yml` workflow is exposed through `workflow_dispatch`, so it can be started directly from a local Ubuntu/Termux environment with GitHub CLI.
-
-Use the helper below to send the complete kernel build parameter set from local to GitHub Actions:
+Or the compatibility wrappers:
 
 ```bash
 ./scripts/start_local_kernel.sh
-```
-
-Override values with environment variables, for example:
-
-```bash
-KERNEL_NAME=Zairenkai \
-ENABLE_KSU=false \
-PATCH_PROFILE=none \
-UPSTREAM_PROFILE=none \
-./scripts/start_local_kernel.sh
-```
-
-The default kernel source is `pix106/android_kernel_xiaomi_sdm660_southwest-ng` on `main` (Xiaomi SDM660 / Lavender-capable SouthWest-NG 0.20.1 tree). The default build uses the source tree as-is: `ENABLE_KSU=false`, `PATCH_PROFILE=none`, and `UPSTREAM_PROFILE=none`.
-
-## Trigger Harness dari local
-
-Untuk menjalankan pipeline Harness melalui GitHub Actions bridge:
-
-```bash
-chmod +x scripts/start_local_harness.sh
 ./scripts/start_local_harness.sh
 ```
 
-GitHub Actions menyimpan secret `HARNESS_API_KEY`, `HARNESS_ACCOUNT_ID`, dan Telegram secrets. Local hanya mengirim input workflow, jadi secret tidak perlu ditaruh di Termux/Ubuntu.
+For a local AnyKernel smoke/package flow:
 
+```bash
+cd anykernel
+mkdir -p images/vanilla
+# Put a compiled image under images/vanilla/ using the profile's KERNEL_IMAGES order.
+./build.sh lavender-4.4 vanilla kernelsu-next resukisu
+```
 
-## Packaging and live build telemetry
+The AnyKernel packager is fail-closed: it refuses to create a ZIP when no accepted kernel image exists.
 
-The CI repository remains the source of truth for universal build orchestration,
-device packaging profiles, and Harness/Telegram integration. The build emits a
-flashable AnyKernel3 ZIP as a normal release artifact.
+## AnyKernel3 profiles
 
-A separate Zairenkai packaging repository can be introduced later for a
-standalone distribution channel, but duplicating the packager here now would
-create two sources of truth.
+- `lavender-4.4`: Linux 4.4, HMP/EAS, legacy + Dynamic Partition compatible.
+- `lavender-4.19`: Linux 4.19, Dynamic Partition compatible.
+- `garnet-gki`: Linux 5.10 GKI, A/B boot; vendor DTBO is left untouched by default.
 
-Live build telemetry uses a unique GitHub commit-status context per Harness
-execution. Phase milestones are real build milestones; compile progress is
-derived from the Kbuild dry-run compile plan versus observed CC/AS actions.
-Telegram refreshes its presentation once per second while Harness API polling
-remains at three-second intervals.
+`anykernel/anykernel.sh` and `anykernel/banner` are templates. `anykernel/ci-patch.sh` renders them from the profile and root variant immediately before packaging.
 
-## Zairenkai branding and build identity
+## Changelog
 
-The full CI bundle includes four AnyKernel banner variants:
-`none`, `kernelsu`, `kernelsu-next`, and `resukisu`. Packaging selects
-exactly one variant from the resolved root provider.
+Per-variant changelogs are generated by:
 
-Kernel build metadata is explicitly set through `KBUILD_BUILD_USER` and
-`KBUILD_BUILD_HOST`, defaulting to:
+```bash
+./scripts/generate_changelog.sh single
+```
 
-  KBUILD_BUILD_USER=FebriCahyaa
-  KBUILD_BUILD_HOST=ZairenkaiProject
+The release aggregate is generated with:
 
-These values are exported by `scripts/kbuild_identity.sh` and recorded in
-`build-info.txt`.
+```bash
+INFO_ROOT=work OUT_FILE=release/CHANGELOG.md ./scripts/generate_changelog.sh aggregate
+```
 
-## Banner style
+The generator uses `build-info.txt` plus kernel git history and does not evaluate changelog content as shell code.
 
-The installer banner uses the fixed-width Sub-Zero-style ASCII treatment from
-the Zairenkai reference. The logo is stored directly as plain text in each
-variant; no runtime font renderer is required in recovery.
+## Root manager refs
 
-All four variants share the same logo and metadata layout. Only the root
-section changes according to the resolved provider.
+The resolver uses deterministic defaults:
 
+```text
+KernelSU-Next 4.x: v1.1.1
+KernelSU-Next GKI: v3.4.0
+ReSukiSU:          v4.2.0-rc3
+```
 
-## Root manager and SUSFS integration
-
-The universal builder now has explicit provider integration for official
-KernelSU, KernelSU-Next, and ReSukiSU. Linux 4.19 official KernelSU is
-pinned to v0.9.5.
-
-SUSFS uses the dedicated Linux 4.19 upstream revision
-`001e69919c6271f690fd00b17e4c721c9e599152`. ReSukiSU builds use its integrated SUSFS hook path; the
-official-KernelSU SUSFS patch set is not mixed into KSU-Next.
+The legacy official KernelSU path remains available for compatibility, but it is not part of the default three-variant release matrix.

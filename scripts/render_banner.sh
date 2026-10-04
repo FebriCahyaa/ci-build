@@ -1,32 +1,21 @@
 #!/usr/bin/env bash
+# Compatibility banner renderer. Uses the canonical AnyKernel template through ci-patch.sh.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-VARIANT="$("$ROOT_DIR/scripts/select_banner_variant.sh" "${ROOT_PROVIDER:-none}")"
-TEMPLATE="$ROOT_DIR/anykernel/banners/${VARIANT}.txt"
 OUT="${1:-banner}"
+PROFILE="${PROFILE_ID:-${ANYKERNEL_PROFILE:-lavender-4.19}}"
+VARIANT="${ROOT_VARIANT:-${ROOT_PROVIDER:-${KSU_PROVIDER:-vanilla}}}"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 
-[[ -f "$TEMPLATE" ]] || {
-  echo "ERROR: missing banner template: $TEMPLATE" >&2
-  exit 1
-}
+cp -a "$ROOT_DIR/anykernel/." "$TMP/"
+KERNEL_NAME="${KERNEL_NAME:-Zairenkai}" \
+  KERNEL_CODENAME="${KERNEL_CODENAME:-VEGA}" \
+  KERNEL_BUILD="${KERNEL_BUILD:-1}" \
+  BUILD_LABEL="${BUILD_LABEL:-Zairenkai-VEGA1}" \
+  bash "$TMP/ci-patch.sh" --profile "$PROFILE" --variant "$VARIANT" --dir "$TMP" >/dev/null
 
-export TEMPLATE OUT
-python3 - <<'PY'
-import os
-from pathlib import Path
-
-text=Path(os.environ["TEMPLATE"]).read_text(encoding="utf-8")
-values={
-    "ASCII": os.environ.get("ASCII_LOGO",""),
-    "BUILD_LABEL": os.environ.get("BUILD_LABEL","Zairenkai-VEGA1"),
-    "KERNEL_RELEASE": os.environ.get("KERNEL_RELEASE","unknown"),
-    "TOOLCHAIN": os.environ.get("TOOLCHAIN","unknown"),
-    "BUILD_USER": os.environ.get("KBUILD_BUILD_USER","FebriCahyaa"),
-    "BUILD_HOST": os.environ.get("KBUILD_BUILD_HOST","ZairenkaiProject"),
-    "PROFILE": os.environ.get("BANNER_PROFILE",""),
-}
-for key,value in values.items():
-    text=text.replace("@"+key+"@",value)
-Path(os.environ["OUT"]).write_text(text.rstrip()+"\n",encoding="utf-8")
-PY
+mkdir -p "$(dirname "$OUT")"
+cp -f "$TMP/banner" "$OUT"
+printf '%s\n' "$OUT"

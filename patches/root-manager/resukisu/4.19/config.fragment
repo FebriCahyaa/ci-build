@@ -1,2 +1,3 @@
-# ReSukiSU built-in kernel driver.
+# ReSukiSU 4.19: legacy manual hook path.
 CONFIG_KSU=y
+CONFIG_KSU_MANUAL_HOOK=y

@@ -1,7 +1,7 @@
 # KernelSU-Next / Linux 4.19
 
 CI integrates the official KernelSU-Next repository through its upstream
-setup layout and resolves `KSU_REF=auto` to the current stable v3.4.0
+setup layout and resolves `KSU_REF=auto` to the pinned legacy-compatible v1.1.1
 release for this workflow.
 
 The external SUSFS `kernel-4.19` patch set is intentionally not applied

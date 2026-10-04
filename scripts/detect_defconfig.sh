@@ -34,9 +34,11 @@ lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
 KVER_MAJOR=0
 KVER_MINOR=0
+KVER_SUB=0
 if [[ -f Makefile ]]; then
   KVER_MAJOR="$(awk '/^VERSION[[:space:]]*=/{print $3; exit}' Makefile)"
   KVER_MINOR="$(awk '/^PATCHLEVEL[[:space:]]*=/{print $3; exit}' Makefile)"
+  KVER_SUB="$(awk '/^SUBLEVEL[[:space:]]*=/{print $3; exit}' Makefile)"
 fi
 
 if [[ "$ARCH_REQ" == "auto" ]]; then
@@ -67,7 +69,7 @@ case "$D" in
     ALIASES+=(lavender sdm660 xiaomi lavender-sdm660)
     ;;
   garnet|xiaomi-garnet)
-    ALIASES+=(garnet sm7435 parrot xiaomi-garnet)
+    ALIASES+=(garnet sm7435 parrot xiaomi-garnet gki)
     ;;
   moonstone|poco-moonstone)
     ALIASES+=(moonstone sm6375 garnet)
@@ -118,8 +120,18 @@ else
   PREFERRED_DEFCONFIG=""
   case "$D" in
     lavender)
-      [[ -f "$CONFIG_ROOT/vendor/xiaomi/sdm660_defconfig" ]] && \
-        PREFERRED_DEFCONFIG="vendor/xiaomi/sdm660_defconfig"
+      for c in vendor/xiaomi/sdm660_defconfig lavender-perf_defconfig lavender_defconfig; do
+        if [[ -f "$CONFIG_ROOT/$c" ]]; then PREFERRED_DEFCONFIG="$c"; break; fi
+      done
+      ;;
+    garnet)
+      # GKI (5.10+) trees build the generic kernel from gki_defconfig; vendor
+      # code ships as modules in vendor_dlkm and is not rebuilt here.
+      if (( KVER_MAJOR >= 5 )); then
+        for c in garnet_GKI_defconfig garnet_defconfig gki_defconfig; do
+          if [[ -f "$CONFIG_ROOT/$c" ]]; then PREFERRED_DEFCONFIG="$c"; break; fi
+        done
+      fi
       ;;
   esac
   if [[ -n "$PREFERRED_DEFCONFIG" ]]; then
@@ -194,6 +206,7 @@ fi
 # Emit only shell-safe assignments on stdout; diagnostics go to stderr.
 printf 'DETECTED_ARCH=%q\n' "$ARCH"
 printf 'DETECTED_KERNEL_VERSION=%q\n' "${KVER_MAJOR}.${KVER_MINOR}"
+printf 'DETECTED_KERNEL_FULL_VERSION=%q\n' "${KVER_MAJOR}.${KVER_MINOR}.${KVER_SUB:-0}"
 printf 'DETECTED_DEFCONFIG=%q\n' "$DEFCONFIG"
 if [[ -n "$FRAGMENT" ]]; then
   relfrag="${FRAGMENT#"$CONFIG_ROOT/"}"
@@ -202,4 +215,4 @@ else
   printf 'DETECTED_FRAGMENT=%q\n' ""
 fi
 
->&2 echo "[detect] kernel=${KVER_MAJOR}.${KVER_MINOR} arch=$ARCH defconfig=$DEFCONFIG fragment=${relfrag:-none}"
+>&2 echo "[detect] kernel=${KVER_MAJOR}.${KVER_MINOR}.${KVER_SUB:-0} arch=$ARCH defconfig=$DEFCONFIG fragment=${relfrag:-none}"

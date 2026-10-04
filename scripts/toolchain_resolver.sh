@@ -10,6 +10,14 @@ REQUESTED="${TOOLCHAIN:-auto}"
 VERSION_REQUEST="${TOOLCHAIN_VERSION:-auto}"
 ARCH="${ARCH:-arm64}"
 
+arch_cross() {
+  case "$1" in
+    arm64) printf '%s\n' 'aarch64-linux-gnu-' ;;
+    arm)   printf '%s\n' 'arm-linux-gnueabi-' ;;
+    *)     printf '%s\n' '' ;;
+  esac
+}
+
 mkdir -p "$WORK_DIR/toolchain"
 TC_ROOT="$WORK_DIR/toolchain"
 BUILD_CONFIG_CLANG_BIN=""
@@ -66,8 +74,8 @@ case "$family" in
     [[ -n "$BIN" ]] || { echo "ERROR: custom Clang archive contains no bin/clang" >&2; exit 1; }
     TOOLCHAIN_BIN="$(dirname "$BIN")"
     export PATH="$TOOLCHAIN_BIN:$PATH"
-    CROSS_DEFAULT=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
-    CLANG_TRIPLE_VALUE=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
+    CROSS_DEFAULT=$(arch_cross "$ARCH")
+    CLANG_TRIPLE_VALUE=$(arch_cross "$ARCH")
     LLVM_VALUE=1
     LLVM_IAS_VALUE=1
     RESOLVED_VERSION=custom-url
@@ -121,8 +129,8 @@ case "$family" in
 
   llvm|system)
     command -v clang >/dev/null 2>&1 || { echo "ERROR: clang is missing" >&2; exit 1; }
-    CROSS_DEFAULT=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
-    CLANG_TRIPLE_VALUE=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
+    CROSS_DEFAULT=$(arch_cross "$ARCH")
+    CLANG_TRIPLE_VALUE=$(arch_cross "$ARCH")
     LLVM_VALUE=1
     LLVM_IAS_VALUE=1
     ;;
@@ -189,7 +197,7 @@ case "$family" in
     TOOLCHAIN_BIN="$(dirname "$BIN")"
     export PATH="$TOOLCHAIN_BIN:$PATH"
     CROSS_DEFAULT=""
-    CLANG_TRIPLE_VALUE=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
+    CLANG_TRIPLE_VALUE=$(arch_cross "$ARCH")
     LLVM_VALUE=1
     LLVM_IAS_VALUE=1
     RESOLVED_VERSION="$rev"
@@ -208,8 +216,8 @@ case "$family" in
     [[ -x "$TC_ROOT/proton/bin/clang" ]] || { echo "ERROR: Proton Clang bin/clang not found" >&2; exit 1; }
     TOOLCHAIN_BIN="$TC_ROOT/proton/bin"
     export PATH="$TOOLCHAIN_BIN:$PATH"
-    CROSS_DEFAULT=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
-    CLANG_TRIPLE_VALUE=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
+    CROSS_DEFAULT=$(arch_cross "$ARCH")
+    CLANG_TRIPLE_VALUE=$(arch_cross "$ARCH")
     LLVM_VALUE=1
     LLVM_IAS_VALUE=1
     RESOLVED_VERSION="$ver"
@@ -254,8 +262,8 @@ PY
     [[ -n "$BIN" ]] || { echo "ERROR: Neutron clang binary not found" >&2; exit 1; }
     TOOLCHAIN_BIN="$(dirname "$BIN")"
     export PATH="$TOOLCHAIN_BIN:$PATH"
-    CROSS_DEFAULT=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
-    CLANG_TRIPLE_VALUE=$([[ "$ARCH" == arm64 ]] && echo aarch64-linux-gnu- || [[ "$ARCH" == arm ]] && echo arm-linux-gnueabi- || echo "")
+    CROSS_DEFAULT=$(arch_cross "$ARCH")
+    CLANG_TRIPLE_VALUE=$(arch_cross "$ARCH")
     LLVM_VALUE=1
     LLVM_IAS_VALUE=1
     RESOLVED_VERSION="$ver"
@@ -273,10 +281,22 @@ if [[ "$LLVM_VALUE" == 1 && -z "$CLANG_PATH" ]]; then
   exit 1
 fi
 
+# Human-readable compiler identity consumed by build metadata and AnyKernel.
+RESOLVED_COMPILER_STRING="unknown"
+if [[ "$LLVM_VALUE" == 1 && -n "$CLANG_PATH" ]]; then
+  clang_line="$("$CLANG_PATH" --version 2>/dev/null | head -n1 || true)"
+  RESOLVED_COMPILER_STRING="${clang_line:-clang}"
+elif [[ -n "${CROSS_DEFAULT:-}" ]]; then
+  gcc_bin="${CROSS_DEFAULT}gcc"
+  gcc_line="$("$gcc_bin" --version 2>/dev/null | head -n1 || true)"
+  RESOLVED_COMPILER_STRING="${gcc_line:-$gcc_bin}"
+fi
+
 printf 'RESOLVED_TOOLCHAIN=%q\n' "$family"
 printf 'RESOLVED_TOOLCHAIN_BIN=%q\n' "$TOOLCHAIN_BIN"
 printf 'RESOLVED_TOOLCHAIN_VERSION=%q\n' "${RESOLVED_VERSION:-${ver:-${BUILD_CONFIG_CLANG_REV:-system}}}"
 printf 'RESOLVED_CLANG=%q\n' "$CLANG_PATH"
+printf 'RESOLVED_COMPILER_STRING=%q\n' "$RESOLVED_COMPILER_STRING"
 printf 'RESOLVED_CLANG_TRIPLE=%q\n' "$CLANG_TRIPLE_VALUE"
 printf 'RESOLVED_CROSS_DEFAULT=%q\n' "$CROSS_DEFAULT"
 printf 'RESOLVED_LLVM=%q\n' "$LLVM_VALUE"

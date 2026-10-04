@@ -1,27 +1,30 @@
-# CI-Build Custom AnyKernel3 Profiles
+# Zairenkai AnyKernel3
 
-This directory contains reusable, profile-driven AnyKernel3 packaging for the CI-Build kernel builder.
+Vendored AnyKernel3 backend for the Zairenkai kernel CI.
 
 Supported profiles:
 
-- `lavender-4.4`
-- `lavender-4.19`
-- `garnet-oss`
-- `garnet-hyperos`
+- `lavender-4.4` — Linux 4.4, HMP/EAS, legacy + dynamic-partition compatible.
+- `lavender-4.19` — Linux 4.19, dynamic-partition compatible.
+- `garnet-gki` — Linux 5.10 GKI, A/B boot and dynamic-partition ROM compatible.
 
-The repository intentionally does **not** vendor the AnyKernel3 backend binaries/scripts. `scripts/build_anykernel.sh` fetches the configured AnyKernel3 revision at packaging time, then overlays the selected profile, kernel image, DTBO (when present), modules (when enabled), banner, and build metadata.
+Root variants:
 
-## Profile selection
+- `vanilla`
+- `kernelsu-next`
+- `resukisu`
 
-Use `ANYKERNEL_PROFILE=auto` to select from `DEVICE`, `KERNEL_VERSION`, and `ROM_FAMILY`:
+The release matrix intentionally uses these three variants. The `kernelsu`
+variant remains supported by the shared renderer for compatibility, but is not
+part of the default release matrix.
 
-- `lavender` + kernel `4.4.x` -> `lavender-4.4`
-- `lavender` + kernel `4.19.x` -> `lavender-4.19`
-- `garnet` + `ROM_FAMILY=hyperos` -> `garnet-hyperos`
-- `garnet` + any other/OSS family -> `garnet-oss`
+## Local packaging
 
-For deterministic builds, pin `ANYKERNEL3_REF` to an AnyKernel3 tag/commit instead of tracking `master`.
+```bash
+./build.sh lavender-4.4 vanilla kernelsu-next resukisu
+./build.sh lavender-4.19 vanilla kernelsu-next resukisu
+./build.sh garnet-gki vanilla kernelsu-next resukisu
+```
 
-## Important
-
-The profiles are packaging/install profiles, not a guarantee that a kernel is bootable on a target ROM. Before flashing, verify the exact device, boot image format, slot state, AVB/vbmeta behavior, rollback requirements, and kernel/DTBO compatibility for the ROM build being used.
+Place the compiled kernel image at `images/<variant>/<image>`. The packager is
+fail-closed: no kernel image means no ZIP is produced.

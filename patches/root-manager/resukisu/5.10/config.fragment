@@ -1,0 +1,3 @@
+# ReSukiSU 5.10 GKI: use the supported tracepoint hook path.
+CONFIG_KSU=y
+CONFIG_KSU_TRACEPOINT_HOOK=y

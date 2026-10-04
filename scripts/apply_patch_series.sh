@@ -16,6 +16,25 @@ KSU_SUSFS_REQUIRED="${KSU_SUSFS_REQUIRED:-false}"
 KERNEL_REPO="${KERNEL_REPO:-}"
 PHASE="${PHASE:-source}"
 LTO_PLUS="${LTO_PLUS:-false}"
+ENABLE_SUSFS="${ENABLE_SUSFS:-false}"
+KSU_PREINTEGRATED="${KSU_PREINTEGRATED:-false}"
+
+# root_manager_apply.sh reports official KernelSU as "official"; the patch
+# registry stores it under root-manager/kernelsu.
+case "$ROOT_MANAGER" in
+  official) ROOT_MANAGER=kernelsu ;;
+  ""|vanilla) ROOT_MANAGER=none ;;
+esac
+
+# root_file <name>: version-specific registry file, falling back to common/.
+root_file() {
+  local provider="$1" name="$2"
+  if [[ -f "$PATCH_ROOT/root-manager/$provider/$KERNEL_MM/$name" ]]; then
+    printf '%s\n' "$PATCH_ROOT/root-manager/$provider/$KERNEL_MM/$name"
+  elif [[ -f "$PATCH_ROOT/root-manager/$provider/common/$name" ]]; then
+    printf '%s\n' "$PATCH_ROOT/root-manager/$provider/common/$name"
+  fi
+}
 
 fail() {
   echo "[patches] ERROR: $*" >&2
@@ -80,7 +99,10 @@ config_apply() {
   echo "[patches] CONFIG $fragment"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+    line="${line%$'\r'}"
+    [[ -z "$line" ]] && continue
+    # Keep "# CONFIG_FOO is not set" (a real directive); skip other comments.
+    [[ "${line:0:1}" == "#" && ! "$line" =~ ^\#\ CONFIG_[A-Za-z0-9_]+\ is\ not\ set$ ]] && continue
 
     case "$line" in
       CONFIG_*=y|CONFIG_*=m|CONFIG_*="\""*"\""|CONFIG_*=*)
@@ -131,8 +153,8 @@ if [[ "$PHASE" == "source" ]]; then
   esac
 
   if [[ "$KSU_REQUIRED" == "true" && "$ROOT_MANAGER" != "none" ]]; then
-    root_series="$PATCH_ROOT/root-manager/$ROOT_MANAGER/$KERNEL_MM/series.conf"
-    series_apply "$root_series"
+    root_series="$(root_file "$ROOT_MANAGER" series.conf)"
+    [[ -n "$root_series" ]] && series_apply "$root_series"
   fi
 
   case "$UPSTREAM_PROFILE" in
@@ -167,14 +189,15 @@ elif [[ "$PHASE" == "config" ]]; then
     fi
   fi
 
-  if [[ "$ROOT_MANAGER" != "none" && -n "$ROOT_MANAGER" ]]; then
-    root_config="$PATCH_ROOT/root-manager/$ROOT_MANAGER/$KERNEL_MM/config.fragment"
-    if [[ -f "$root_config" ]]; then
-      config_apply "$root_config"
-    fi
+  if [[ "$ROOT_MANAGER" != "none" ]]; then
+    root_config="$(root_file "$ROOT_MANAGER" config.fragment)"
+    [[ -n "$root_config" ]] && config_apply "$root_config"
+  elif [[ "$KSU_PREINTEGRATED" == "true" ]]; then
+    # Vanilla build of a tree that already carries a root provider.
+    config_apply "$PATCH_ROOT/root-manager/none/common/config.fragment"
   fi
 
-  if [[ "${ENABLE_SUSFS:-false}" == "true" || "${ENABLE_SUSFS:-false}" == "1" ]]; then
+  if [[ "$ENABLE_SUSFS" == "true" || "$ENABLE_SUSFS" == "1" ]]; then
     susfs_config="$PATCH_ROOT/features/susfs/kernel-$KERNEL_MM/config.fragment"
     [[ -f "$susfs_config" ]] || fail "SUSFS config fragment missing: $susfs_config"
     config_apply "$susfs_config"
