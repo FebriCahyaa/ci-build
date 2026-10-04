@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Reuse the canonical variant normalization/label helpers so every CI
+# component renders root-manager names consistently.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/common.sh"
+
 MODE="${1:-single}"
 BUILD_INFO="${BUILD_INFO:-}"
 SOURCE_DIR="${SOURCE_DIR:-}"
@@ -21,7 +27,8 @@ single() {
   [[ -n "$OUT_FILE" ]] || { echo "ERROR: OUT_FILE missing" >&2; exit 2; }
   mkdir -p "$(dirname "$OUT_FILE")"
   {
-    printf '# Zairenkai Kernel Changelog — %s\n\n' "$VARIANT"
+    VARIANT_CANONICAL="$(normalize_variant "$VARIANT" 2>/dev/null || printf '%s' "$VARIANT")"
+    printf '# Zairenkai Kernel Changelog — %s\n\n' "$(variant_label "$VARIANT_CANONICAL")"
     echo '## Target'
     printf -- '- Profile: '; md_code "$(get_info build_profile "$BUILD_INFO")"; echo
     printf -- '- Device: '; md_code "$(get_info device "$BUILD_INFO")"; echo
@@ -87,9 +94,14 @@ aggregate() {
     echo
     providers=()
     for file in "${files[@]}"; do
-      v="$(get_info root_variant "$file")"
-      [[ -n "$v" ]] || v="$(get_info ksu_provider "$file")"
-      [[ -n "$v" ]] && providers+=("$(variant_label "$v")") || true
+      info_file="$(dirname -- "$file")/build-info.txt"
+      v="$(get_info root_variant "$info_file")"
+      [[ -n "$v" ]] || v="$(get_info variant "$info_file")"
+      [[ -n "$v" ]] || v="$(get_info ksu_provider "$info_file")"
+      if [[ -n "$v" ]]; then
+        v="$(normalize_variant "$v" 2>/dev/null || printf '%s' "$v")"
+        providers+=("$(variant_label "$v")")
+      fi
     done
     printf 'This release contains the %s builds for the selected target profile.\n' "$(IFS=', '; echo "${providers[*]}")" 
     echo
