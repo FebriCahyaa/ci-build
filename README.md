@@ -136,8 +136,8 @@ The generator uses `build-info.txt` plus kernel git history and does not evaluat
 The resolver uses deterministic defaults:
 
 ```text
-KernelSU-Next 4.4: v1.1.1
-KernelSU-Next 4.19: v3.4.0
+KernelSU-Next 4.4: v1.1.1 (legacy compat pin)
+KernelSU-Next 4.19+: v3.4.0
 KernelSU-Next GKI: v3.4.0
 ReSukiSU:          v4.2.0-rc3
 SukiSU Ultra:      main

@@ -55,7 +55,21 @@ if [[ "$release_found" != true ]]; then
 fi
 readarray -t relmeta < <(python3 - "$RELEASE_JSON" <<'PY'
 import json,sys
-v=json.load(open(sys.argv[1],encoding="utf-8")); print(v.get("html_url","")); assets=v.get("assets",[]); print(len(assets))
+v=json.load(open(sys.argv[1],encoding="utf-8")); is_pre=bool(v.get("prerelease")); print(v.get("html_url",""));
+assets=[]
+for a in v.get("assets",[]):
+    if not isinstance(a,dict):
+        continue
+    name=str(a.get("name","") or "")
+    if name == "handoff-HANDOFF-READY.txt" or name.startswith("staging-"):
+        continue
+    if is_pre:
+        if not name.startswith("handoff-"):
+            continue
+    elif name.startswith("handoff-"):
+        continue
+    assets.append(a)
+print(len(assets))
 names=[a.get("name","") for a in assets]; variants=[]
 for key,label in (("sukisu-ultra","SukiSU Ultra"),("kernelsu-next","KernelSU-Next"),("resukisu","ReSukiSU"),("kernelsu","KernelSU"),("vanilla","Vanilla")):
     if any(key in n.lower() for n in names): variants.append(label)
@@ -71,9 +85,16 @@ if [[ "${TG_SKIP_ASSET_UPLOAD:-false}" != true ]]; then
   python3 - "$RELEASE_JSON" "$WORK" <<'PY'
 import json,sys,os
 p=json.load(open(sys.argv[1],encoding="utf-8")); out=sys.argv[2]
+is_pre=bool(p.get("prerelease"))
 for a in p.get("assets",[]):
     name=a.get("name"); url=a.get("browser_download_url") or a.get("url")
-    if name and url: open(os.path.join(out,name+".url"),"w",encoding="utf-8").write(url)
+    if not name or name == "handoff-HANDOFF-READY.txt" or name.startswith("staging-") or not url:
+        continue
+    if is_pre and not name.startswith("handoff-"):
+        continue
+    if not is_pre and name.startswith("handoff-"):
+        continue
+    open(os.path.join(out,name+".url"),"w",encoding="utf-8").write(url)
 PY
   for marker in "$WORK"/*.url; do
     [[ -f "$marker" ]] || continue

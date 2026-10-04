@@ -9,7 +9,8 @@
 
 Verified current upstream commits on 2026-10-04:
 - KernelSU `cd4af89c43005f33df91ba7cb66e00e67a4d0c1b`
-- KernelSU-Next `9ba1a51e46d0e4a88ba502a80eda1351a6ce1cd8`
+- KernelSU-Next source is pinned at build time to `v3.4.0` for Linux 4.19+;
+  Linux 4.4 uses the separately pinned `v1.1.1` compatibility snapshot.
 - ReSukiSU `8770c7e324a22895703c4916b8a16520e0b81c79`
 - SukiSU Ultra `7fbbb1f12e2410b69c8ebf958be84f165b8d0c93`
 

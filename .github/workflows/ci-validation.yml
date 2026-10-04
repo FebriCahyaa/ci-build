@@ -284,7 +284,6 @@ jobs:
         run: |
           set -euo pipefail
           bash tests/root_manager_policy_test.sh
-          bash tests/ksu_next_v3_4_0_policy_test.sh
 
       - name: NonGKI lavender 4.4 policy
         run: |

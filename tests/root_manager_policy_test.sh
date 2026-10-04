@@ -4,13 +4,16 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 fail=0
 check(){ grep -qE "$2" "$1" && echo "PASS: $3" || { echo "FAIL: $3" >&2; fail=1; }; }
 check "$ROOT/scripts/root_manager_apply.sh" 'v0\.9\.5' 'official KernelSU 4.x pins v0.9.5'
-check "$ROOT/scripts/root_manager_apply.sh" 'v1\.1\.1' 'KernelSU-Next 4.4 compatibility line is pinned'
-check "$ROOT/scripts/root_manager_apply.sh" 'v3\.4\.0' 'KernelSU-Next 4.19/GKI line is pinned'
+check "$ROOT/scripts/root_manager_apply.sh" 'KSU_NEXT_44_REF=.*v1\.1\.1' 'KernelSU-Next 4.4 has an explicit legacy compatibility pin'
+check "$ROOT/scripts/root_manager_apply.sh" 'KSU_NEXT_LEGACY_REF=.*v3\.4\.0' 'KernelSU-Next 4.19+ legacy line is pinned to v3.4.0'
+check "$ROOT/scripts/root_manager_apply.sh" 'KSU_NEXT_GKI_REF=.*v3\.4\.0' 'KernelSU-Next GKI line is pinned to v3.4.0'
 check "$ROOT/scripts/root_manager_apply.sh" 'v4\.2\.0-rc3' 'ReSukiSU deterministic default is pinned'
 check "$ROOT/scripts/root_manager_apply.sh" 'SukiSU-Ultra/SukiSU-Ultra' 'SukiSU Ultra upstream is wired'
 check "$ROOT/scripts/root_manager_apply.sh" 'PROVIDER_PATCH_DIR' 'provider-specific patch registry is wired'
 check "$ROOT/scripts/apply_nongki_4_4.sh" 'provider-native' 'provider-native 4.4 hook path is explicit'
 check "$ROOT/scripts/build_kernel.sh" 'SUKISU_ULTRA_REF_DEFAULT' 'build kernel defines SukiSU Ultra ref'
+check "$ROOT/scripts/build_kernel.sh" 'KSU_NEXT_44_REF' 'build kernel carries explicit KSU-Next 4.4 ref'
+check "$ROOT/scripts/build_variants.sh" 'KSU_NEXT_44_REF' 'matrix runner carries explicit KSU-Next 4.4 ref'
 check "$ROOT/scripts/build_kernel.sh" 'ROOT_MANAGER_SOURCE_ROOT' 'build kernel passes root-manager source root'
 check "$ROOT/scripts/root_manager_apply.sh" 'official KernelSU is not supported by upstream on Linux' 'official KernelSU 4.4 fail-closed gate'
 check "$ROOT/scripts/apply_susfs.sh" 'git apply --check' 'SUSFS uses strict patch preflight'

@@ -153,6 +153,16 @@ if [[ "$PHASE" == "source" ]]; then
   esac
 
   if [[ "$KSU_REQUIRED" == "true" && "$ROOT_MANAGER" != "none" ]]; then
+    # Provider patches target the isolated provider checkout and are handled
+    # by root_manager_apply.sh. Some provider versions additionally require a
+    # small compatibility backport in the host kernel tree itself. Keep those
+    # patches in a separate host-series registry so they never touch the
+    # provider gitlink/submodule.
+    if [[ "$ROOT_MANAGER" == "kernelsu-next" ]]; then
+      host_series="$PATCH_ROOT/root-manager/kernelsu-next/$KERNEL_MM/host-series.conf"
+      [[ -f "$host_series" ]] && series_apply "$host_series"
+    fi
+
     root_series="$(root_file "$ROOT_MANAGER" series.conf)"
     [[ -n "$root_series" ]] && series_apply "$root_series"
   fi

@@ -5,6 +5,7 @@ PIPE="$ROOT/harness/kernel-pipeline.yaml"
 WF="$ROOT/.github/workflows/harness-kernel.yml"
 BUILD="$ROOT/scripts/build_kernel.sh"
 FETCH="$ROOT/scripts/fetch_harness_staging_assets.sh"
+STAGE="$ROOT/scripts/stage_ci_release_assets.sh"
 
 # Harness must stage artifacts regardless of public release publication and must
 # not send bulky build files directly to Telegram from the ephemeral runner.
@@ -14,14 +15,18 @@ grep -q 'CI_ARTIFACT_STAGE: "true"' "$PIPE"
 grep -q 'trap .*finalize_handoff' "$PIPE"
 grep -q 'handoff_release=harness-' "$PIPE"
 grep -q 'bash scripts/stage_ci_release_assets.sh' "$PIPE"
+grep -q 'type: Plugin' "$PIPE"
+grep -q 'publish_harness_artifact_handoff' "$PIPE"
+grep -q 'plugins/artifact-metadata-publisher' "$PIPE"
+grep -q 'stageStatus: All' "$PIPE"
 grep -q 'CLEAN_PREFIX="staging-"' "$PIPE"
 # Finalization must execute assemble_release_assets with environment assignments.
 grep -q 'SOURCE_ROOT="$PWD/work"' "$PIPE"
 grep -q 'ASSET_DIR="$PWD/release/assets"' "$PIPE"
 grep -q 'bash scripts/assemble_release_assets.sh' "$PIPE"
 
-# The handoff is a draft release, so the consuming Actions job needs push-level
-# contents access; contents: read cannot enumerate draft releases and appears as 404.
+# The handoff is a published prerelease, so GET /releases/tags/{tag} is
+# resolvable by GitHub Actions without draft-release enumeration.
 grep -A6 '^  trigger-harness:' "$WF" | grep -q 'contents: write'
 
 # GitHub Actions must materialize the per-execution handoff, retain it as an
@@ -31,6 +36,10 @@ grep -q 'scripts/fetch_harness_staging_assets.sh' "$WF"
 grep -q 'actions/upload-artifact@v4' "$WF"
 grep -q 'name: harness-${{ inputs.build_profile }}-${{ steps.trigger.outputs.plan_execution_id }}' "$WF"
 grep -q 'TG_SKIP_ASSET_UPLOAD: "false"' "$WF"
+grep -q 'READY_ASSET_NAME' "$FETCH"
+grep -q 'handoff-HANDOFF-READY.txt' "$STAGE"
+! grep -q 'bash scripts/send_release_to_telegram.sh' "$PIPE"
+grep -q 'cleanup_ci_release_transients.sh' "$WF"
 
 # Failure reports are copied into the persistent artifact directory before fail() exits.
 grep -q 'cp -f "\$summary" "\$ARTIFACTS/failure-summary.txt"' "$BUILD"

@@ -226,18 +226,7 @@ pipeline:
                               ASSET_DIR="$PWD/release/assets" \
                               bash scripts/publish_ci_release.sh || \
                               echo "[harness] public release publication failed; staging handoff remains the fallback" >&2
-                            if [[ -n "${TG_RELEASE_TOPIC_ID:-}" ]]; then
-                              TG_BOT_TOKEN="$TG_BOT_TOKEN" TG_CHAT_ID="$TG_CHAT_ID" \
-                                TG_RELEASE_TOPIC_ID="$TG_RELEASE_TOPIC_ID" TG_RELEASE_REQUIRE_TOPIC=true \
-                                GITHUB_TOKEN="$GH_TOKEN" GH_REPOSITORY="$GH_REPOSITORY" \
-                                RELEASE_TAG="harness-${HARNESS_EXECUTION_ID}" \
-                                BUILD_PROFILE="$BUILD_PROFILE" RELEASE_STATUS=PUBLISHED \
-                                TG_SKIP_ASSET_UPLOAD=false \
-                                bash scripts/send_release_to_telegram.sh || \
-                                echo "[harness] release-topic Telegram relay failed; GitHub Release remains published" >&2
-                            else
-                              echo "[harness] tg_release_topic_id secret is not configured; release Telegram relay skipped" >&2
-                            fi
+                            echo "[harness] public release published; GitHub Actions owns the release-topic Telegram relay" >&2
                           else
                             echo "[harness] no installable package exists; retaining diagnostic staging release" >&2
                           fi
@@ -276,3 +265,16 @@ pipeline:
                       fi
 
                       exit "$matrix_rc"
+
+              - step:
+                  type: Plugin
+                  name: Publish Harness Artifact Handoff
+                  identifier: publish_harness_artifact_handoff
+                  timeout: 5m
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: plugins/artifact-metadata-publisher
+                    settings:
+                      file_urls: Zairenkai CI handoff:::https://github.com/FebriCahyaa/ci-build/releases/tag/harness-<+pipeline.executionId>
+                  when:
+                    stageStatus: All

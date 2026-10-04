@@ -135,8 +135,8 @@ jobs:
   trigger-harness:
     runs-on: ubuntu-latest
     timeout-minutes: 150
-    # The Harness handoff is intentionally stored as a draft GitHub Release.
-    # GitHub only exposes draft releases to callers with push-level access.
+    # The Harness handoff is a published prerelease so GET /releases/tags/{tag}
+    # can resolve it from GitHub Actions without relying on draft-only visibility.
     permissions:
       contents: write
     steps:
@@ -156,7 +156,7 @@ jobs:
           set -euo pipefail
           chmod +x scripts/*.sh
           python3 -m py_compile scripts/harness_monitor.py
-          bash -n scripts/build_variants.sh scripts/build_kernel.sh scripts/apply_nongki_4_4.sh scripts/apply_susfs.sh scripts/assemble_release_assets.sh scripts/publish_ci_release.sh scripts/stage_ci_release_assets.sh
+          bash -n scripts/build_variants.sh scripts/build_kernel.sh scripts/apply_nongki_4_4.sh scripts/apply_susfs.sh scripts/assemble_release_assets.sh scripts/publish_ci_release.sh scripts/stage_ci_release_assets.sh scripts/fetch_harness_staging_assets.sh scripts/cleanup_ci_release_transients.sh scripts/send_release_to_telegram.sh
           test -f profiles/targets/${{ inputs.build_profile }}.conf
           test -f anykernel/anykernel.sh
           git rev-parse HEAD
@@ -375,6 +375,14 @@ jobs:
           TG_SKIP_ASSET_UPLOAD: "false"
           HARNESS_MONITOR_FILE: harness-monitor.json
         run: bash scripts/send_release_to_telegram.sh
+
+      - name: Clean transient Harness release assets
+        if: always() && steps.trigger.outputs.plan_execution_id != '' && inputs.publish_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.trigger.outputs.release_tag }}
+        run: bash scripts/cleanup_ci_release_transients.sh
 
       - name: Propagate Harness result
         if: always()

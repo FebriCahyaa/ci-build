@@ -9,7 +9,7 @@ KSU_REPO="${KSU_REPO:-}"
 KSU_REF="${KSU_REF:-auto}"
 ENABLE_SUSFS="${ENABLE_SUSFS:-false}"
 KSU_HOOK_MODE="${KSU_HOOK_MODE:-auto}"
-KSU_NEXT_4_4_REF="${KSU_NEXT_4_4_REF:-v1.1.1}"
+KSU_NEXT_44_REF="${KSU_NEXT_44_REF:-v1.1.1}"
 KSU_NEXT_LEGACY_REF="${KSU_NEXT_LEGACY_REF:-v3.4.0}"
 KSU_NEXT_GKI_REF="${KSU_NEXT_GKI_REF:-v3.4.0}"
 RESUKISU_REF_DEFAULT="${RESUKISU_REF_DEFAULT:-v4.2.0-rc3}"
@@ -64,15 +64,13 @@ case "$ROOT_MANAGER" in
     PROVIDER="kernelsu-next"; PROVIDER_REPO="${KSU_REPO:-https://github.com/KernelSU-Next/KernelSU-Next}"; SOURCE_SUBDIR="kernelsu-next"
     if [[ "$KSU_REF" == "auto" || -z "$KSU_REF" ]]; then
       if [[ "$KERNEL_MM" == "4.4" ]]; then
-        PROVIDER_REF="$KSU_NEXT_4_4_REF"
+        PROVIDER_REF="$KSU_NEXT_44_REF"
       elif [[ "$KERNEL_MAJOR" -gt 5 || ( "$KERNEL_MAJOR" -eq 5 && "$KERNEL_MINOR" -ge 10 ) ]]; then
         PROVIDER_REF="$KSU_NEXT_GKI_REF"
       else
         PROVIDER_REF="$KSU_NEXT_LEGACY_REF"
       fi
-    else
-      PROVIDER_REF="$KSU_REF"
-    fi
+    else PROVIDER_REF="$KSU_REF"; fi
     ;;
   resukisu|re-sukisu)
     PROVIDER="resukisu"; PROVIDER_REPO="${KSU_REPO:-https://github.com/ReSukiSU/ReSukiSU}"; SOURCE_SUBDIR="resukisu"

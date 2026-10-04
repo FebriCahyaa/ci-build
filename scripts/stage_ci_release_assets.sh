@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Stage build artifacts into a per-execution draft GitHub Release.
-# Used by Harness so successful matrix variants remain downloadable even when
-# another variant fails later. Final publishing reuses the same tag.
+# Stage build artifacts into a per-execution published prerelease GitHub Release.
+# Used by Harness so successful/failed matrix diagnostics remain downloadable
+# to GitHub Actions and visible through the Harness artifact metadata link.
+# Final publishing reuses the same tag and removes the handoff assets.
 set -Eeuo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib/common.sh"
 CI_LOG_TAG=release-stage
@@ -59,17 +60,49 @@ ensure_release() {
     ci_die "GitHub release lookup failed: HTTP $code"
   }
 
+  # A draft release cannot be fetched through GitHub's GET /releases/tags/{tag}
+  # endpoint. Publish the handoff as a prerelease instead; it is still non-latest
+  # and can later be promoted to a normal release by publish_ci_release.sh.
   body="$(python3 - "$RELEASE_TAG" <<'PYBODY'
 import json, sys
 print(json.dumps({
     "tag_name": sys.argv[1],
     "name": "Zairenkai CI — " + sys.argv[1],
-    "body": "CI staging release. Artifacts are uploaded as each variant completes.",
-    "draft": True,
-    "prerelease": False,
+    "body": "CI handoff prerelease. Artifacts are uploaded as each variant completes.",
+    "draft": False,
+    "prerelease": True,
 }, separators=(",", ":")))
 PYBODY
 )"
+
+  # Migrate a release created by the previous draft-based implementation.
+  existing_releases="$(curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+    "$API/repos/${GH_REPOSITORY}/releases?per_page=100")"
+  existing_id="$(python3 - "$existing_releases" "$RELEASE_TAG" <<'PY_EXISTING'
+import json, sys
+for item in json.loads(sys.argv[1]):
+    if item.get('tag_name') == sys.argv[2]:
+        print(item.get('id',''))
+        break
+PY_EXISTING
+)"
+  if [[ -n "$existing_id" ]]; then
+    echo "[release-stage] migrating existing draft handoff $RELEASE_TAG to published prerelease"
+    set +e
+    migrate_code="$(curl -sSL --retry 4 --retry-delay 2 -X PATCH "${AUTH[@]}" \
+      -H 'Content-Type: application/json' \
+      "$API/repos/${GH_REPOSITORY}/releases/${existing_id}" \
+      --data "$body" -o "$RELEASE_JSON" -w '%{http_code}')"
+    curl_rc=$?
+    set -e
+    if (( curl_rc == 0 )) && [[ "$migrate_code" =~ ^20[01]$ ]]; then
+      flock -u 9
+      return 0
+    fi
+    flock -u 9
+    ci_die "unable to migrate existing GitHub staging release $RELEASE_TAG (HTTP ${migrate_code:-curl-error})"
+  fi
+
   set +e
   response="$(curl -sSL --retry 3 --retry-delay 2 -X POST "${AUTH[@]}" \
     -H 'Content-Type: application/json' \
@@ -83,15 +116,24 @@ PYBODY
     return 0
   fi
 
-  # Another runner may have won the create race. Re-read the tag before giving up.
+  # Another runner may have won the create race, or an older draft may have
+  # become visible through the list endpoint. Reconcile by exact tag.
   if [[ "$response" == 422 ]]; then
-    set +e
-    code="$(curl -sSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
-      -o "$RELEASE_JSON" -w '%{http_code}' \
-      "$API/repos/${GH_REPOSITORY}/releases/tags/${TAG_ENC}")"
-    curl_rc=$?
-    set -e
-    if (( curl_rc == 0 )) && [[ "$code" == 200 ]]; then
+    existing_releases="$(curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+      "$API/repos/${GH_REPOSITORY}/releases?per_page=100")"
+    existing_id="$(python3 - "$existing_releases" "$RELEASE_TAG" <<'PY_EXISTING2'
+import json, sys
+for item in json.loads(sys.argv[1]):
+    if item.get('tag_name') == sys.argv[2]:
+        print(item.get('id',''))
+        break
+PY_EXISTING2
+)"
+    if [[ -n "$existing_id" ]]; then
+      curl -fsSL --retry 4 --retry-delay 2 -X PATCH "${AUTH[@]}" \
+        -H 'Content-Type: application/json' \
+        "$API/repos/${GH_REPOSITORY}/releases/${existing_id}" \
+        --data "$body" > "$RELEASE_JSON"
       flock -u 9
       return 0
     fi
@@ -100,7 +142,6 @@ PYBODY
   flock -u 9
   ci_die "unable to create GitHub staging release $RELEASE_TAG (HTTP ${response:-curl-error})"
 }
-
 
 exec 9>"$LOCK_FILE"
 ensure_release
@@ -171,14 +212,45 @@ for item in json.loads(sys.argv[1]):
 PY
 )"
   if [[ -n "$asset_id" ]]; then
-    curl -fsSL -X DELETE "${AUTH[@]}" "$API/repos/${GH_REPOSITORY}/releases/assets/${asset_id}" >/dev/null
+    curl -fsSL --retry 4 --retry-delay 2 -X DELETE "${AUTH[@]}" \
+      "$API/repos/${GH_REPOSITORY}/releases/assets/${asset_id}" >/dev/null
   fi
 
   echo "[release-stage] uploading $name"
-  curl -fsSL -X POST "${AUTH[@]}" \
+  curl -fsSL --retry 4 --retry-delay 2 -X POST "${AUTH[@]}" \
     -H 'Content-Type: application/octet-stream' \
     --data-binary "@$file" \
     "${UPLOAD_URL}?name=${encoded}" >/dev/null
- done
+done
 
-printf '%s\n' "[release-stage] staged $((${#assets[@]})) asset(s) into draft $RELEASE_TAG"
+# Upload a completion marker *last*. fetch_harness_staging_assets.sh waits for
+# this file, preventing a race where it sees the release before its real assets
+# have finished uploading. Only handoff-prefixed staging gets the marker.
+if [[ "$ASSET_PREFIX" == "handoff" ]]; then
+  READY_NAME="handoff-HANDOFF-READY.txt"
+  READY_FILE="$STATE_DIR/$READY_NAME"
+  printf 'release_tag=%s\nstatus=READY\nasset_count=%s\n' \
+    "$RELEASE_TAG" "${#assets[@]}" > "$READY_FILE"
+  assets_json="$(curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+    "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100")"
+  ready_id="$(python3 - "$assets_json" "$READY_NAME" <<'PY_READY_ID'
+import json,sys
+for item in json.loads(sys.argv[1]):
+    if item.get('name') == sys.argv[2]:
+        print(item.get('id',''))
+        break
+PY_READY_ID
+)"
+  if [[ -n "$ready_id" ]]; then
+    curl -fsSL --retry 4 --retry-delay 2 -X DELETE "${AUTH[@]}" \
+      "$API/repos/${GH_REPOSITORY}/releases/assets/${ready_id}" >/dev/null
+  fi
+  echo "[release-stage] uploading $READY_NAME"
+  curl -fsSL --retry 4 --retry-delay 2 -X POST "${AUTH[@]}" \
+    -H 'Content-Type: text/plain' \
+    --data-binary "@$READY_FILE" \
+    "${UPLOAD_URL}?name=$(urlencode "$READY_NAME")" >/dev/null
+  rm -f "$READY_FILE"
+fi
+
+printf '%s\n' "[release-stage] staged $((${#assets[@]} + $( [[ "$ASSET_PREFIX" == "handoff" ]] && echo 1 || echo 0 ))) asset(s) into published prerelease $RELEASE_TAG"

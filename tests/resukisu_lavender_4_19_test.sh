@@ -66,7 +66,7 @@ if [[ "${VERIFY_REMOTE_PATCHES:-false}" == "true" ]]; then
   grep -qE 'config KPROBES' "$tmp/kernel/arch/Kconfig" || { echo 'FAIL: target KPROBES Kconfig missing' >&2; fail=1; }
   grep -qE 'depends on MODULES' "$tmp/kernel/arch/Kconfig" || { echo 'FAIL: target KPROBES MODULES dependency missing' >&2; fail=1; }
   grep -qE 'depends on KPROBES' "$tmp/ksu-next/kernel/Kconfig" || { echo 'FAIL: KSU-Next legacy dependency on KPROBES missing' >&2; fail=1; }
-  echo 'PASS: remote KSU-Next v3.4.0 4.19 Kconfig dependency contract'
+  echo 'PASS: remote KSU-Next 4.19 Kconfig dependency contract'
 fi
 
 exit "$fail"

@@ -1,4 +1,4 @@
-# KernelSU-Next v3.4.0 / Linux 4.19: built-in KSU via Kprobe legacy path.
+# KernelSU-Next v3.4.0 / Linux 4.19: built-in KSU via the legacy Kprobe path.
 # KPROBES depends on MODULES in this kernel generation, even though KSU itself
 # is compiled into vmlinux.
 CONFIG_MODULES=y

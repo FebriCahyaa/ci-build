@@ -13,6 +13,7 @@ CI_LOG_TAG=harness-fetch
 OUT_DIR="${OUT_DIR:-${RUNNER_TEMP:-/tmp}/harness-artifacts}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-36}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-10}"
+READY_ASSET_NAME="${READY_ASSET_NAME:-handoff-HANDOFF-READY.txt}"
 
 API="${GITHUB_API:-https://api.github.com}"
 AUTH=(
@@ -44,8 +45,25 @@ for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
   set -e
 
   if (( curl_rc == 0 )) && [[ "$status" == "200" ]]; then
-    found=true
-    break
+    ready="$(python3 - "$RELEASE_JSON" "$READY_ASSET_NAME" <<'PY_READY'
+import json,sys
+r=json.load(open(sys.argv[1],encoding='utf-8'))
+if r.get('draft', True):
+    print('draft')
+    raise SystemExit(0)
+for a in r.get('assets',[]):
+    if isinstance(a,dict) and a.get('name') == sys.argv[2]:
+        print('ready')
+        break
+else:
+    print('waiting')
+PY_READY
+)"
+    if [[ "$ready" == "ready" ]]; then
+      found=true
+      break
+    fi
+    status="200/no-ready-marker"
   fi
 
   last_status="${status:-curl-error}"
@@ -54,12 +72,14 @@ for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
 done
 
 [[ "$found" == true ]] || ci_die \
-  "Harness staging release was not found: $RELEASE_TAG (last_status=$last_status; draft releases require push-level contents access)"
+  "Harness staging release handoff was not ready: $RELEASE_TAG (last_status=$last_status; expected published prerelease + $READY_ASSET_NAME)"
 
-python3 - "$RELEASE_JSON" "$OUT_DIR" <<'PY'
+python3 - "$RELEASE_JSON" "$OUT_DIR" "$READY_ASSET_NAME" <<'PY'
 import json, os, sys
 release=json.load(open(sys.argv[1], encoding='utf-8'))
 out=sys.argv[2]
+ready_name=sys.argv[3]
+is_prerelease=bool(release.get('prerelease'))
 assets=[]
 for item in release.get('assets', []):
     if not isinstance(item, dict):
@@ -67,12 +87,20 @@ for item in release.get('assets', []):
     asset_id=str(item.get('id') or '').strip()
     name=str(item.get('name') or '').strip()
     url=str(item.get('url') or '').strip()
-    if asset_id and name and url:
-        assets.append((asset_id,name,url))
+    if not (asset_id and name and url):
+        continue
+    if name == ready_name:
+        continue
+    # During the Harness handoff, fetch the handoff copies. Once the same
+    # release is promoted to final, fetch only canonical assets so Telegram
+    # and Actions never receive duplicate handoff/staging files.
+    if not is_prerelease and (name.startswith('handoff-') or name.startswith('staging-')):
+        continue
+    assets.append((asset_id,name,url))
 with open(os.path.join(out,'assets.tsv'),'w',encoding='utf-8') as fh:
     for row in assets:
         fh.write('\t'.join(row)+'\n')
-print(f"asset_count={len(assets)}")
+print(f"release_prerelease={str(is_prerelease).lower()} asset_count={len(assets)}")
 PY
 
 count=0

@@ -73,7 +73,10 @@ Root providers are integrated through `scripts/root_manager_apply.sh` using
 the upstream `drivers/kernelsu` integration layout.
 
 Linux 4.19 pins official KernelSU to `v0.9.5`, the last official non-GKI
-release. KernelSU-Next defaults to `v1.1.1` on legacy 4.x and `v3.4.0` on GKI 5.10. ReSukiSU is pinned to `v4.2.0-rc3`.
+release. KernelSU-Next defaults to `v3.4.0` on Linux 4.19 and later, while the
+separate Linux 4.4 compatibility path remains pinned to `v1.1.1` until a full
+v3.4.0-on-4.4 compile/backport validation is complete. ReSukiSU is pinned to
+`v4.2.0-rc3`.
 
 SUSFS for Linux 4.19 uses upstream `simonpunk/susfs4ksu` revision
 `001e69919c6271f690fd00b17e4c721c9e599152` (the dedicated `kernel-4.19` branch's latest compatible
