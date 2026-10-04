@@ -42,9 +42,8 @@ PY
 }
 
 mkdir -p "$ASSET_DIR"
-shopt -s nullglob
-ASSETS=("$ASSET_DIR"/*)
-((${#ASSETS[@]} > 0)) || { echo "ERROR: no assets to publish in $ASSET_DIR" >&2; exit 1; }
+mapfile -t ASSETS < <(find "$ASSET_DIR" -maxdepth 1 -type f -print | sort)
+((${#ASSETS[@]} > 0)) || { echo "ERROR: no files to publish in $ASSET_DIR" >&2; exit 1; }
 
 if [[ -n "$RELEASE_BODY_FILE" ]]; then
   [[ -f "$RELEASE_BODY_FILE" ]] || { echo "ERROR: RELEASE_BODY_FILE not found: $RELEASE_BODY_FILE" >&2; exit 1; }
@@ -54,27 +53,63 @@ TAG_ENC="$(urlencode "$RELEASE_TAG")"
 RELEASE_JSON="$(mktemp)"
 trap 'rm -f "$RELEASE_JSON"' EXIT
 
-# Create or update the release. Updating makes reruns deterministic instead of
-# producing duplicate releases/assets for the same tag.
-if curl -fsSL "${AUTH[@]}" "$API/repos/${GH_REPOSITORY}/releases/tags/${TAG_ENC}" > "$RELEASE_JSON" 2>/dev/null; then
-  RELEASE_ID="$(python3 - "$RELEASE_JSON" <<'PY'
-import json,sys
-print(json.load(open(sys.argv[1],encoding='utf-8'))['id'])
-PY
-)"
-  curl -fsSL -X PATCH "${AUTH[@]}" -H 'Content-Type: application/json' \
-    "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}" \
-    --data "$(json_payload "$RELEASE_TAG" "$RELEASE_NAME" "$RELEASE_DRAFT" "$RELEASE_PRERELEASE" "${RELEASE_BODY_FILE:-}")" > "$RELEASE_JSON"
-else
-  curl -fsSL -X POST "${AUTH[@]}" -H 'Content-Type: application/json' \
-    "$API/repos/${GH_REPOSITORY}/releases" \
-    --data "$(json_payload "$RELEASE_TAG" "$RELEASE_NAME" "$RELEASE_DRAFT" "$RELEASE_PRERELEASE" "${RELEASE_BODY_FILE:-}")" > "$RELEASE_JSON"
-  RELEASE_ID="$(python3 - "$RELEASE_JSON" <<'PY'
-import json,sys
-print(json.load(open(sys.argv[1],encoding='utf-8'))['id'])
-PY
-)"
+# Create or update the release. Distinguish a real 404 from transient API/network
+# errors so a rate-limit or outage can never accidentally create a duplicate tag.
+set +e
+release_code="$(curl -sSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+  -o "$RELEASE_JSON" -w '%{http_code}' \
+  "$API/repos/${GH_REPOSITORY}/releases/tags/${TAG_ENC}")"
+curl_rc=$?
+set -e
+if (( curl_rc != 0 )); then
+  echo "ERROR: GitHub release lookup failed for tag $RELEASE_TAG" >&2
+  exit 1
 fi
+
+case "$release_code" in
+  200)
+    RELEASE_ID="$(python3 - "$RELEASE_JSON" <<'PY'
+import json,sys
+print(json.load(open(sys.argv[1],encoding='utf-8'))['id'])
+PY
+)"
+    curl -fsSL --retry 4 --retry-delay 2 -X PATCH "${AUTH[@]}" -H 'Content-Type: application/json' \
+      "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}" \
+      --data "$(json_payload "$RELEASE_TAG" "$RELEASE_NAME" "$RELEASE_DRAFT" "$RELEASE_PRERELEASE" "${RELEASE_BODY_FILE:-}")" > "$RELEASE_JSON"
+    ;;
+  404)
+    set +e
+    create_code="$(curl -sSL --retry 3 --retry-delay 2 -X POST "${AUTH[@]}" -H 'Content-Type: application/json' \
+      "$API/repos/${GH_REPOSITORY}/releases" \
+      --data "$(json_payload "$RELEASE_TAG" "$RELEASE_NAME" "$RELEASE_DRAFT" "$RELEASE_PRERELEASE" "${RELEASE_BODY_FILE:-}")" \
+      -o "$RELEASE_JSON" -w '%{http_code}')"
+    curl_rc=$?
+    set -e
+    if (( curl_rc != 0 )); then
+      echo "ERROR: GitHub release create request failed for tag $RELEASE_TAG" >&2
+      exit 1
+    fi
+    if [[ "$create_code" == 422 ]]; then
+      # Another actor created the tag between our GET and POST. Re-read it.
+      curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+        "$API/repos/${GH_REPOSITORY}/releases/tags/${TAG_ENC}" > "$RELEASE_JSON"
+    elif [[ ! "$create_code" =~ ^20[01]$ ]]; then
+      echo "ERROR: GitHub release create failed: HTTP $create_code" >&2
+      cat "$RELEASE_JSON" >&2 || true
+      exit 1
+    fi
+    RELEASE_ID="$(python3 - "$RELEASE_JSON" <<'PY'
+import json,sys
+print(json.load(open(sys.argv[1],encoding='utf-8'))['id'])
+PY
+)"
+    ;;
+  *)
+    echo "ERROR: GitHub release lookup returned HTTP $release_code" >&2
+    cat "$RELEASE_JSON" >&2 || true
+    exit 1
+    ;;
+esac
 
 UPLOAD_URL="$(python3 - "$RELEASE_JSON" <<'PY'
 import json,sys
@@ -100,14 +135,18 @@ PY
 )
 
 # Final publication removes per-variant draft assets staged during the build,
-# leaving only the canonical release assets.
+# leaving only the canonical release assets. Refresh the remote inventory after
+# same-name replacement/deletion so cleanup sees assets created in this run too.
 if [[ "${RELEASE_CLEAN_STAGING,,}" == "true" ]]; then
+  FINAL_ASSETS_JSON="$(curl -fsSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+    "$API/repos/${GH_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100")"
   while IFS=$'\t' read -r asset_id asset_name; do
     [[ -n "$asset_id" ]] || continue
     [[ "$asset_name" == staging-* ]] || continue
     echo "[release] removing staged asset $asset_name"
-    curl -fsSL -X DELETE "${AUTH[@]}" "$API/repos/${GH_REPOSITORY}/releases/assets/${asset_id}" >/dev/null
-  done < <(python3 - "$ASSETS_JSON" <<'PY'
+    curl -fsSL --retry 4 --retry-delay 2 -X DELETE "${AUTH[@]}" \
+      "$API/repos/${GH_REPOSITORY}/releases/assets/${asset_id}" >/dev/null
+  done < <(python3 - "$FINAL_ASSETS_JSON" <<'PY'
 import json,sys
 for a in json.loads(sys.argv[1]):
     print(f"{a['id']}\t{a['name']}")
@@ -120,7 +159,7 @@ for file in "${ASSETS[@]}"; do
   name="$(basename "$file")"
   encoded="$(urlencode "$name")"
   echo "[release] uploading $name"
-  curl -fsSL -X POST "${AUTH[@]}" \
+  curl -fsSL --retry 4 --retry-delay 2 -X POST "${AUTH[@]}" \
     -H 'Content-Type: application/octet-stream' \
     --data-binary "@$file" \
     "${UPLOAD_URL}?name=${encoded}" >/dev/null

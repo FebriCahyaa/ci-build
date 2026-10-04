@@ -276,14 +276,17 @@ jobs:
           name: kernel-${{ inputs.build_profile }}-${{ matrix.variant }}
           path: |
             work/artifacts/**
-            work/error_tail.log
-          if-no-files-found: error
+            work/failure-summary.txt
+            work/failure-build.log.gz
+          if-no-files-found: warn
           retention-days: 14
 
   release:
     name: Release ${{ inputs.build_profile }}
     needs: build
-    if: needs.build.result == 'success' && inputs.release
+    # Build failures still leave successful matrix artifacts and diagnostics.
+    # Finalize those instead of silently skipping the release job.
+    if: always() && inputs.release && (needs.build.result == 'success' || needs.build.result == 'failure')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout CI repository
@@ -294,6 +297,7 @@ jobs:
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           path: release/artifacts
 
@@ -301,15 +305,19 @@ jobs:
         env:
           BUILD_PROFILE: ${{ inputs.build_profile }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           mkdir -p release/assets
-          find release/artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp -f {} release/assets/ \;
-          test -n "$(find release/assets -type f -print -quit)"
-          INFO_ROOT="release/artifacts" OUT_FILE="release/CHANGELOG.md" bash scripts/generate_changelog.sh aggregate
-          printf '%s\n' "$(git log -1 --pretty='%h %s')" >> release/CHANGELOG.md
-          cp -f release/CHANGELOG.md release/assets/CHANGELOG.md
-          (cd release/assets && sha256sum *.tar.gz *.zip CHANGELOG.md > SHA256SUMS)
-          cp -f release/assets/SHA256SUMS release/SHA256SUMS
+          bash scripts/assemble_release_assets.sh \
+            SOURCE_ROOT="$PWD/release/artifacts" \
+            ASSET_DIR="$PWD/release/assets" \
+            CHANGELOG_OUT="$PWD/release/CHANGELOG.md" \
+            BUILD_PROFILE="$BUILD_PROFILE" \
+            MATRIX_SUMMARY="$PWD/release/artifacts/matrix-summary.txt"
+          package_count="$(find release/assets -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) | wc -l | tr -d ' ')"
+          if (( package_count == 0 )); then
+            echo '::error::No successful kernel/AnyKernel package was produced; release cannot be published.'
+            exit 1
+          fi
 
       - name: Publish GitHub release
         env:

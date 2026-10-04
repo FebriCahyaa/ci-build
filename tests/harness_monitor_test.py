@@ -31,6 +31,11 @@ mod.edit = lambda message_id, text: True
 mod.github_progress_state = lambda: (None, "", "")
 mod.github_release_state = lambda: ("", "")
 
+
+bar0, label0 = mod.progress_bar("RUNNING", 0, 1, 0, None, 1)
+bar1, label1 = mod.progress_bar("RUNNING", 0, 1, 1, None, 1)
+assert label0 == "LIVE" and label1 == "LIVE", (bar0, label0, bar1, label1)
+assert bar0 != bar1, "live Harness progress bar must animate while the step is running"
 calls = {"count": 0}
 def api_get(path):
     calls["count"] += 1

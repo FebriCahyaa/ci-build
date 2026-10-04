@@ -1048,6 +1048,7 @@ def progress_bar(
     total: int,
     frame: int,
     telemetry_pct: int | None = None,
+    active: int = 0,
 ) -> tuple[str, str]:
     state = norm(status)
 
@@ -1062,6 +1063,17 @@ def progress_bar(
 
     if total > 0:
         pct = int(round(done * 100 / total))
+        if state in RUNNING_STATES and active > 0 and done < total:
+            # Harness exposes the matrix as one long-running step, so a real
+            # numeric compiler percentage is unavailable here. Show a moving
+            # indeterminate progress pulse instead of a misleading frozen 0%.
+            span = max(1, BAR_WIDTH * 2 - 2)
+            pos = frame % span
+            if pos >= BAR_WIDTH:
+                pos = span - pos
+            cells = ["░"] * BAR_WIDTH
+            cells[pos] = "█"
+            return "".join(cells), "LIVE"
         if state not in TERMINAL:
             pct = min(pct, 99)
         filled = int(round(BAR_WIDTH * pct / 100))
@@ -1192,6 +1204,7 @@ def render(
         total,
         frame,
         telemetry_pct,
+        active,
     )
 
     current = html.escape(

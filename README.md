@@ -52,10 +52,14 @@ Run `Build Kernel` and choose one canonical profile. `variants` accepts comma- o
 
 The workflow has 25 `workflow_dispatch` inputs, within GitHub's limit. Release creation is opt-in. A successful release contains:
 
-- one kernel archive per root variant
-- one AnyKernel3 ZIP per root variant
+- one kernel archive per completed root variant
+- one AnyKernel3 ZIP per completed root variant
 - `CHANGELOG.md`
 - `SHA256SUMS`
+
+Release assembly is shared by GitHub Actions and Harness. When a matrix is
+partially successful, completed variants and failure diagnostics are retained
+instead of silently discarding the run; publishing remains opt-in.
 
 Release tags default to `zairenkai-<profile>-run-<run_number>` and are non-prerelease, so reruns with a custom tag update the existing release rather than creating a duplicate.
 
@@ -64,6 +68,9 @@ Release tags default to `zairenkai-<profile>-run-<run_number>` and are non-prere
 `harness/kernel-pipeline.yaml` is the reusable Harness Cloud pipeline. It uses the same profile registry and calls `scripts/build_variants.sh`, which prepares one pristine kernel source seed and shares ccache across its three variants.
 
 `.github/workflows/harness-kernel.yml` is the GitHub-to-Harness bridge and keeps its workflow inputs under 25. The bridge monitors the Harness execution and can relay the resulting release to Telegram.
+The Harness dashboard uses an animated `LIVE` progress state while the single
+long-running matrix step has no numeric percentage telemetry, so the UI does not
+appear frozen at 0%.
 
 Required Harness secret for release publishing:
 

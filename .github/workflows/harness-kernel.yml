@@ -144,7 +144,7 @@ jobs:
           set -euo pipefail
           chmod +x scripts/*.sh
           python3 -m py_compile scripts/harness_monitor.py
-          bash -n scripts/build_variants.sh scripts/build_kernel.sh scripts/publish_ci_release.sh
+          bash -n scripts/build_variants.sh scripts/build_kernel.sh scripts/assemble_release_assets.sh scripts/publish_ci_release.sh scripts/stage_ci_release_assets.sh
           test -f profiles/targets/${{ inputs.build_profile }}.conf
           test -f anykernel/anykernel.sh
           git rev-parse HEAD
@@ -302,7 +302,7 @@ jobs:
           GH_REPOSITORY: ${{ github.repository }}
           HARNESS_POLL_SECONDS: "3"
           HARNESS_UNKNOWN_IDLE_GRACE_SECONDS: "45"
-          TG_UI_INTERVAL: "1"
+          TG_UI_INTERVAL: "2"
           HARNESS_API_TIMEOUT: "10"
           HARNESS_GRAPH_FALLBACK_EVERY: "3"
           HARNESS_RELEASE_CHECK_EVERY: "6"

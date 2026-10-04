@@ -11,6 +11,8 @@ TG_START_TIME="${TG_START_TIME:-$(date +%s)}"
 TG_PROGRESS_INTERVAL="${TG_PROGRESS_INTERVAL:-5}"
 TG_PROGRESS_WIDTH="${TG_PROGRESS_WIDTH:-20}"
 TG_PROGRESS_STATE_FILE="${TG_PROGRESS_STATE_FILE:-${WORK_DIR:-/tmp}/.tg-progress-last}"
+TG_HTTP_TIMEOUT="${TG_HTTP_TIMEOUT:-8}"
+TG_MAX_RETRIES="${TG_MAX_RETRIES:-3}"
 
 if [[ -n "$TG_BOT_TOKEN" && -n "$TG_CHAT_ID" ]]; then
   API="https://api.telegram.org/bot${TG_BOT_TOKEN}"
@@ -23,7 +25,7 @@ fi
 tg_msg() {
   [[ "$TG_ENABLED" == true ]] || return 0
   local response="/tmp/tg_last_${TG_CHAT_ID//[^A-Za-z0-9_-]/_}.json"
-  curl -fsS -X POST "$API/sendMessage" \
+  curl -fsS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" -X POST "$API/sendMessage" \
     -d chat_id="$TG_CHAT_ID" \
     ${TG_TOPIC_ID:+-d message_thread_id="$TG_TOPIC_ID"} \
     -d parse_mode=HTML \
@@ -43,18 +45,21 @@ tg_edit() {
   local message_id="${1:-}"
   local message="${2:-}"
   [[ -n "$message_id" ]] || return 0
-  local delay=1
-  for _ in 1 2 3; do
-    local response
-    response="$(curl -sS -X POST "$API/editMessageText" \
+  local delay=1 attempt response
+  for ((attempt=1; attempt<=TG_MAX_RETRIES; attempt++)); do
+    response="$(curl -sS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" -X POST "$API/editMessageText" \
       -d chat_id="$TG_CHAT_ID" \
       -d message_id="$message_id" \
       -d parse_mode=HTML \
       -d disable_web_page_preview=true \
       --data-urlencode "text=$message" 2>/dev/null || true)"
-    if [[ -z "$response" || "$response" == *'"ok":true'* ]]; then
+    if [[ "$response" == *'"ok":true'* || "$response" == *'message is not modified'* ]]; then
       return 0
     fi
+    [[ -n "$response" ]] || {
+      [[ "$attempt" -lt "$TG_MAX_RETRIES" ]] && { sleep "$delay"; delay=$((delay * 2)); continue; }
+      return 1
+    }
     if [[ "$response" == *'retry after'* || "$response" == *'RetryAfter'* ]]; then
       sleep "$delay"
       delay=$((delay * 2))
@@ -70,7 +75,7 @@ tg_file() {
   local file="${1:-}"
   local caption="${2:-}"
   [[ -f "$file" ]] || return 0
-  curl -fsS -F chat_id="$TG_CHAT_ID" \
+  curl -fsS --connect-timeout "$TG_HTTP_TIMEOUT" --max-time "$TG_HTTP_TIMEOUT" -F chat_id="$TG_CHAT_ID" \
     ${TG_TOPIC_ID:+-F message_thread_id="$TG_TOPIC_ID"} \
     -F "document=@${file}" \
     -F parse_mode=HTML \
@@ -165,6 +170,9 @@ tg_progress_update() {
   safe_detail="$(tg_escape_html "$detail")"
   safe_tail="$tail"
   [[ -n "$safe_tail" ]] || safe_tail='Waiting for build output...'
+  # Telegram caps message text at 4096 characters. Bound only the log tail so
+  # the structural HTML is never truncated or left with a malformed </pre>.
+  safe_tail="${safe_tail:0:2500}"
 
   text="${icon} <b>Zairenkai Kernel Build</b>"$'\n'
   text+="📱 <code>${DEVICE:-unknown}</code> | 🔐 <code>${VARIANT_LABEL:-${ROOT_VARIANT:-unknown}}</code>"$'\n'
@@ -176,11 +184,9 @@ tg_progress_update() {
   fi
   text+=$'\n'"📜 <b>Live log</b>"$'\n'"<pre>${safe_tail}</pre>"
 
-  if (( ${#text} > 4090 )); then
-    text="${text:0:4040}...\n</pre>"
+  if tg_edit "$message_id" "$text"; then
+    printf '%s\n' "$signature" > "$TG_PROGRESS_STATE_FILE"
   fi
-  tg_edit "$message_id" "$text"
-  printf '%s\n' "$signature" > "$TG_PROGRESS_STATE_FILE"
 }
 
 fmt_dur() {

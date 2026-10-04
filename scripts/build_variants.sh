@@ -56,13 +56,13 @@ prepare_seed() {
 
 prepare_seed
 
-# Harness uses one per-execution staging release. Completed variants are
-# persisted immediately and survive later variant failures.
-if [[ -n "${HARNESS_EXECUTION_ID:-}" && -z "${CI_ARTIFACT_RELEASE_TAG:-}" ]]; then
-  export CI_ARTIFACT_RELEASE_TAG="harness-${HARNESS_EXECUTION_ID}"
-fi
-if [[ -n "${CI_ARTIFACT_RELEASE_TAG:-}" ]]; then
-  export CI_ARTIFACT_STAGE="${CI_ARTIFACT_STAGE:-true}"
+# Harness uses one per-execution staging release only when artifact staging is
+# explicitly enabled. This prevents PUBLISH_RELEASE=false runs from creating
+# orphaned draft releases.
+if is_true "${CI_ARTIFACT_STAGE:-false}"; then
+  if [[ -n "${HARNESS_EXECUTION_ID:-}" && -z "${CI_ARTIFACT_RELEASE_TAG:-}" ]]; then
+    export CI_ARTIFACT_RELEASE_TAG="harness-${HARNESS_EXECUTION_ID}"
+  fi
 fi
 
 SUMMARY="$MATRIX_WORK_DIR/matrix-summary.txt"

@@ -31,7 +31,7 @@ jobs:
           bash -n "${shell_files[@]}"
           shellcheck -S error scripts/lib/common.sh scripts/build_variants.sh scripts/build_kernel.sh \
             scripts/build_anykernel.sh scripts/root_manager_apply.sh scripts/resolve_build_profile.sh \
-            scripts/select_anykernel_profile.sh scripts/generate_changelog.sh scripts/publish_ci_release.sh scripts/stage_ci_release_assets.sh \
+            scripts/select_anykernel_profile.sh scripts/generate_changelog.sh scripts/publish_ci_release.sh scripts/stage_ci_release_assets.sh scripts/assemble_release_assets.sh \
             anykernel/build.sh anykernel/ci-patch.sh
 
       - name: Workflow and Harness input limits
@@ -152,6 +152,47 @@ jobs:
             rm -rf "$tmp"
             echo "PASS package $profile"
           done
+
+      - name: Release artifact assembly contract
+        run: |
+          set -euo pipefail
+          bash tests/artifact_pipeline_test.sh
+
+      - name: Workflow run-block shell syntax
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess, tempfile, yaml, re
+          paths = [
+              '.github/workflows/kernel.yml',
+              '.github/workflows/harness-kernel.yml',
+          ]
+          for path in paths:
+              data = yaml.safe_load(open(path, encoding='utf-8'))
+              def walk(obj):
+                  if isinstance(obj, dict):
+                      for key, value in obj.items():
+                          if key == 'run' and isinstance(value, str):
+                              yield value
+                          yield from walk(value)
+                  elif isinstance(obj, list):
+                      for item in obj:
+                          yield from walk(item)
+              runs = list(walk(data))
+              assert runs, f'no run blocks found in {path}'
+              for i, run in enumerate(runs, 1):
+                  # GitHub expressions are resolved before the shell sees the block.
+                  normalized = re.sub(r'\$\{\{.*?\}\}', 'dummy', run)
+                  with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False, encoding='utf-8') as fh:
+                      fh.write(normalized)
+                      tmp = fh.name
+                  try:
+                      proc = subprocess.run(['bash', '-n', tmp], text=True, capture_output=True)
+                      assert proc.returncode == 0, f'{path} run block {i}: {proc.stderr}'
+                  finally:
+                      import os; os.unlink(tmp)
+              print(f'PASS workflow shell syntax: {path} ({len(runs)} run blocks)')
+          PY
 
       - name: Changelog generation smoke
         run: |

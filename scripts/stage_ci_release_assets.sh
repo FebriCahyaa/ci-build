@@ -34,12 +34,31 @@ LOCK_FILE="$STATE_DIR/zairenkai-release-${GH_REPOSITORY//\//_}-${RELEASE_TAG//[^
 RELEASE_JSON="$STATE_DIR/zairenkai-release.json"
 
 ensure_release() {
-  # Serialise create/update so parallel matrix variants cannot race on release creation.
+  # flock only coordinates processes on the same runner. The API conflict retry
+  # below is the real cross-runner protection when multiple jobs share a tag.
   flock -x 9
-  if curl -fsSL "${AUTH[@]}" "$API/repos/${GH_REPOSITORY}/releases/tags/${TAG_ENC}" -o "$RELEASE_JSON" 2>/dev/null; then
-    :
-  else
-    body="$(python3 - "$RELEASE_TAG" <<'PY'
+  local code response body
+  set +e
+  code="$(curl -sSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+    -o "$RELEASE_JSON" -w '%{http_code}' \
+    "$API/repos/${GH_REPOSITORY}/releases/tags/${TAG_ENC}")"
+  local curl_rc=$?
+  set -e
+
+  if (( curl_rc == 0 )) && [[ "$code" == 200 ]]; then
+    flock -u 9
+    return 0
+  fi
+  if (( curl_rc != 0 )); then
+    flock -u 9
+    ci_die "unable to query GitHub release tag $RELEASE_TAG"
+  fi
+  [[ "$code" == 404 ]] || {
+    flock -u 9
+    ci_die "GitHub release lookup failed: HTTP $code"
+  }
+
+  body="$(python3 - "$RELEASE_TAG" <<'PYBODY'
 import json, sys
 print(json.dumps({
     "tag_name": sys.argv[1],
@@ -48,13 +67,39 @@ print(json.dumps({
     "draft": True,
     "prerelease": False,
 }, separators=(",", ":")))
-PY
+PYBODY
 )"
-    curl -fsSL -X POST "${AUTH[@]}" -H 'Content-Type: application/json' \
-      "$API/repos/${GH_REPOSITORY}/releases" --data "$body" -o "$RELEASE_JSON"
+  set +e
+  response="$(curl -sSL --retry 3 --retry-delay 2 -X POST "${AUTH[@]}" \
+    -H 'Content-Type: application/json' \
+    "$API/repos/${GH_REPOSITORY}/releases" \
+    --data "$body" -o "$RELEASE_JSON" -w '%{http_code}')"
+  curl_rc=$?
+  set -e
+
+  if (( curl_rc == 0 )) && [[ "$response" =~ ^20[01]$ ]]; then
+    flock -u 9
+    return 0
   fi
+
+  # Another runner may have won the create race. Re-read the tag before giving up.
+  if [[ "$response" == 422 ]]; then
+    set +e
+    code="$(curl -sSL --retry 4 --retry-delay 2 "${AUTH[@]}" \
+      -o "$RELEASE_JSON" -w '%{http_code}' \
+      "$API/repos/${GH_REPOSITORY}/releases/tags/${TAG_ENC}")"
+    curl_rc=$?
+    set -e
+    if (( curl_rc == 0 )) && [[ "$code" == 200 ]]; then
+      flock -u 9
+      return 0
+    fi
+  fi
+
   flock -u 9
+  ci_die "unable to create GitHub staging release $RELEASE_TAG (HTTP ${response:-curl-error})"
 }
+
 
 exec 9>"$LOCK_FILE"
 ensure_release
