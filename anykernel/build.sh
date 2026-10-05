@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Standalone AnyKernel3 packager.
 # Usage: ./build.sh <profile> [variant ...]
-#   variant: vanilla | kernelsu | kernelsu-next | resukisu | sukisu-ultra (aliases accepted)
+#   variant: vanilla | kernelsu | kernelsu-next | resukisu | resukisu-susfs | sukisu-ultra (aliases accepted)
 set -Eeuo pipefail
 cd "$(dirname -- "$0")"
 
@@ -25,6 +25,7 @@ for raw in "${VARIANT_ARGS[@]}"; do
     ksu|kernelsu|official) VARIANT=kernelsu ;;
     ksun|kernelsu-next|next) VARIANT=kernelsu-next ;;
     resukisu|re-sukisu) VARIANT=resukisu ;;
+    resukisu-susfs|resukisu+susfs) VARIANT=resukisu-susfs ;;
     suki|sukisu|sukisu-ultra|sukisu_ultra|sukisuultra) VARIANT=sukisu-ultra ;;
     *) echo "ERROR: unsupported variant: $raw" >&2; exit 2 ;;
   esac

@@ -5,9 +5,8 @@
 # Required: KERNEL_REPO
 # Main options (all optional):
 #   KERNEL_BRANCH KERNEL_REF_TYPE DEVICE ARCH DEFCONFIG CONFIG_FRAGMENT JOBS KERNEL_TARGET
-#   ROOT_VARIANT=vanilla|kernelsu|kernelsu-next|resukisu|sukisu-ultra   (preferred over ENABLE_KSU/KSU_PROVIDER)
+#   ROOT_VARIANT=vanilla|kernelsu|kernelsu-next|resukisu|resukisu-susfs|sukisu-ultra   (preferred over ENABLE_KSU/KSU_PROVIDER)
 #   KSU_REF ENABLE_SUSFS SUSFS_REF KSU_REPO KSU_HOOK_MODE
-#   NONGKI_4_4_HOOKS NONGKI_4_4_MODE
 #   TOOLCHAIN TOOLCHAIN_VERSION TOOLCHAIN_URL LLVM LLVM_IAS CROSS_COMPILE CROSS_COMPILE_ARM32 CLANG_URL GCC_URL
 #   PATCH_PROFILE UPSTREAM_PROFILE LTO_PLUS TWEAKS SCHEDULER_PROFILE KERNEL_NAME EXTRA_MAKE_ARGS
 #   PACKAGE_ANYKERNEL ANYKERNEL_PROFILE ANYKERNEL3_REPO ANYKERNEL3_REF
@@ -84,6 +83,9 @@ KSU_REF="${KSU_REF:-auto}"
 KSU_HOOK_MODE="${KSU_HOOK_MODE:-auto}"
 ENABLE_SUSFS="${ENABLE_SUSFS:-false}"
 SUSFS_REF="${SUSFS_REF:-001e69919c6271f690fd00b17e4c721c9e599152}"
+# "<provider>-susfs" variants are the provider built with SUSFS.
+ROOT_PROVIDER="$(variant_provider "$ROOT_VARIANT")"
+variant_susfs "$ROOT_VARIANT" && ENABLE_SUSFS=true
 [[ "$ROOT_VARIANT" == vanilla ]] && ENABLE_SUSFS=false
 
 PACKAGE_ANYKERNEL="${PACKAGE_ANYKERNEL:-${PROFILE_PACKAGE_ANYKERNEL:-true}}"
@@ -97,15 +99,13 @@ ROM_FAMILY="${ROM_FAMILY:-${PROFILE_ROM_FAMILY:-auto}}"
 DYNAMIC_PARTITION="${DYNAMIC_PARTITION:-${PROFILE_DYNAMIC_PARTITION:-false}}"
 GKI="${GKI:-${PROFILE_GKI:-false}}"
 SOURCE_LABEL="${SOURCE_LABEL:-${PROFILE_SOURCE_LABEL:-}}"
-KSU_NEXT_44_REF="${KSU_NEXT_44_REF:-${PROFILE_KSU_NEXT_44_REF:-v1.1.1}}"
-KSU_NEXT_LEGACY_REF="${KSU_NEXT_LEGACY_REF:-${PROFILE_KSU_NEXT_LEGACY_REF:-v3.4.0}}"
+KSU_NEXT_44_REF="${KSU_NEXT_44_REF:-${PROFILE_KSU_NEXT_44_REF:-v3.4.0-legacy}}"
+KSU_NEXT_LEGACY_REF="${KSU_NEXT_LEGACY_REF:-${PROFILE_KSU_NEXT_LEGACY_REF:-v3.4.0-legacy}}"
 KSU_NEXT_GKI_REF="${KSU_NEXT_GKI_REF:-${PROFILE_KSU_NEXT_GKI_REF:-v3.4.0}}"
 RESUKISU_REF_DEFAULT="${RESUKISU_REF_DEFAULT:-${PROFILE_RESUKISU_REF:-v4.2.0-rc3}}"
 SUKISU_ULTRA_REF_DEFAULT="${SUKISU_ULTRA_REF_DEFAULT:-${PROFILE_SUKISU_ULTRA_REF:-main}}"
 ROOT_MANAGER_SOURCE_ROOT="${ROOT_MANAGER_SOURCE_ROOT:-$CI_ROOT/third_party/root-managers}"
 ROOT_MANAGER_SOURCE_MODE="${ROOT_MANAGER_SOURCE_MODE:-auto}"
-NONGKI_4_4_HOOKS="${NONGKI_4_4_HOOKS:-${PROFILE_NONGKI_4_4_HOOKS:-auto}}"
-NONGKI_4_4_MODE="${NONGKI_4_4_MODE:-${PROFILE_NONGKI_4_4_MODE:-auto}}"
 
 BUILD_ENV="${BUILD_ENV:-}"
 RUN_URL="${RUN_URL:-}"
@@ -390,7 +390,7 @@ else
   ci_phase "root-provider"
   progress_update 8 "root-provider" "integrating $VARIANT_LABEL"
   run_helper root_manager_apply.sh \
-    SOURCE_DIR="$SRC_DIR" WORK_DIR="$WORK" KERNEL_VERSION="$KMM" ROOT_MANAGER="$ROOT_VARIANT" \
+    SOURCE_DIR="$SRC_DIR" WORK_DIR="$WORK" KERNEL_VERSION="$KMM" ROOT_MANAGER="$ROOT_PROVIDER" \
     KSU_REPO="$KSU_REPO" KSU_REF="$KSU_REF" ENABLE_SUSFS="$ENABLE_SUSFS" KSU_HOOK_MODE="$KSU_HOOK_MODE" \
     KSU_NEXT_44_REF="$KSU_NEXT_44_REF" KSU_NEXT_LEGACY_REF="$KSU_NEXT_LEGACY_REF" KSU_NEXT_GKI_REF="$KSU_NEXT_GKI_REF" \
     RESUKISU_REF_DEFAULT="$RESUKISU_REF_DEFAULT" SUKISU_ULTRA_REF_DEFAULT="$SUKISU_ULTRA_REF_DEFAULT" \
@@ -401,7 +401,6 @@ else
 fi
 
 SUSFS_COMMIT=none SUSFS_VERSION=none SUSFS_SOURCE=none
-NONGKI_4_4_ENABLED=false NONGKI_4_4_UPSTREAM_COMMIT=none NONGKI_4_4_MODE_RESOLVED=none NONGKI_4_4_HOOK_BLOB=none
 if is_true "$ENABLE_SUSFS"; then
   ENABLE_SUSFS=true
   run_helper apply_susfs.sh \
@@ -410,29 +409,6 @@ if is_true "$ENABLE_SUSFS"; then
   source "$WORK/susfs.env"
 else
   ENABLE_SUSFS=false
-fi
-
-# ------------------------------------------------------------
-# Legacy NonGKI hook integration
-#
-# Lavender 4.4 is non-GKI. Root variants receive the upstream 4.4-tested
-# syscall hook layer automatically; SUSFS switches the hook layer to the
-# upstream inline implementation after the dedicated SUSFS patch succeeds.
-# ------------------------------------------------------------
-if [[ "$DEVICE" == "lavender" && "$KMM" == 4.4* && "$ROOT_VARIANT" != "vanilla" ]] && is_true "$NONGKI_4_4_HOOKS"; then
-  ci_phase "nongki-4.4-hooks"
-  run_helper apply_nongki_4_4.sh \
-    SOURCE_DIR="$SRC_DIR" WORK_DIR="$WORK" DEVICE="$DEVICE" KERNEL_VERSION="$KMM" \
-    ROOT_MANAGER="$KSU_PROVIDER" ENABLE_SUSFS="$ENABLE_SUSFS" \
-    NONGKI_4_4_HOOKS="$NONGKI_4_4_HOOKS" NONGKI_4_4_MODE="$NONGKI_4_4_MODE" \
-    DEFCONFIG_FILE="$SRC_DIR/arch/$DETECTED_ARCH/configs/$DETECTED_DEFCONFIG" \
-    KPM_ENABLE="${KPM_ENABLE:-false}" || fail "NonGKI 4.4 hook integration"
-  source "$WORK/nongki-4.4.env"
-  NONGKI_4_4_ENABLED=true
-  NONGKI_4_4_UPSTREAM_COMMIT="$NONGKI_4_4_UPSTREAM_COMMIT"
-  NONGKI_4_4_MODE_RESOLVED="$NONGKI_4_4_MODE"
-else
-  NONGKI_4_4_ENABLED=false
 fi
 
 # ------------------------------------------------------------
@@ -552,7 +528,6 @@ for kv in \
   "ksu_repo=${KSU_REPO:-}" "ksu_ref=${KSU_REF:-}" "ksu_version=${KSU_PROVIDER_VERSION:-none}" \
   "ksu_commit=${KSU_PROVIDER_COMMIT:-none}" "ksu_layout=${KSU_LAYOUT_RESOLVED:-none}" "ksu_hook_mode=$KSU_HOOK_MODE" \
   "susfs_enabled=$ENABLE_SUSFS" "susfs_source=$SUSFS_SOURCE" "susfs_ref=$SUSFS_REF" \
-  "nongki_4_4_enabled=$NONGKI_4_4_ENABLED" "nongki_4_4_mode=$NONGKI_4_4_MODE_RESOLVED" "nongki_4_4_commit=$NONGKI_4_4_UPSTREAM_COMMIT" "nongki_4_4_hook_blob=$NONGKI_4_4_HOOK_BLOB" \
   "susfs_commit=$SUSFS_COMMIT" "susfs_version=$SUSFS_VERSION"; do
   info "${kv%%=*}" "${kv#*=}"
 done
@@ -601,6 +576,11 @@ else
 fi
 if [[ "$ENABLE_SUSFS" == true ]]; then
   grep -qE '^CONFIG_KSU_SUSFS=(y|m)' "$OUT/.config" || fail "CONFIG_KSU_SUSFS is not enabled after config resolution"
+fi
+# Manual-hook providers: the host hook call sites exist only under
+# CONFIG_KSU_MANUAL_HOOK; without it the driver would build with no hooks.
+if [[ "${KSU_HOOK_MODE:-}" == manual && ( "$KSU_PROVIDER" == kernelsu-next || "$KSU_PROVIDER" == resukisu ) ]]; then
+  grep -qE '^CONFIG_KSU_MANUAL_HOOK=y' "$OUT/.config" || fail "CONFIG_KSU_MANUAL_HOOK is not enabled after config resolution"
 fi
 
 ci_phase "kernel-name"

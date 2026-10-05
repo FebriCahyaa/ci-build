@@ -108,3 +108,45 @@ if out="$(SOURCE_DIR="$HOST" WORK_DIR="$TMP/gate" KERNEL_VERSION=4.4 ROOT_MANAGE
   fail "official KernelSU on Linux 4.4 must fail closed"
 fi
 pass "official KernelSU on Linux 4.4 fails closed"
+
+if out="$(SOURCE_DIR="$HOST" WORK_DIR="$TMP/gate" KERNEL_VERSION=4.19 ROOT_MANAGER=kernelsu-next KSU_REF=v3.4.0 \
+    ROOT_MANAGER_SOURCE_MODE=clone bash "$ROOT/scripts/root_manager_apply.sh" 2>&1)"; then
+  fail "non-legacy KernelSU-Next on Linux 4.19 must fail closed"
+fi
+grep -q 'is not a legacy ref' <<<"$out" || fail "unexpected KernelSU-Next ref gate message: $out"
+[[ ! -d "$TMP/gate/KernelSU" ]] || fail "KernelSU-Next ref gate ran after cloning"
+pass "non-legacy KernelSU-Next refs fail closed below 5.10 before any network access"
+
+for combo in "kernelsu-next 4.19" "kernelsu-next 4.4" "resukisu 4.4"; do
+  set -- $combo
+  if SOURCE_DIR="$HOST" WORK_DIR="$TMP/gate" KERNEL_VERSION="$2" ROOT_MANAGER="$1" ENABLE_SUSFS=true \
+      ROOT_MANAGER_SOURCE_MODE=clone bash "$ROOT/scripts/root_manager_apply.sh" >/dev/null 2>&1; then
+    fail "$1 + SUSFS on Linux $2 must fail closed"
+  fi
+done
+pass "SUSFS fails closed for KernelSU-Next and for ReSukiSU on 4.4"
+
+# --- susfs-series.conf / susfs.fragment (ENABLE_SUSFS only) --------------------
+HOST2="$TMP/host2"
+mkdir -p "$HOST2/fs"
+printf 'int susfs_value = 1;\n' > "$HOST2/fs/susfs_hook.c"
+gitc -C "$HOST2" init -q && gitc -C "$HOST2" add -A && gitc -C "$HOST2" commit -qm host2
+(cd "$HOST2" && sed -i 's/= 1;/= 2;/' fs/susfs_hook.c && git diff > "$REG/root-manager/custom/4.19/0101-susfs.patch" && git checkout -q -- fs/susfs_hook.c)
+printf '0101-susfs.patch\n' > "$REG/root-manager/custom/4.19/susfs-series.conf"
+: > "$REG/root-manager/custom/4.19/host-series.conf"
+printf '# CONFIG_KSU_MANUAL_HOOK is not set\nCONFIG_KSU_SUSFS=y\n' > "$REG/root-manager/custom/4.19/susfs.fragment"
+run_source() { CI_PATCH_ROOT="$REG" SOURCE_DIR="$HOST2" KERNEL_VERSION=4.19 ROOT_MANAGER=custom KSU_REQUIRED=true \
+  PATCH_PROFILE=none UPSTREAM_PROFILE=none PHASE=source ENABLE_SUSFS="$1" bash "$ROOT/scripts/apply_patch_series.sh" >/dev/null; }
+run_source false
+grep -q 'susfs_value = 1' "$HOST2/fs/susfs_hook.c" || fail "susfs-series.conf applied without ENABLE_SUSFS"
+run_source true
+grep -q 'susfs_value = 2' "$HOST2/fs/susfs_hook.c" || fail "susfs-series.conf not applied with ENABLE_SUSFS=true"
+pass "susfs-series.conf is applied only with ENABLE_SUSFS=true"
+
+printf 'CONFIG_KSU=y\nCONFIG_KSU_MANUAL_HOOK=y\n' > "$REG/root-manager/custom/4.19/config.fragment"
+printf 'CONFIG_KSU_MANUAL_HOOK=y\n' > "$TMP/out/.config"
+CI_PATCH_ROOT="$REG" SOURCE_DIR="$HOST2" KERNEL_VERSION=4.19 ROOT_MANAGER=custom KERNEL_OUT="$TMP/out" \
+  ENABLE_SUSFS=true PHASE=config bash "$ROOT/scripts/apply_patch_series.sh" >/dev/null
+expected=$'# CONFIG_KSU_MANUAL_HOOK is not set\nCONFIG_KSU=y\nCONFIG_KSU_SUSFS=y'
+[[ "$(cat "$TMP/out/.config")" == "$expected" ]] || { diff <(printf '%s\n' "$expected") "$TMP/out/.config" >&2; fail "susfs.fragment merge"; }
+pass "susfs.fragment overrides the provider fragment's hook mode"

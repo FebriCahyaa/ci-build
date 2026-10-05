@@ -10,7 +10,7 @@ on:
         options: [lavender-4.4, lavender-4.19, garnet-gki]
         default: lavender-4.4
       root_variants:
-        description: "Root variants: default (profile set), all, or e.g. vanilla,kernelsu-next,resukisu,sukisu-ultra"
+        description: "Root variants: default (profile set), all, or e.g. vanilla,kernelsu-next,resukisu,resukisu-susfs,sukisu-ultra"
         required: true
         type: string
         default: default

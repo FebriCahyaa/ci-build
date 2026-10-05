@@ -1,0 +1,193 @@
+Subject: [PATCH] ksu: upgrade Nexus pre-integrated hooks to the KernelSU-Next legacy manual-hook ABI
+
+The Nexus lavender 4.4 tree calls the old KernelSU hooks unconditionally.
+execveat/faccessat keep their ABI. This patch moves ksu_handle_stat() to
+the three-argument form, gates the init.rc vfs_read hook on
+ksu_init_rc_hook (cleared after the first init.rc read) and adds the hooks
+KernelSU-Next v3.x-legacy needs with CONFIG_KSU_MANUAL_HOOK:
+
+  fs/stat.c              newfstat / fstat64 return hooks (init.rc size)
+  kernel/reboot.c        ksu_handle_sys_reboot (supercall entry)
+  drivers/input/input.c  ksu_handle_input_handle_event (safe mode)
+  security/selinux/avc.c ksu_handle_slow_avc_audit (AVC log spoofing)
+
+Hook placement follows the manual integration used by
+stanley0010/KSU-Next-Kernel-for-LineageOS-24-for-Redmi-Note-7-lavender
+(c083ee15, e4fd8a63) and rianrizkifauzi/C9-Kernel_xiaomi_lavender_44.
+---
+diff --git a/drivers/input/input.c b/drivers/input/input.c
+index 85791708..ac6c00ca 100644
+--- a/drivers/input/input.c
++++ b/drivers/input/input.c
+@@ -368,11 +368,21 @@ static int input_get_disposition(struct input_dev *dev,
+ 	return disposition;
+ }
+ 
++#ifdef CONFIG_KSU_MANUAL_HOOK
++extern bool ksu_input_hook __read_mostly;
++extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code,
++					 int *value);
++#endif
++
+ static void input_handle_event(struct input_dev *dev,
+ 			       unsigned int type, unsigned int code, int value)
+ {
+ 	int disposition;
+ 
++#ifdef CONFIG_KSU_MANUAL_HOOK
++	if (unlikely(ksu_input_hook))
++		ksu_handle_input_handle_event(&type, &code, &value);
++#endif
+ 	disposition = input_get_disposition(dev, type, code, &value);
+ 
+ 	if ((disposition & INPUT_PASS_TO_DEVICE) && dev->event)
+diff --git a/fs/read_write.c b/fs/read_write.c
+index 7016baa6..3b4a5e1d 100644
+--- a/fs/read_write.c
++++ b/fs/read_write.c
+@@ -441,6 +441,9 @@ EXPORT_SYMBOL(__vfs_read);
+ 
+ 
+ // KernelSU hook
++#ifdef CONFIG_KSU_MANUAL_HOOK
++extern bool ksu_init_rc_hook __read_mostly;
++#endif
+ extern int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
+ 			       size_t *count_ptr, loff_t **pos);
+ 
+@@ -448,7 +451,12 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
+ {
+ 	ssize_t ret;
+ 
+-        ksu_handle_vfs_read(&file, &buf, &count, &pos); // call KSU fork first
++#ifdef CONFIG_KSU_MANUAL_HOOK
++	if (unlikely(ksu_init_rc_hook))
++		ksu_handle_vfs_read(&file, &buf, &count, &pos);
++#else
++	ksu_handle_vfs_read(&file, &buf, &count, &pos); // call KSU fork first
++#endif
+ 	if (!(file->f_mode & FMODE_READ))
+ 		return -EBADF;
+ 	if (!(file->f_mode & FMODE_CAN_READ))
+diff --git a/fs/stat.c b/fs/stat.c
+index 80b1fdfe..fa4c1d25 100644
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -88,7 +88,8 @@ int vfs_fstat(unsigned int fd, struct kstat *stat)
+ EXPORT_SYMBOL(vfs_fstat);
+ 
+ // KernelSU hook
+-extern int ksu_handle_stat(int *dfd, const char __user **filename_user);
++extern int ksu_handle_stat(int *dfd, const char __user **filename_user,
++			   int *flags);
+ 
+ int vfs_fstatat(int dfd, const char __user *filename, struct kstat *stat,
+ 		int flag)
+@@ -97,7 +98,7 @@ int vfs_fstatat(int dfd, const char __user *filename, struct kstat *stat,
+ 	int error = -EINVAL;
+ 	unsigned int lookup_flags = 0;
+ 
+-        ksu_handle_stat(&dfd, &filename); // call KSU hook first
++	ksu_handle_stat(&dfd, &filename, &flag); // call KSU hook first
+ 	if ((flag & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
+ 		      AT_EMPTY_PATH)) != 0)
+ 		goto out;
+@@ -305,6 +306,11 @@ SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
+ }
+ #endif
+ 
++#ifdef CONFIG_KSU_MANUAL_HOOK
++extern void ksu_handle_newfstat_ret(unsigned int *fd,
++				    struct stat __user **statbuf_ptr);
++#endif
++
+ SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
+ {
+ 	struct kstat stat;
+@@ -313,6 +319,10 @@ SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
+ 	if (!error)
+ 		error = cp_new_stat(&stat, statbuf);
+ 
++#ifdef CONFIG_KSU_MANUAL_HOOK
++	if (!error)
++		ksu_handle_newfstat_ret(&fd, &statbuf);
++#endif
+ 	return error;
+ }
+ 
+@@ -423,6 +433,11 @@ SYSCALL_DEFINE2(lstat64, const char __user *, filename,
+ 	return error;
+ }
+ 
++#ifdef CONFIG_KSU_MANUAL_HOOK
++extern void ksu_handle_fstat64_ret(unsigned long *fd,
++				   struct stat64 __user **statbuf_ptr);
++#endif
++
+ SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
+ {
+ 	struct kstat stat;
+@@ -431,6 +446,10 @@ SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
+ 	if (!error)
+ 		error = cp_new_stat64(&stat, statbuf);
+ 
++#ifdef CONFIG_KSU_MANUAL_HOOK
++	if (!error)
++		ksu_handle_fstat64_ret(&fd, &statbuf);
++#endif
+ 	return error;
+ }
+ 
+diff --git a/kernel/reboot.c b/kernel/reboot.c
+index 2946ed1d..0ffb2d05 100644
+--- a/kernel/reboot.c
++++ b/kernel/reboot.c
+@@ -277,6 +277,11 @@ static DEFINE_MUTEX(reboot_mutex);
+  *
+  * reboot doesn't sync: do that yourself before calling this.
+  */
++#ifdef CONFIG_KSU_MANUAL_HOOK
++extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
++				 void __user **arg);
++#endif
++
+ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
+ 		void __user *, arg)
+ {
+@@ -284,6 +289,10 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
+ 	char buffer[256];
+ 	int ret = 0;
+ 
++#ifdef CONFIG_KSU_MANUAL_HOOK
++	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
++#endif
++
+ 	/* We only trust the superuser with rebooting the system. */
+ 	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
+ 		return -EPERM;
+diff --git a/security/selinux/avc.c b/security/selinux/avc.c
+index c2873a2c..cc991893 100644
+--- a/security/selinux/avc.c
++++ b/security/selinux/avc.c
+@@ -744,6 +744,10 @@ static void avc_audit_post_callback(struct audit_buffer *ab, void *a)
+ 
+ 
+ /* This is the slow part of avc audit with big stack footprint */
++#ifdef CONFIG_KSU_MANUAL_HOOK
++extern int ksu_handle_slow_avc_audit(u32 *tsid);
++#endif
++
+ noinline int slow_avc_audit(u32 ssid, u32 tsid, u16 tclass,
+ 		u32 requested, u32 audited, u32 denied, int result,
+ 		struct common_audit_data *a,
+@@ -752,6 +756,10 @@ noinline int slow_avc_audit(u32 ssid, u32 tsid, u16 tclass,
+ 	struct common_audit_data stack_data;
+ 	struct selinux_audit_data sad;
+ 
++#ifdef CONFIG_KSU_MANUAL_HOOK
++	ksu_handle_slow_avc_audit(&tsid);
++#endif
++
+ 	/* Only log permissive=1 messages for SECURITY_SELINUX_DEVELOP */
+ 	if (denied && !result)
+ 		return 0;

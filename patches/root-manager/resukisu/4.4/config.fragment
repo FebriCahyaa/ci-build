@@ -1,3 +1,7 @@
-# ReSukiSU 4.4: force the legacy manual hook path.
+# ReSukiSU / Linux 4.4 (Nexus lavender): manual hooks from host-series.conf;
+# setuid, init.rc and input use ReSukiSU's automatic (LSM / input_handler) hooks.
 CONFIG_KSU=y
 CONFIG_KSU_MANUAL_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y

@@ -19,9 +19,8 @@ The CI uses `git apply --check` first and aborts on a non-clean patch.
 It never falls back to fuzzy/manual application.
 
 Provider matrix:
-  - official KernelSU 4.19 + SUSFS: supported using official KSU v0.9.5
-  - KernelSU-Next 4.19 + external SUSFS 1.5.5 patch set: blocked because
-    the upstream 4.19 SUSFS patch set is based on official KernelSU and
-    does not constitute a verified KSU-Next patch.
-  - ReSukiSU + SUSFS: supported through ReSukiSU's integrated SUSFS
-    inline-hook path; no foreign SUSFS patch is mixed into ReSukiSU.
+  - official KernelSU 4.19 + SUSFS: this upstream 1.5.5 set, with official
+    KernelSU v0.9.5.
+  - ReSukiSU 4.19 + SUSFS: SUSFS v2.2.0 backport from the root-manager
+    registry (`root-manager/resukisu/4.19/susfs-series.conf`), not this set.
+  - KernelSU-Next: blocked; the legacy manual-hook line has no SUSFS mode.

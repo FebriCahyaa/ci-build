@@ -1,4 +1,6 @@
-# KernelSU-Next (4.4 / 4.9 / 4.14 / 5.x GKI): built-in driver + kprobe hooks.
+# KernelSU-Next on GKI (5.10+, v3.x): built-in driver with kprobe/tracepoint
+# hooks. Non-GKI kernels (4.4, 4.19) use the manual-hook fragments in their
+# version directories instead.
 CONFIG_KSU=y
 CONFIG_KPROBES=y
 CONFIG_HAVE_KPROBES=y

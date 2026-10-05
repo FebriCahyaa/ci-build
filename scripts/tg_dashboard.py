@@ -63,7 +63,7 @@ STAGES = [
     ("done", "Done"),
 ]
 STAGE_ALIASES = {
-    "nongki-4.4-hooks": "root-provider", "identity": "defconfig", "anykernel": "artifacts",
+    "identity": "defconfig", "anykernel": "artifacts",
     "config-patches": "config",
 }
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")

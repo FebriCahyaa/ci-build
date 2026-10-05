@@ -41,7 +41,7 @@ Usage: TARGET=github|harness $0
 
 Common:
   BUILD_PROFILE=lavender-4.4|lavender-4.19|garnet-gki
-  VARIANTS=default|all|vanilla,kernelsu-next,resukisu,sukisu-ultra
+  VARIANTS=default|all|vanilla,kernelsu-next,resukisu,resukisu-susfs,sukisu-ultra
   TOOLCHAIN=auto|aosp|aosp-r416183b|zyc-10|proton|llvm-18|neutron|llvm|gcc|system
   TOOLCHAIN_URL=<custom archive>  TWEAKS=none|balanced|performance
   REPO=owner/repo REF=branch

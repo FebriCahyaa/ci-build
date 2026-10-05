@@ -26,6 +26,7 @@ fi
 ! grep -RInE 'garnet-(oss|hyperos)' "$ROOT/.github" "$ROOT/anykernel" "$ROOT/profiles" "$ROOT/harness" "$ROOT/scripts" || fail "stale garnet profile names"
 
 [[ "$(BUILD_PROFILE=lavender-4.4 VARIANTS=default bash "$ROOT/scripts/resolve_variants.sh" --json)" == '["vanilla","kernelsu-next","resukisu"]' ]] || fail "lavender-4.4 default variants"
+[[ "$(BUILD_PROFILE=lavender-4.19 VARIANTS=default bash "$ROOT/scripts/resolve_variants.sh" --json)" == '["vanilla","kernelsu-next","resukisu","resukisu-susfs"]' ]] || fail "lavender-4.19 default variants (manual-hook providers + SUSFS)"
 [[ "$(BUILD_PROFILE=garnet-gki VARIANTS=all bash "$ROOT/scripts/resolve_variants.sh" --json)" == '["vanilla","kernelsu-next","resukisu","sukisu-ultra"]' ]] || fail "garnet all variants"
 [[ "$(BUILD_PROFILE=lavender-4.19 VARIANTS='ksun, vanilla ksun' bash "$ROOT/scripts/resolve_variants.sh" --json)" == '["kernelsu-next","vanilla"]' ]] || fail "alias/dedupe"
 if BUILD_PROFILE=lavender-4.19 VARIANTS='vanilla,bogus' bash "$ROOT/scripts/resolve_variants.sh" >/dev/null 2>&1; then

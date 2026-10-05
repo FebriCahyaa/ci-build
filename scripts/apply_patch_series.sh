@@ -7,8 +7,10 @@
 #
 # Root-manager registry contract (patches/root-manager/<provider>/<mm>|common/):
 #   host-series.conf      host-kernel patches — applied HERE
+#   susfs-series.conf     host-kernel SUSFS patches, after host-series (ENABLE_SUSFS)
 #   provider-series.conf  provider-tree patches — applied by root_manager_apply.sh
 #   config.fragment       Kconfig overrides — applied HERE in the config phase
+#   susfs.fragment        Kconfig overrides for ENABLE_SUSFS, after config.fragment
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,7 +43,7 @@ esac
 
 fail() { ci_die "$*"; }
 
-[[ -n "$SOURCE_DIR" && -d "$SOURCE_DIR/.git" ]] ||
+[[ -n "$SOURCE_DIR" && -e "$SOURCE_DIR/.git" ]] ||
   fail "SOURCE_DIR must point to a git working tree: ${SOURCE_DIR:-<empty>}"
 
 KERNEL_MM="$(kernel_mm "$KERNEL_VERSION")"
@@ -140,37 +142,58 @@ config_apply() {
 # config_verify: compare every merged fragment with the resolved .config.
 # Kconfig silently drops values whose dependencies are unmet; report them.
 config_verify() {
-  local list="$KERNEL_OUT/.ci-config-fragments" fragment
+  local list="$KERNEL_OUT/.ci-config-fragments"
   [[ -f "$list" ]] || { echo "[patches] VERIFY no config fragments were merged"; return 0; }
-  while IFS= read -r fragment; do
-    python3 - "$fragment" "$KERNEL_OUT/.config" <<'PY'
+  # Fragments are checked in merge order: a symbol that a later fragment sets
+  # again (e.g. susfs.fragment switching the hook mode) is reported as
+  # overridden, not as dropped by Kconfig.
+  awk '!seen[$0]++' "$list" | python3 -c '
 import re, sys
-frag, cfg = sys.argv[1:3]
+cfg = sys.argv[1]
+frags = [l.strip() for l in sys.stdin if l.strip()]
+SET = re.compile(r"^(CONFIG_[A-Za-z0-9_]+)=(.*)$")
+UNSET = re.compile(r"^# (CONFIG_[A-Za-z0-9_]+) is not set$")
 have = {}
 for line in open(cfg, encoding="utf-8", errors="replace"):
-    m = re.match(r"^(CONFIG_[A-Za-z0-9_]+)=(.*)$", line.rstrip("\n"))
+    line = line.rstrip("\n")
+    m = SET.match(line)
     if m:
         have[m.group(1)] = m.group(2)
-    m = re.match(r"^# (CONFIG_[A-Za-z0-9_]+) is not set$", line.rstrip("\n"))
+    m = UNSET.match(line)
     if m:
         have[m.group(1)] = ""
-want, dropped = 0, []
-for line in open(frag, encoding="utf-8"):
-    line = line.rstrip("\r\n")
-    m = re.match(r"^(CONFIG_[A-Za-z0-9_]+)=(.*)$", line)
-    unset = re.match(r"^# (CONFIG_[A-Za-z0-9_]+) is not set$", line)
-    if m:
-        want += 1
-        if have.get(m.group(1)) != m.group(2):
-            dropped.append(f"{m.group(1)}={m.group(2)} -> {have.get(m.group(1)) or 'unset'}")
-    elif unset:
-        want += 1
-        if have.get(unset.group(1), ""):
-            dropped.append(f"{unset.group(1)} still ={have[unset.group(1)]}")
-name = frag.split("/patches/", 1)[-1]
-print(f"[patches] VERIFY {name}: {want - len(dropped)}/{want} applied" + ("" if not dropped else "; not applied: " + ", ".join(dropped)))
-PY
-  done < <(sort -u "$list")
+def entries(frag):
+    for line in open(frag, encoding="utf-8"):
+        line = line.rstrip("\r\n")
+        m = SET.match(line)
+        if m:
+            yield m.group(1), m.group(2)
+            continue
+        m = UNSET.match(line)
+        if m:
+            yield m.group(1), ""
+parsed = [(f, list(entries(f))) for f in frags]
+short = lambda f: f.split("/patches/", 1)[-1]
+for i, (frag, items) in enumerate(parsed):
+    later = {}
+    for f2, it2 in parsed[i + 1:]:
+        for k, _ in it2:
+            later.setdefault(k, short(f2))
+    dropped, overridden = [], []
+    for key, value in items:
+        if key in later:
+            overridden.append(key + " (by " + later[key] + ")")
+        elif have.get(key, "") != value:
+            shown = key + "=" + value if value else key + " unset"
+            dropped.append(shown + " -> " + (have.get(key) or "unset"))
+    want = len(items) - len(overridden)
+    msg = "[patches] VERIFY %s: %d/%d applied" % (short(frag), want - len(dropped), want)
+    if overridden:
+        msg += "; overridden: " + ", ".join(overridden)
+    if dropped:
+        msg += "; not applied: " + ", ".join(dropped)
+    print(msg)
+' "$KERNEL_OUT/.config"
 }
 
 case "$PHASE" in
@@ -201,6 +224,10 @@ case "$PHASE" in
         series_apply "$host_series"
       else
         echo "[patches] no host-kernel series for $ROOT_MANAGER Linux $KERNEL_MM"
+      fi
+      if is_true "$ENABLE_SUSFS"; then
+        susfs_series="$(root_file "$ROOT_MANAGER" susfs-series.conf)"
+        [[ -n "$susfs_series" ]] && series_apply "$susfs_series"
       fi
     fi
 
@@ -242,7 +269,10 @@ case "$PHASE" in
     fi
 
     if is_true "$ENABLE_SUSFS"; then
-      susfs_config="$PATCH_ROOT/features/susfs/kernel-$KERNEL_MM/config.fragment"
+      # Provider-specific SUSFS hook mode first (ReSukiSU 4.19), else the
+      # generic upstream SUSFS surface (official KernelSU 4.19).
+      susfs_config="$(root_file "$ROOT_MANAGER" susfs.fragment)"
+      [[ -n "$susfs_config" ]] || susfs_config="$PATCH_ROOT/features/susfs/kernel-$KERNEL_MM/config.fragment"
       [[ -f "$susfs_config" ]] || fail "SUSFS config fragment missing: $susfs_config"
       config_apply "$susfs_config"
     fi

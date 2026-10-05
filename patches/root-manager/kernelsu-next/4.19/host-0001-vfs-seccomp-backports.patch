@@ -1,0 +1,89 @@
+Subject: [PATCH] vfs/seccomp: backports for KernelSU-Next legacy (Linux 4.19)
+
+* fs/namespace.c, fs/internal.h: path_umount()/can_umount() (Linux 5.9,
+  41525f56e256), used to unmount module mounts for denylisted apps.
+* include/linux/seccomp.h: atomic_t filter_count (Linux 5.9).
+
+SouthWest-NG already carries the SELinux LSM-blob accessors.
+---
+diff --git a/fs/internal.h b/fs/internal.h
+index c02439a5d..86ccac4a6 100644
+--- a/fs/internal.h
++++ b/fs/internal.h
+@@ -86,6 +86,7 @@ extern int finish_automount(struct vfsmount *, struct path *);
+ extern int sb_prepare_remount_readonly(struct super_block *);
+ 
+ extern void __init mnt_init(void);
++int path_umount(struct path *path, int flags);
+ 
+ extern int __mnt_want_write_file(struct file *);
+ extern void __mnt_drop_write_file(struct file *);
+diff --git a/fs/namespace.c b/fs/namespace.c
+index 8f3402f2a..2f299db1b 100644
+--- a/fs/namespace.c
++++ b/fs/namespace.c
+@@ -1762,6 +1762,44 @@ SYSCALL_DEFINE1(oldumount, char __user *, name)
+ 
+ #endif
+ 
++/*
++ * Backport of the Linux 5.9 path_umount() helper (commit 41525f56e256),
++ * used by KernelSU to unmount module overlays for denylisted apps.
++ */
++static int can_umount(const struct path *path, int flags)
++{
++	struct mount *mnt = real_mount(path->mnt);
++
++	if (flags & ~(MNT_FORCE | MNT_DETACH | MNT_EXPIRE | UMOUNT_NOFOLLOW))
++		return -EINVAL;
++	if (!may_mount())
++		return -EPERM;
++	if (path->dentry != path->mnt->mnt_root)
++		return -EINVAL;
++	if (!check_mnt(mnt))
++		return -EINVAL;
++	if (mnt->mnt.mnt_flags & MNT_LOCKED) /* Check optimistically */
++		return -EINVAL;
++	if (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN))
++		return -EPERM;
++	return 0;
++}
++
++int path_umount(struct path *path, int flags)
++{
++	struct mount *mnt = real_mount(path->mnt);
++	int ret;
++
++	ret = can_umount(path, flags);
++	if (!ret)
++		ret = do_umount(mnt, flags);
++
++	/* we mustn't call path_put() as that would clear mnt_expiry_mark */
++	dput(path->dentry);
++	mntput_no_expire(mnt);
++	return ret;
++}
++
+ static bool is_mnt_ns_file(struct dentry *dentry)
+ {
+ 	/* Is this a proxy for a mount namespace? */
+diff --git a/include/linux/seccomp.h b/include/linux/seccomp.h
+index e5320f6c8..e77f7b4f3 100644
+--- a/include/linux/seccomp.h
++++ b/include/linux/seccomp.h
+@@ -11,6 +11,7 @@
+ #ifdef CONFIG_SECCOMP
+ 
+ #include <linux/thread_info.h>
++#include <linux/atomic.h>
+ #include <asm/seccomp.h>
+ 
+ struct seccomp_filter;
+@@ -27,6 +28,7 @@ struct seccomp_filter;
+  */
+ struct seccomp {
+ 	int mode;
++	atomic_t filter_count;
+ 	struct seccomp_filter *filter;
+ };
+ 

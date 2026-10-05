@@ -1,5 +1,6 @@
-# ReSukiSU / Lavender 4.19: stable legacy Manual Hook integration.
-# ReSukiSU's 4.19 manual path relies on the kernel-side hooks registered below.
+# ReSukiSU / Linux 4.19 (SouthWest-NG): manual hooks from host-series.conf.
+# The host hooks for setuid, sys_read and input are no-ops while the matching
+# AUTO option is enabled, so ReSukiSU's LSM / input_handler hooks stay in charge.
 CONFIG_KSU=y
 CONFIG_KSU_MANUAL_HOOK=y
 CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y

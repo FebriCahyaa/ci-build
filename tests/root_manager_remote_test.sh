@@ -34,8 +34,9 @@ for profile_file in "$ROOT"/profiles/targets/*.conf; do
       [[ "$variant" == vanilla ]] && continue
       case_dir="$TMP/$profile-$variant"
       fake_host_tree "$case_dir/host"
+      susfs=false; variant_susfs "$variant" && susfs=true
       if SOURCE_DIR="$case_dir/host" WORK_DIR="$case_dir/work" KERNEL_VERSION="$PROFILE_KERNEL_FAMILY" \
-          ROOT_MANAGER="$variant" KSU_REF=auto ROOT_MANAGER_SOURCE_MODE=clone \
+          ROOT_MANAGER="$(variant_provider "$variant")" ENABLE_SUSFS="$susfs" KSU_REF=auto ROOT_MANAGER_SOURCE_MODE=clone \
           KSU_NEXT_44_REF="$PROFILE_KSU_NEXT_44_REF" KSU_NEXT_LEGACY_REF="$PROFILE_KSU_NEXT_LEGACY_REF" \
           KSU_NEXT_GKI_REF="$PROFILE_KSU_NEXT_GKI_REF" RESUKISU_REF_DEFAULT="$PROFILE_RESUKISU_REF" \
           SUKISU_ULTRA_REF_DEFAULT="$PROFILE_SUKISU_ULTRA_REF" \
@@ -54,33 +55,44 @@ for profile_file in "$ROOT"/profiles/targets/*.conf; do
   ) || fail=1
 done
 
-# Host-kernel series against the real SouthWest-NG 4.19 tree (sparse checkout).
-SW="$TMP/southwest-ng"
-git clone --quiet --depth=1 --filter=blob:none --sparse --branch main \
-  https://github.com/pix106/android_kernel_xiaomi_sdm660_southwest-ng.git "$SW"
-git -C "$SW" sparse-checkout set --no-cone \
-  /fs/exec.c /fs/open.c /fs/stat.c /fs/namespace.c /kernel/reboot.c \
-  /security/selinux/selinuxfs.c /arch/Kconfig
-for series in "$ROOT"/patches/root-manager/*/4.19/host-series.conf; do
-  provider="$(basename "$(dirname "$(dirname "$series")")")"
-  work="$TMP/host-$provider"
-  rm -rf "$work"
-  cp -a "$SW" "$work"
-  while IFS= read -r patch; do
-    if git -C "$work" apply --check --whitespace=nowarn "$(dirname "$series")/$patch"; then
-      git -C "$work" apply --whitespace=nowarn "$(dirname "$series")/$patch"
-      echo "PASS: $provider 4.19 host patch $patch applies to SouthWest-NG"
-    else
-      echo "FAIL: $provider 4.19 host patch $patch does not apply to SouthWest-NG" >&2
-      fail=1
-    fi
-  done < <(read_series "$series")
-done
+# Host-kernel series (host-series.conf, then susfs-series.conf) against the
+# real kernel trees, sparse-checked-out to exactly the files the patches touch.
+patched_paths() {
+  local mm="$1" series patch
+  for series in "$ROOT"/patches/root-manager/*/"$mm"/{host,susfs}-series.conf; do
+    [[ -f "$series" ]] || continue
+    while IFS= read -r patch; do
+      sed -n 's|^diff --git a/\([^ ]*\) b/.*|/\1|p' "$(dirname "$series")/$patch"
+    done < <(read_series "$series")
+  done | sort -u
+}
 
-# KernelSU-Next v3.4.0 on 4.19 depends on KPROBES, which depends on MODULES in
-# this kernel generation; the 4.19 config fragment must keep both enabled.
-grep -qE 'depends on MODULES' "$SW/arch/Kconfig" || { echo 'FAIL: target KPROBES MODULES dependency missing' >&2; fail=1; }
-grep -q '^CONFIG_MODULES=y$' "$ROOT/patches/root-manager/kernelsu-next/4.19/config.fragment" ||
-  { echo 'FAIL: KernelSU-Next 4.19 fragment must enable CONFIG_MODULES' >&2; fail=1; }
+check_tree() {
+  local mm="$1" url="$2" ref="$3" label="$4" tree="$TMP/tree-$1" series provider work patch
+  git clone --quiet --depth=1 --filter=blob:none --sparse --branch "$ref" "$url" "$tree"
+  mapfile -t paths < <(patched_paths "$mm")
+  git -C "$tree" sparse-checkout set --no-cone "${paths[@]}"
+  for series in "$ROOT"/patches/root-manager/*/"$mm"/host-series.conf; do
+    provider="$(basename "$(dirname "$(dirname "$series")")")"
+    work="$TMP/host-$provider-$mm"
+    rm -rf "$work"
+    cp -a "$tree" "$work"
+    for s in "$series" "$(dirname "$series")/susfs-series.conf"; do
+      [[ -f "$s" ]] || continue
+      while IFS= read -r patch; do
+        if git -C "$work" apply --check --whitespace=nowarn "$(dirname "$s")/$patch"; then
+          git -C "$work" apply --whitespace=nowarn "$(dirname "$s")/$patch"
+          echo "PASS: $provider $mm $(basename "$s") $patch applies to $label"
+        else
+          echo "FAIL: $provider $mm $(basename "$s") $patch does not apply to $label" >&2
+          fail=1
+        fi
+      done < <(read_series "$s")
+    done
+  done
+}
+
+check_tree 4.19 https://github.com/pix106/android_kernel_xiaomi_sdm660_southwest-ng.git main "SouthWest-NG"
+check_tree 4.4 https://github.com/projects-nexus/nexus_kernel_xiaomi_lavender.git 13 "Nexus lavender"
 
 exit "$fail"

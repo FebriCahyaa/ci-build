@@ -1,6 +1,5 @@
-# KernelSU-Next v1.1.1 / Linux 4.4: built-in KSU with the kprobes hook path.
-# (KPROBE_EVENTS is not needed and cannot be enabled without tracing on the
-# Nexus lavender tree; HAVE_KPROBES is selected by the architecture.)
+# KernelSU-Next v3.x-legacy / Linux 4.4 (Nexus lavender): built-in driver with
+# manual hooks (host-series.conf upgrades the tree's pre-integrated hooks).
 CONFIG_KSU=y
-CONFIG_KPROBES=y
+CONFIG_KSU_MANUAL_HOOK=y
 CONFIG_EXT4_FS=y

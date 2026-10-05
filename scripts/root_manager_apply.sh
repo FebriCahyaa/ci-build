@@ -26,8 +26,8 @@ KSU_REPO="${KSU_REPO:-}"
 KSU_REF="${KSU_REF:-auto}"
 ENABLE_SUSFS="${ENABLE_SUSFS:-false}"
 KSU_HOOK_MODE="${KSU_HOOK_MODE:-auto}"
-KSU_NEXT_44_REF="${KSU_NEXT_44_REF:-v1.1.1}"
-KSU_NEXT_LEGACY_REF="${KSU_NEXT_LEGACY_REF:-v3.4.0}"
+KSU_NEXT_44_REF="${KSU_NEXT_44_REF:-v3.4.0-legacy}"
+KSU_NEXT_LEGACY_REF="${KSU_NEXT_LEGACY_REF:-v3.4.0-legacy}"
 KSU_NEXT_GKI_REF="${KSU_NEXT_GKI_REF:-v3.4.0}"
 RESUKISU_REF_DEFAULT="${RESUKISU_REF_DEFAULT:-v4.2.0-rc3}"
 SUKISU_ULTRA_REF_DEFAULT="${SUKISU_ULTRA_REF_DEFAULT:-${PROFILE_SUKISU_ULTRA_REF:-main}}"
@@ -38,6 +38,8 @@ ROOT_MANAGER_SOURCE_MODE="${ROOT_MANAGER_SOURCE_MODE:-auto}"
 # A moved/re-tagged upstream tag must never silently change what is patched.
 declare -A PINNED_COMMITS=(
   [kernelsu-next@v3.4.0]=1a879d6a866f80b1fa1c1009a2ffa747873cbb5e
+  [kernelsu-next@v3.4.0-legacy]=8af3d4fec33be32fa5d3f8dae4f380fac45bf2cd
+  [resukisu@v4.2.0-rc3]=239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb
 )
 
 fail() { ci_die "$*"; }
@@ -47,7 +49,7 @@ is_git_worktree() {
   [[ -d "$1" ]] && git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1
 }
 
-[[ -n "$SOURCE_DIR" && -d "$SOURCE_DIR/.git" ]] || fail "SOURCE_DIR must be a git working tree"
+[[ -n "$SOURCE_DIR" && -e "$SOURCE_DIR/.git" ]] || fail "SOURCE_DIR must be a git working tree"
 
 KERNEL_MAJOR="${KERNEL_VERSION%%.*}"
 KERNEL_REST="${KERNEL_VERSION#*.}"
@@ -92,6 +94,17 @@ case "$ROOT_MANAGER" in
     else
       PROVIDER_REF="$KSU_REF"
     fi
+    # Non-GKI kernels need the legacy line (v3.x-legacy tags / legacy branch):
+    # it is the one maintained for CONFIG_KSU_MANUAL_HOOK. Mainline v3.x uses
+    # kprobe/syscall-table hooks that bootloop on the SouthWest-NG CFI+LTO
+    # tree and does not compile on 4.4.
+    if ! kernel_ge "$KERNEL_VERSION" 5 10 && ! is_true "${ALLOW_UNSUPPORTED_PROVIDER:-false}"; then
+      case "$PROVIDER_REF" in
+        *legacy*) ;;
+        *) is_commit_ref "$PROVIDER_REF" ||
+             fail "KernelSU-Next $PROVIDER_REF is not a legacy ref; Linux $KERNEL_MM needs the manual-hook legacy line (e.g. $KSU_NEXT_LEGACY_REF)" ;;
+      esac
+    fi
     ;;
   resukisu|re-sukisu)
     PROVIDER="resukisu"
@@ -124,9 +137,8 @@ esac
 # combinations fail fast with an actionable message.
 if is_true "$ENABLE_SUSFS"; then
   case "$PROVIDER:$KERNEL_MM" in
-    kernelsu-next:4.19) fail "external SUSFS 4.19 patch set is based on official KernelSU, not KSU-Next" ;;
-    kernelsu-next:4.4) fail "dedicated SUSFS 4.4 patch path is validated for official KernelSU/ReSukiSU; KSU-Next is intentionally blocked" ;;
-    sukisu-ultra:4.4) fail "SukiSU Ultra 4.4 SUSFS is not enabled by this harness: supplied upstream Kconfig exposes KSU_MANUAL_SU but no verified KSU_SUSFS integration contract" ;;
+    kernelsu-next:4.4|kernelsu-next:4.19) fail "KernelSU-Next legacy has no SUSFS hook mode; use ReSukiSU for SUSFS on Linux $KERNEL_MM" ;;
+    resukisu:4.4) fail "no SUSFS backport exists for the pre-integrated Nexus 4.4 tree; SUSFS is available with ReSukiSU on Linux 4.19" ;;
   esac
 fi
 
@@ -274,9 +286,11 @@ case "$KSU_HOOK_MODE" in
     case "$PROVIDER" in
       official) HOOK_MODE="kprobe" ;;
       resukisu)
-        if [[ "$KERNEL_MM" == "4.19" || "$KERNEL_MM" == "4.4" ]]; then HOOK_MODE="manual"; else HOOK_MODE="auto"; fi
+        if is_true "$ENABLE_SUSFS"; then HOOK_MODE="susfs"
+        elif [[ "$KERNEL_MM" == "4.19" || "$KERNEL_MM" == "4.4" ]]; then HOOK_MODE="manual"
+        else HOOK_MODE="auto"; fi
         ;;
-      sukisu-ultra)
+      sukisu-ultra|kernelsu-next)
         if kernel_ge "$KERNEL_VERSION" 5 10; then HOOK_MODE="kprobe"; else HOOK_MODE="manual"; fi
         ;;
       *) HOOK_MODE="auto" ;;

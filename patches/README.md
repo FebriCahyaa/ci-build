@@ -11,11 +11,13 @@ patches/
 ├── root-manager/<provider>/<mm|common>/
 │   ├── provider-series.conf                      → isolated provider checkout
 │   ├── host-series.conf                          → host kernel tree
-│   └── config.fragment                           → .config (config phase)
+│   ├── susfs-series.conf                         → host kernel tree, after host-series (ENABLE_SUSFS)
+│   ├── config.fragment                           → .config (config phase)
+│   └── susfs.fragment                            → .config after config.fragment (ENABLE_SUSFS)
 ├── upstream/<source>/<mm>/series.conf            upstream backports (UPSTREAM_PROFILE)
 └── features/
     ├── tweaks/{balanced,performance}/<mm>.config TWEAKS=balanced|performance
-    ├── susfs/kernel-<mm>/config.fragment         ENABLE_SUSFS=true
+    ├── susfs/kernel-4.19/config.fragment         ENABLE_SUSFS=true (official KernelSU)
     └── lto-plus/lavender-4.19/thinlto.config     LTO_PLUS=true
 ```
 
@@ -38,7 +40,12 @@ Kconfig dropped because of unmet dependencies.
 
 ## SUSFS
 
-Linux 4.19 uses `simonpunk/susfs4ksu` at `001e69919c6271f690fd00b17e4c721c9e599152`
-(official KernelSU only; KernelSU-Next and ReSukiSU manual-hook profiles are
-blocked). Linux 4.4 uses the blob-verified NonGKI `susfs_patch_to_4.4.patch`.
-Both use strict `git apply --check`; no fuzzy application.
+| Provider | Linux 4.19 | Linux 4.4 |
+|---|---|---|
+| ReSukiSU | SUSFS v2.2.0 backport (LavenderLabz `e4c673c9`): `root-manager/resukisu/4.19/susfs-series.conf` + `susfs.fragment` | blocked (no backport for the pre-integrated Nexus tree) |
+| official KernelSU | `simonpunk/susfs4ksu` `001e6991` (SUSFS 1.5.5), applied by `apply_susfs.sh` | blocked (KernelSU itself unsupported) |
+| KernelSU-Next | blocked (the legacy line has no SUSFS hook mode) | blocked |
+
+All SUSFS sources are applied with strict `git apply --check`; no fuzzy
+application. Blocked combinations fail in `root_manager_apply.sh` before any
+clone.

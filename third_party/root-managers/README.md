@@ -3,8 +3,8 @@
 | Provider | Upstream | Submodule branch | Linux 4.4 |
 |---|---|---|---|
 | KernelSU | https://github.com/tiann/KernelSU | `main` | not supported upstream (< 4.14) |
-| KernelSU-Next | https://github.com/KernelSU-Next/KernelSU-Next | `dev` | `v1.1.1` |
-| ReSukiSU | https://github.com/ReSukiSU/ReSukiSU | `main` | manual hooks + NonGKI stage |
+| KernelSU-Next | https://github.com/KernelSU-Next/KernelSU-Next | `dev` | `v3.4.0-legacy` + manual hooks |
+| ReSukiSU | https://github.com/ReSukiSU/ReSukiSU | `main` | `v4.2.0-rc3` + manual hooks |
 | SukiSU Ultra | https://github.com/SukiSU-Ultra/SukiSU-Ultra | `main` | not supported (does not compile) |
 
 Builds never use the submodule working tree directly: `root_manager_apply.sh`

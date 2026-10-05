@@ -60,7 +60,7 @@ def validate_patch(path: Path) -> None:
             )
 
 
-SERIES_NAMES = ("series.conf", "host-series.conf", "provider-series.conf")
+SERIES_NAMES = ("series.conf", "host-series.conf", "provider-series.conf", "susfs-series.conf")
 
 
 def series_entries(path: Path) -> list[Path]:
@@ -94,7 +94,7 @@ def main() -> int:
     series = sorted(p for name in SERIES_NAMES for p in PATCH_ROOT.rglob(name))
     for legacy in (p for p in series if p.name == "series.conf" and "root-manager" in p.parts):
         fail(f"{legacy.relative_to(ROOT)}: root-manager patches must be listed in "
-             "provider-series.conf or host-series.conf")
+             "provider-series.conf, host-series.conf or susfs-series.conf")
 
     referenced: set[Path] = set()
     for series_file in series:

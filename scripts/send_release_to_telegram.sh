@@ -85,7 +85,7 @@ import re
 # Word-bounded patterns: "kernelsu" must not match "kernelsu-next", and
 # "sukisu" must not match "resukisu".
 patterns=(("SukiSU Ultra",r"(?<![a-z])sukisu[-_ ]?ultra"),("KernelSU-Next",r"kernelsu-next"),
-          ("ReSukiSU",r"resukisu"),("KernelSU",r"kernelsu(?!-next)"),("Vanilla",r"vanilla"))
+          ("ReSukiSU + SUSFS",r"resukisu-susfs"),("ReSukiSU",r"resukisu(?!-susfs)"),("KernelSU",r"kernelsu(?!-next)"),("Vanilla",r"vanilla"))
 for label,pattern in patterns:
     if any(re.search(pattern, n.lower()) for n in names): variants.append(label)
 print(", ".join(variants) if variants else "lihat assets release")

@@ -1,0 +1,132 @@
+Subject: [PATCH] kernel: Kbuild: verify host backports instead of sed-patching the host tree
+
+KernelSU-Next legacy's Kbuild rewrites fs/namespace.c, fs/internal.h,
+include/linux/seccomp.h and security/selinux/* with sed while make is
+parsing drivers/. Objects compiled in parallel may see either version
+(link-stage "undefined reference to path_umount" on 4.4), and a header
+rewrite invalidates every cached object. The CI host patch series
+provides those backports up front, so only verify them here.
+
+Applies to: KernelSU-Next v3.4.0-legacy (8af3d4fec33b) on Linux 4.4 and 4.19.
+---
+diff --git a/kernel/Kbuild b/kernel/Kbuild
+index baa32a37..2d501753 100644
+--- a/kernel/Kbuild
++++ b/kernel/Kbuild
+@@ -171,102 +171,20 @@ ifneq ($(HAVE_KSU_HOOK),0)
+ $(error -- KernelSU-Next: No hooks were defined, please integrate manual hooks in your kernel!)
+ endif
+ 
+-# some backports
+-ifneq ($(shell grep -Eq "^static int can_umount" $(srctree)/fs/namespace.c; echo $$?),0)
+-$(info -- KSU_NEXT: adding function 'static int can_umount(const struct path *path, int flags);' to $(srctree)/fs/namespace.c)
+-CAN_UMOUNT = static int can_umount(const struct path *path, int flags)\n\
+-{\n\t\
+-        struct mount *mnt = real_mount(path->mnt);\n\t\
+-        if (flags & ~(MNT_FORCE | MNT_DETACH | MNT_EXPIRE | UMOUNT_NOFOLLOW))\n\t\t\
+-                return -EINVAL;\n\t\
+-        if (!may_mount())\n\t\t\
+-                return -EPERM;\n\t\
+-        if (path->dentry != path->mnt->mnt_root)\n\t\t\
+-                return -EINVAL;\n\t\
+-        if (!check_mnt(mnt))\n\t\t\
+-                return -EINVAL;\n\t\
+-        if (mnt->mnt.mnt_flags & MNT_LOCKED)\n\t\t\
+-                return -EINVAL;\n\t\
+-        if (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN))\n\t\t\
+-                return -EPERM;\n\t\
+-        return 0;\n\
+-}\n
+-$(shell sed -i '/^static bool is_mnt_ns_file/i $(CAN_UMOUNT)' $(srctree)/fs/namespace.c;)
+-endif
+-
+-ifneq ($(shell grep -Eq "^int path_umount" $(srctree)/fs/namespace.c; echo $$?),0)
+-$(info -- KSU_NEXT: adding function 'int path_umount(struct path *path, int flags);' to $(srctree)/fs/namespace.c)
+-PATH_UMOUNT = int path_umount(struct path *path, int flags)\n\
+-{\n\t\
+-        struct mount *mnt = real_mount(path->mnt);\n\t\
+-        int ret;\n\t\
+-        ret = can_umount(path, flags);\n\t\
+-        if (!ret)\n\t\t\
+-                ret = do_umount(mnt, flags);\n\t\
+-        dput(path->dentry);\n\t\
+-        mntput_no_expire(mnt);\n\t\
+-        return ret;\n\
+-}\n
+-$(shell sed -i '/^static bool is_mnt_ns_file/i $(PATH_UMOUNT)' $(srctree)/fs/namespace.c;)
+-endif
+-
+-ifneq ($(shell grep -Eq "^int path_umount" $(srctree)/fs/internal.h; echo $$?),0)
+-$(shell sed -i '/^extern void __init mnt_init/a int path_umount(struct path *path, int flags);' $(srctree)/fs/internal.h;)
+-$(info -- KSU_NEXT: adding 'int path_umount(struct path *path, int flags);' to $(srctree)/fs/internal.h)
+-endif
+-
+-ifneq ($(shell grep -q "atomic_t filter_count;" $(srctree)/include/linux/seccomp.h; echo $$?),0)
+-$(info -- KSU_NEXT: patching struct seccomp for filter_count)
+-$(shell sed -i '/int mode;/a\	atomic_t filter_count;' $(srctree)/include/linux/seccomp.h)
+-$(shell sed -i '/#include <linux\/thread_info.h>/a\#include <linux/atomic.h>' $(srctree)/include/linux/seccomp.h)
+-endif
+-
+-# security/selinux backports
+-ifneq ($(shell grep -q "selinux_inode(inode)" $(srctree)/security/selinux/hooks.c; echo $$?),0)
+-$(info -- KSU_NEXT: patching selinux/hooks.c for selinux_inode)
+-$(shell sed -i 's/struct inode_security_struct \*isec = inode->i_security/struct inode_security_struct *isec = selinux_inode(inode)/g' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/return inode->i_security/return selinux_inode(inode)/g' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/return inode->i_security/return selinux_inode(inode)/g' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/\bisec = inode->i_security;/isec = selinux_inode(inode);/' $(srctree)/security/selinux/hooks.c)
+-endif
+-
+-ifneq ($(shell grep -Eq 'selinux_cred\(.*\)' $(srctree)/security/selinux/hooks.c; echo $$?),0)
+-$(info -- KSU_NEXT: patching selinux/hooks.c for selinux_cred)
+-$(shell sed -i 's/tsec = cred->security;/tsec = selinux_cred(cred);/g' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/const struct task_security_struct \*tsec = cred->security;/const struct task_security_struct *tsec = selinux_cred(cred);/g' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/const struct task_security_struct \*tsec = current_security();/const struct task_security_struct *tsec = selinux_cred(current_cred());/g' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/old_tsec = current_security();/old_tsec = selinux_cred(current_cred());/g' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/new_tsec = bprm->cred->security;/new_tsec = selinux_cred(bprm->cred);/g' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/tsec = new->security;/tsec = selinux_cred(new);/g' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/tsec = new_creds->security;/tsec = selinux_cred(new_creds);/g' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/old_tsec = old->security;/old_tsec = selinux_cred(old);/g' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/const struct task_security_struct \*old_tsec = old->security;/const struct task_security_struct *old_tsec = selinux_cred(old);/g' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/struct task_security_struct \*tsec = new->security;/struct task_security_struct *tsec = selinux_cred(new);/g' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/__tsec = current_security();/__tsec = selinux_cred(current_cred());/' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/__tsec = __task_cred(p)->security;/__tsec = selinux_cred(__task_cred(p));/' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/current_security()/selinux_cred(current_cred())/g' $(srctree)/security/selinux/hooks.c)
+-$(shell sed -i 's/old->security/selinux_cred(old)/g' $(srctree)/security/selinux/hooks.c)
+-endif
+-
+-ifneq ($(shell grep -q "selinux_inode(inode)" $(srctree)/security/selinux/selinuxfs.c; echo $$?),0)
+-$(info -- KSU_NEXT: patching selinux/selinuxfs.c for selinux_inode)
+-$(shell sed -i 's/(struct inode_security_struct \*)inode->i_security/selinux_inode(inode)/g' $(srctree)/security/selinux/selinuxfs.c)
+-endif
+-
+-ifneq ($(shell grep -q "selinux_cred" $(srctree)/security/selinux/xfrm.c; echo $$?),0)
+-$(info -- KSU_NEXT: patching selinux/xfrm.c for selinux_cred)
+-$(shell sed -i 's/const struct task_security_struct \*tsec = current_security();/const struct task_security_struct *tsec = selinux_cred(current_cred());/g' $(srctree)/security/selinux/xfrm.c)
+-endif
+-
+-ifneq ($(shell grep -q "selinux_inode" $(srctree)/security/selinux/include/objsec.h; echo $$?),0)
+-$(info -- KSU_NEXT: patching selinux/include/objsec.h for selinux_inode)
+-$(shell sed -i '/#endif \/\* _SELINUX_OBJSEC_H_ \*\//i\static inline struct inode_security_struct *selinux_inode(\n\t\t\t\t\t\tconst struct inode *inode)\n{\n\treturn inode->i_security;\n}\n' $(srctree)/security/selinux/include/objsec.h)
+-endif
+-
+-ifneq ($(shell grep -q "task_security_struct\s\+\*selinux_cred" $(srctree)/security/selinux/include/objsec.h; echo $$?),0)
+-$(info -- KSU_NEXT: patching selinux/include/objsec.h for selinux_cred)
+-$(shell sed -i '/#endif \/\* _SELINUX_OBJSEC_H_ \*\//i\static inline struct task_security_struct *selinux_cred(const struct cred *cred)\n{\n\treturn cred->security;\n}\n' $(srctree)/security/selinux/include/objsec.h)
+-endif
++# Host backports (path_umount, struct seccomp filter_count, SELinux LSM-blob
++# accessors) are provided by the CI host patch series. Upstream rewrites the
++# host tree with sed from here, which races with objects compiled in parallel
++# and silently edits shared headers; verify instead and fail loudly.
++define ksu_require_host
++ifneq ($$(shell grep -Eq '$(1)' $(srctree)/$(2); echo $$$$?),0)
++$$(error -- KernelSU-Next: host kernel lacks '$(1)' in $(2); apply the root-manager host patch series)
++endif
++endef
++$(eval $(call ksu_require_host,^int path_umount,fs/namespace.c))
++$(eval $(call ksu_require_host,path_umount,fs/internal.h))
++$(eval $(call ksu_require_host,atomic_t filter_count;,include/linux/seccomp.h))
++$(eval $(call ksu_require_host,selinux_inode,security/selinux/include/objsec.h))
++$(eval $(call ksu_require_host,selinux_cred,security/selinux/include/objsec.h))
+ 
+ # SELinux drivers check
+ ifeq ($(shell grep -q "current_sid(void)" $(srctree)/security/selinux/include/objsec.h; echo $$?),0)

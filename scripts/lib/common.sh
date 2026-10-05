@@ -98,7 +98,8 @@ read_series() {
 }
 
 # normalize_variant <name>: canonical root variant id.
-#   vanilla | kernelsu | kernelsu-next | resukisu | sukisu-ultra
+#   vanilla | kernelsu | kernelsu-next | resukisu | resukisu-susfs | sukisu-ultra
+# "<provider>-susfs" is the provider built with ENABLE_SUSFS=true.
 normalize_variant() {
   case "${1,,}" in
     ""|vanilla|none|false|0|no|off|disabled) echo "vanilla" ;;
@@ -106,6 +107,7 @@ normalize_variant() {
     ksun|kernelsu-next|ksu-next|next) echo "kernelsu-next" ;;
     suki|sukisu|sukisu-ultra|sukisu_ultra|sukisuultra) echo "sukisu-ultra" ;;
     resukisu|re-sukisu) echo "resukisu" ;;
+    resukisu-susfs|resukisu+susfs|re-sukisu-susfs) echo "resukisu-susfs" ;;
     *) return 1 ;;
   esac
 }
@@ -117,10 +119,17 @@ variant_label() {
     kernelsu) echo "KernelSU" ;;
     kernelsu-next) echo "KernelSU-Next" ;;
     resukisu) echo "ReSukiSU" ;;
+    resukisu-susfs) echo "ReSukiSU-SUSFS" ;;
     sukisu-ultra|sukisu_ultra|sukisuultra) echo "SukiSU Ultra" ;;
     *) echo "$1" ;;
   esac
 }
+
+# variant_provider <variant>: root provider of a variant ("resukisu-susfs" -> "resukisu").
+variant_provider() { printf '%s\n' "${1%-susfs}"; }
+
+# variant_susfs <variant>: true when the variant is built with SUSFS.
+variant_susfs() { [[ "$1" == *-susfs ]]; }
 
 # expand_variants <list> [profile-default]: comma/space separated list -> one
 # canonical id per line. "", "all" and "default" select the profile default
@@ -130,7 +139,7 @@ expand_variants() {
   local raw="${1:-$fallback}" item v seen=" "
   case "${raw,,}" in all|default|auto) raw="$fallback" ;; esac
   for item in ${raw//,/ }; do
-    v="$(normalize_variant "$item")" || ci_die "unknown variant: $item (use vanilla, kernelsu, kernelsu-next, resukisu, sukisu-ultra)"
+    v="$(normalize_variant "$item")" || ci_die "unknown variant: $item (use vanilla, kernelsu, kernelsu-next, resukisu, resukisu-susfs, sukisu-ultra)"
     [[ "$seen" == *" $v "* ]] && continue
     seen+="$v "
     echo "$v"

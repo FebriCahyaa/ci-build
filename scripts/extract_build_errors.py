@@ -23,7 +23,7 @@ PRIMARY = [
     re.compile(r"No rule to make target", re.I),
     re.compile(r"\*\*\* .*(Stop|Error)", re.I),
     re.compile(r"(Killed|out of memory|Segmentation fault|Permission denied|cannot find|not found)", re.I),
-    re.compile(r"\[(build|root-manager|patches|toolchain|susfs|nongki-4\.4|variants|anykernel)\] ERROR", re.I),
+    re.compile(r"\[(build|root-manager|patches|toolchain|susfs|variants|anykernel)\] ERROR", re.I),
     re.compile(r"^(ERROR|FATAL|fatal):|unexpected end of file|Error is not recoverable", re.I),
 ]
 NOISE = re.compile(r"(-W(no-)?error|error\.o\b|errors? (were|was) |\berror_[a-z]|_error\b)", re.I)

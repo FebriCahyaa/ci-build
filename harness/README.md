@@ -13,7 +13,7 @@ All 25 pipeline variables are runtime inputs supplied by
 
 ```text
 BUILD_PROFILE   = lavender-4.4 | lavender-4.19 | garnet-gki
-ROOT_VARIANTS   = default | all | vanilla,kernelsu-next,resukisu,sukisu-ultra
+ROOT_VARIANTS   = default | all | vanilla,kernelsu-next,resukisu,resukisu-susfs,sukisu-ultra
 PUBLISH_RELEASE = false | true
 BUILD_CUSTOMIZATION = {"kernel_name": "...", "apt_packages": "...", "tweaks": "none|balanced|performance"}
 ```

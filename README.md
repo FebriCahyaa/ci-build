@@ -6,7 +6,7 @@ implementation drives GitHub Actions, Harness, and local builds.
 | Profile | Kernel | Source | Default root variants |
 |---|---|---|---|
 | `lavender-4.4` | Linux 4.4 non-GKI, HMP/EAS | `projects-nexus/nexus_kernel_xiaomi_lavender@13` | vanilla, kernelsu-next, resukisu |
-| `lavender-4.19` | Linux 4.19 non-GKI | `pix106/android_kernel_xiaomi_sdm660_southwest-ng@main` | vanilla, kernelsu-next, resukisu, sukisu-ultra |
+| `lavender-4.19` | Linux 4.19 non-GKI | `pix106/android_kernel_xiaomi_sdm660_southwest-ng@main` | vanilla, kernelsu-next, resukisu, resukisu-susfs |
 | `garnet-gki` | Linux 5.10 GKI, A/B | `FebriCahyaa/kernel_xiaomi_garnet@garnet-t-oss` | vanilla, kernelsu-next, resukisu, sukisu-ultra |
 
 Profiles live in `profiles/targets/`; AnyKernel flash metadata in
@@ -99,12 +99,22 @@ receives only KMI-safe tweaks so the stock vendor modules keep loading. See
 
 ## Root managers
 
-| Provider | Linux 4.4 | Linux 4.19 | Linux 5.10 GKI |
+| Provider | Linux 4.4 (Nexus) | Linux 4.19 (SouthWest-NG) | Linux 5.10 GKI |
 |---|---|---|---|
-| KernelSU-Next | `v1.1.1` (kprobes) | `v3.4.0` + provider/host compat patches | `v3.4.0` |
-| ReSukiSU | `v4.2.0-rc3` + NonGKI hook stage | `v4.2.0-rc3` + manual-hook host patches | `v4.2.0-rc3` |
-| SukiSU Ultra | not supported (fails closed) | `main` | `main` |
-| KernelSU (official) | not supported (fails closed) | `v0.9.5` | `main` |
+| KernelSU-Next | `v3.4.0-legacy`, manual hooks | `v3.4.0-legacy`, manual hooks | `v3.4.0` (kprobes) |
+| ReSukiSU | `v4.2.0-rc3`, manual hooks | `v4.2.0-rc3`, manual hooks, optional SUSFS v2.2.0 | `v4.2.0-rc3` (tracepoint) |
+| SukiSU Ultra | not supported (fails closed) | `main` (kprobes only; not in the default matrix) | `main` |
+| KernelSU (official) | not supported (fails closed) | `v0.9.5` (+ SUSFS 1.5.5) | `main` |
+
+Non-GKI kernels use manual hooks only: kprobe/tracepoint hooks bootloop on the
+SouthWest-NG Clang CFI + LTO tree, and the Nexus 4.4 tree already carries
+manual hook call sites. The host-side hooks live in
+`patches/root-manager/<provider>/<mm>/host-series.conf`, are applied to root
+variants only and are guarded by the provider's manual-hook option.
+`ENABLE_SUSFS=true` is available for ReSukiSU and official KernelSU on 4.19;
+other combinations fail before any clone. See
+[`patches/root-manager/kernelsu-next/README.md`](patches/root-manager/kernelsu-next/README.md)
+and [`patches/root-manager/resukisu/README.md`](patches/root-manager/resukisu/README.md).
 
 Provider sources come from the `third_party/root-managers/` submodules when
 initialized, otherwise from an upstream clone; either way patches are applied
@@ -114,7 +124,9 @@ to an isolated copy. The patch registry contract is:
 patches/root-manager/<provider>/<kernel-mm>/
   provider-series.conf   applied to the isolated provider checkout (root_manager_apply.sh)
   host-series.conf       applied to the host kernel tree           (apply_patch_series.sh)
+  susfs-series.conf      host tree, after host-series, ENABLE_SUSFS (apply_patch_series.sh)
   config.fragment        Kconfig overrides                         (config phase)
+  susfs.fragment         Kconfig overrides with ENABLE_SUSFS       (config phase)
 ```
 
 Bootstrap / update the submodules:
@@ -130,9 +142,6 @@ bash scripts/sync_root_managers.sh remote
   `obj-y += kernelsu/` and unconditional hook calls in `fs/*.c`. The *vanilla*
   variant therefore still contains that KernelSU copy; a truly root-free build
   needs a source branch without it.
-* **ReSukiSU on lavender-4.4**: the pre-integrated `fs/stat.c` hook predates
-  ReSukiSU's `ksu_handle_newfstat_ret`/`ksu_handle_fstat64_ret` hooks, so
-  ReSukiSU's own hook check stops the build until those hooks are ported.
 * **garnet** source release omits `drivers/misc/hwid` and carries
   `drivers/misc/plaid` as an orphan gitlink; `patches/devices/garnet/5.10`
   drops those references so `gki_defconfig` and the Image build work.

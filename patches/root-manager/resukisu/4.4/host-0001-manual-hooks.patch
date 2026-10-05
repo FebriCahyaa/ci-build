@@ -1,0 +1,191 @@
+Subject: [PATCH] ksu: adapt Nexus pre-integrated hooks to ReSukiSU (Linux 4.4)
+
+ReSukiSU's manual_hook_check.mk / static_export_check.mk contract on the
+Nexus lavender 4.4 tree, which already calls the old KernelSU hooks:
+
+* fs/stat.c: three-argument ksu_handle_stat(); newfstat/fstat64 return hooks.
+* fs/read_write.c: drop the old ksu_handle_vfs_read() call. ReSukiSU has no
+  such symbol; init.rc is hooked through LSM
+  (CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK).
+* kernel/reboot.c: ksu_handle_sys_reboot() supercall hook.
+* SELinux: write_op, sel_handle_status_ops, sel_mutex, selinux_status_page,
+  selinux_status_lock and policy_rwlock lose `static`
+  (CONFIG_KALLSYMS_ALL is off and 4.4 has no struct selinux_state).
+
+setuid, init.rc and input use ReSukiSU's automatic hooks (config.fragment).
+---
+diff --git a/fs/read_write.c b/fs/read_write.c
+index 7016baa6..c1284481 100644
+--- a/fs/read_write.c
++++ b/fs/read_write.c
+@@ -440,15 +440,11 @@ ssize_t __vfs_read(struct file *file, char __user *buf, size_t count,
+ EXPORT_SYMBOL(__vfs_read);
+ 
+ 
+-// KernelSU hook
+-extern int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
+-			       size_t *count_ptr, loff_t **pos);
+ 
+ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
+ {
+ 	ssize_t ret;
+ 
+-        ksu_handle_vfs_read(&file, &buf, &count, &pos); // call KSU fork first
+ 	if (!(file->f_mode & FMODE_READ))
+ 		return -EBADF;
+ 	if (!(file->f_mode & FMODE_CAN_READ))
+diff --git a/fs/stat.c b/fs/stat.c
+index 80b1fdfe..fa4c1d25 100644
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -88,7 +88,8 @@ int vfs_fstat(unsigned int fd, struct kstat *stat)
+ EXPORT_SYMBOL(vfs_fstat);
+ 
+ // KernelSU hook
+-extern int ksu_handle_stat(int *dfd, const char __user **filename_user);
++extern int ksu_handle_stat(int *dfd, const char __user **filename_user,
++			   int *flags);
+ 
+ int vfs_fstatat(int dfd, const char __user *filename, struct kstat *stat,
+ 		int flag)
+@@ -97,7 +98,7 @@ int vfs_fstatat(int dfd, const char __user *filename, struct kstat *stat,
+ 	int error = -EINVAL;
+ 	unsigned int lookup_flags = 0;
+ 
+-        ksu_handle_stat(&dfd, &filename); // call KSU hook first
++	ksu_handle_stat(&dfd, &filename, &flag); // call KSU hook first
+ 	if ((flag & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
+ 		      AT_EMPTY_PATH)) != 0)
+ 		goto out;
+@@ -305,6 +306,11 @@ SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
+ }
+ #endif
+ 
++#ifdef CONFIG_KSU_MANUAL_HOOK
++extern void ksu_handle_newfstat_ret(unsigned int *fd,
++				    struct stat __user **statbuf_ptr);
++#endif
++
+ SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
+ {
+ 	struct kstat stat;
+@@ -313,6 +319,10 @@ SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
+ 	if (!error)
+ 		error = cp_new_stat(&stat, statbuf);
+ 
++#ifdef CONFIG_KSU_MANUAL_HOOK
++	if (!error)
++		ksu_handle_newfstat_ret(&fd, &statbuf);
++#endif
+ 	return error;
+ }
+ 
+@@ -423,6 +433,11 @@ SYSCALL_DEFINE2(lstat64, const char __user *, filename,
+ 	return error;
+ }
+ 
++#ifdef CONFIG_KSU_MANUAL_HOOK
++extern void ksu_handle_fstat64_ret(unsigned long *fd,
++				   struct stat64 __user **statbuf_ptr);
++#endif
++
+ SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
+ {
+ 	struct kstat stat;
+@@ -431,6 +446,10 @@ SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
+ 	if (!error)
+ 		error = cp_new_stat64(&stat, statbuf);
+ 
++#ifdef CONFIG_KSU_MANUAL_HOOK
++	if (!error)
++		ksu_handle_fstat64_ret(&fd, &statbuf);
++#endif
+ 	return error;
+ }
+ 
+diff --git a/kernel/reboot.c b/kernel/reboot.c
+index 2946ed1d..0ffb2d05 100644
+--- a/kernel/reboot.c
++++ b/kernel/reboot.c
+@@ -277,6 +277,11 @@ static DEFINE_MUTEX(reboot_mutex);
+  *
+  * reboot doesn't sync: do that yourself before calling this.
+  */
++#ifdef CONFIG_KSU_MANUAL_HOOK
++extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
++				 void __user **arg);
++#endif
++
+ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
+ 		void __user *, arg)
+ {
+@@ -284,6 +289,10 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
+ 	char buffer[256];
+ 	int ret = 0;
+ 
++#ifdef CONFIG_KSU_MANUAL_HOOK
++	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
++#endif
++
+ 	/* We only trust the superuser with rebooting the system. */
+ 	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
+ 		return -EPERM;
+diff --git a/security/selinux/selinuxfs.c b/security/selinux/selinuxfs.c
+index 7778e28c..01215f70 100644
+--- a/security/selinux/selinuxfs.c
++++ b/security/selinux/selinuxfs.c
+@@ -60,7 +60,7 @@ static int __init checkreqprot_setup(char *str)
+ }
+ __setup("checkreqprot=", checkreqprot_setup);
+ 
+-static DEFINE_MUTEX(sel_mutex);
++DEFINE_MUTEX(sel_mutex);
+ 
+ /* global data for booleans */
+ static struct dentry *bool_dir;
+@@ -263,7 +263,7 @@ static int sel_mmap_handle_status(struct file *filp,
+ 			       size, vma->vm_page_prot);
+ }
+ 
+-static const struct file_operations sel_handle_status_ops = {
++const struct file_operations sel_handle_status_ops = {
+ 	.open		= sel_open_handle_status,
+ 	.read		= sel_read_handle_status,
+ 	.mmap		= sel_mmap_handle_status,
+@@ -662,7 +662,7 @@ static ssize_t sel_write_relabel(struct file *file, char *buf, size_t size);
+ static ssize_t sel_write_user(struct file *file, char *buf, size_t size);
+ static ssize_t sel_write_member(struct file *file, char *buf, size_t size);
+ 
+-static ssize_t (*write_op[])(struct file *, char *, size_t) = {
++ssize_t (*write_op[])(struct file *, char *, size_t) = {
+ 	[SEL_ACCESS] = sel_write_access,
+ 	[SEL_CREATE] = sel_write_create,
+ 	[SEL_RELABEL] = sel_write_relabel,
+diff --git a/security/selinux/ss/services.c b/security/selinux/ss/services.c
+index 1b391054..349031fe 100644
+--- a/security/selinux/ss/services.c
++++ b/security/selinux/ss/services.c
+@@ -76,7 +76,7 @@ int selinux_policycap_netpeer;
+ int selinux_policycap_openperm;
+ int selinux_policycap_alwaysnetwork;
+ 
+-static DEFINE_RWLOCK(policy_rwlock);
++DEFINE_RWLOCK(policy_rwlock);
+ 
+ static struct sidtab sidtab;
+ struct policydb policydb;
+diff --git a/security/selinux/ss/status.c b/security/selinux/ss/status.c
+index d982365f..56ca9747 100644
+--- a/security/selinux/ss/status.c
++++ b/security/selinux/ss/status.c
+@@ -35,8 +35,8 @@
+  * In most cases, application shall confirm the kernel status is not
+  * changed without any system call invocations.
+  */
+-static struct page *selinux_status_page;
+-static DEFINE_MUTEX(selinux_status_lock);
++struct page *selinux_status_page;
++DEFINE_MUTEX(selinux_status_lock);
+ 
+ /*
+  * selinux_kernel_status_page
