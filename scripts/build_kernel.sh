@@ -61,6 +61,12 @@ PATCH_PROFILE="${PATCH_PROFILE:-${PROFILE_PATCH_PROFILE:-auto}}"
 UPSTREAM_PROFILE="${UPSTREAM_PROFILE:-${PROFILE_UPSTREAM_PROFILE:-auto}}"
 LTO_PLUS="${LTO_PLUS:-${PROFILE_LTO_PLUS:-false}}"
 TWEAKS="${TWEAKS:-${PROFILE_TWEAKS:-none}}"
+ZAIRENKAI="${ZAIRENKAI:-${PROFILE_ZAIRENKAI:-false}}"
+ZAIRENKAI_REPO="${ZAIRENKAI_REPO:-${PROFILE_ZAIRENKAI_REPO:-https://github.com/FebriCahyaa/Zairenkai.git}}"
+ZAIRENKAI_REF="${ZAIRENKAI_REF:-${PROFILE_ZAIRENKAI_REF:-main}}"
+ZAIRENKAI_TAG="${ZAIRENKAI_TAG:-${PROFILE_ZAIRENKAI_TAG:-}}"
+ZAIRENKAI_HOOK_MODE="${ZAIRENKAI_HOOK_MODE:-${PROFILE_ZAIRENKAI_HOOK_MODE:-manual}}"
+ZAIRENKAI_LICENSE_INC_FILE="${ZAIRENKAI_LICENSE_INC_FILE:-}"
 KERNEL_NAME="${KERNEL_NAME:-}"
 # PATCH_PROFILE=southwest-ng also labels the scheduler profile (keeps workflow inputs <= 25).
 if [[ "$PATCH_PROFILE" == "southwest-ng" && "$SCHEDULER_PROFILE" == "auto" ]]; then
@@ -239,7 +245,22 @@ dashboard_finish() {
   DASHBOARD_PID=""
   return 0
 }
-stop_dashboard() { [[ -z "$DASHBOARD_PID" ]] || kill "$DASHBOARD_PID" 2>/dev/null || true; }
+cleanup_zairenkai_sensitive() {
+  # Do not delete ZAIRENKAI_LICENSE_INC_FILE here: Harness reuses the same
+  # secret-backed file across all matrix variants in one execution. Only remove
+  # private material copied into the per-build source tree; the CI wrapper owns
+  # the lifetime of the original secret file.
+  if [[ -n "${WORK:-}" && -d "$WORK" ]]; then
+    find "$WORK" -type f \
+      \( -path '*/Zairenkai/kernel/license/zkfc_license.inc' -o -path '*/Zairenkai/kernel/license/zkfc_crl.inc' \) \
+      -delete 2>/dev/null || true
+  fi
+}
+
+stop_dashboard() {
+  [[ -z "$DASHBOARD_PID" ]] || kill "$DASHBOARD_PID" 2>/dev/null || true
+  cleanup_zairenkai_sensitive
+}
 trap stop_dashboard EXIT
 start_dashboard
 
@@ -419,6 +440,9 @@ PATCH_ENV=(
   PATCH_PROFILE="$PATCH_PROFILE" UPSTREAM_PROFILE="$UPSTREAM_PROFILE"
   ROOT_MANAGER="$KSU_PROVIDER" KSU_REQUIRED="$KSU_REQUIRED" KSU_PREINTEGRATED="$KSU_PREINTEGRATED"
   ENABLE_SUSFS="$ENABLE_SUSFS" KSU_SUSFS_REQUIRED="$ENABLE_SUSFS" LTO_PLUS="$LTO_PLUS" TWEAKS="$TWEAKS"
+  ZAIRENKAI="$ZAIRENKAI" ZAIRENKAI_REPO="$ZAIRENKAI_REPO" ZAIRENKAI_REF="$ZAIRENKAI_REF"
+  ZAIRENKAI_TAG="$ZAIRENKAI_TAG" ZAIRENKAI_HOOK_MODE="$ZAIRENKAI_HOOK_MODE"
+  ZAIRENKAI_LICENSE_INC_FILE="$ZAIRENKAI_LICENSE_INC_FILE"
 )
 ci_phase "config-patches"
 run_helper apply_patch_series.sh "${PATCH_ENV[@]}" PHASE=source || fail "source patch series"
@@ -528,7 +552,10 @@ for kv in \
   "ksu_repo=${KSU_REPO:-}" "ksu_ref=${KSU_REF:-}" "ksu_version=${KSU_PROVIDER_VERSION:-none}" \
   "ksu_commit=${KSU_PROVIDER_COMMIT:-none}" "ksu_layout=${KSU_LAYOUT_RESOLVED:-none}" "ksu_hook_mode=$KSU_HOOK_MODE" \
   "susfs_enabled=$ENABLE_SUSFS" "susfs_source=$SUSFS_SOURCE" "susfs_ref=$SUSFS_REF" \
-  "susfs_commit=$SUSFS_COMMIT" "susfs_version=$SUSFS_VERSION"; do
+  "susfs_commit=$SUSFS_COMMIT" "susfs_version=$SUSFS_VERSION" \
+  "zairenkai_enabled=$ZAIRENKAI" "zairenkai_repo=$ZAIRENKAI_REPO" "zairenkai_ref=$ZAIRENKAI_REF" \
+  "zairenkai_tag=$ZAIRENKAI_TAG" "zairenkai_hook_mode=$ZAIRENKAI_HOOK_MODE" \
+  "zairenkai_license_embedded=${ZAIRENKAI_LICENSE_INC_FILE:+true}"; do
   info "${kv%%=*}" "${kv#*=}"
 done
 

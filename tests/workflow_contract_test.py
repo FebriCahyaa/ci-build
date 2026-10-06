@@ -108,6 +108,37 @@ for needle in ('"kernel_name":', '"apt_packages":', "  identifier: Universal_Ker
         fail(f"harness-kernel.yml is missing {needle!r}")
 if "TG_RELEASE_TOPIC_ID" in KERNEL_PIPELINE.read_text(encoding="utf-8"):
     fail("the Harness build step must not receive TG_RELEASE_TOPIC_ID")
+
+# 3b. Zairenkai token wiring stays outside the 25 runtime-input contract.
+harness_pipeline_text = KERNEL_PIPELINE.read_text(encoding="utf-8")
+kernel_workflow_text = (ROOT / ".github" / "workflows" / "kernel.yml").read_text(encoding="utf-8")
+for needle in (
+    'ZAIRENKAI_LICENSE_INC: <+secrets.getValue("zairenkai_license_inc")>',
+    'license_file=/tmp/zairenkai-zkfc-license.inc',
+    'ZAIRENKAI_LICENSE_INC_FILE: /tmp/zairenkai-zkfc-license.inc',
+    'name: Cleanup Zairenkai license',
+):
+    if needle not in harness_pipeline_text:
+        fail(f"Harness Zairenkai wiring missing {needle!r}")
+for needle in (
+    "ZAIRENKAI_LICENSE_INC: ${{ secrets.ZAIRENKAI_LICENSE_INC }}",
+    'license_file="$RUNNER_TEMP/zkfc_license.inc"',
+    'ZAIRENKAI_LICENSE_INC_FILE=$license_file',
+    'name: Remove temporary Zairenkai license',
+):
+    if needle not in kernel_workflow_text:
+        fail(f"GitHub Zairenkai wiring missing {needle!r}")
+if "ZAIRENKAI_LICENSE_INC" in "\n".join(re.findall(r'"([A-Z][A-Z0-9_]+)"', blocks[0])):
+    fail("Zairenkai license must not be a Harness runtime input")
+build_kernel_text = (ROOT / "scripts" / "build_kernel.sh").read_text(encoding="utf-8")
+if 'rm -f "${ZAIRENKAI_LICENSE_INC_FILE:-}"' in build_kernel_text:
+    fail("build_kernel.sh must not delete the shared Harness Zairenkai license input")
+for needle in (
+    'rm -f /tmp/zairenkai-zkfc-license.inc',
+    "Zairenkai license",
+):
+    if needle not in harness_pipeline_text:
+        fail(f"Harness Zairenkai cleanup is missing {needle!r}")
 print(f"PASS Harness bridge: {len(declared)} runtime inputs match the pipeline")
 
 # 4. scripts/start_local_ci.sh sends exactly the workflow_dispatch inputs.

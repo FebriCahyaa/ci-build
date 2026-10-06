@@ -6,3 +6,8 @@ __pycache__/
 /harness-inputs.yaml
 /harness-response.json
 /harness-monitor.json
+
+# Zairenkai private owner-issued token material (never commit/archive)
+**/zkfc_license.inc
+**/zkfc_crl.inc
+*.zkl

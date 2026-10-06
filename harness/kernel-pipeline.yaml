@@ -98,6 +98,39 @@ pipeline:
             steps:
               - step:
                   type: Run
+                  name: Prepare Zairenkai license
+                  identifier: prepare_zairenkai_license
+                  timeout: 5m
+                  spec:
+                    shell: Bash
+                    envVariables:
+                      ZAIRENKAI_LICENSE_INC: <+secrets.getValue("zairenkai_license_inc")>
+                      BUILD_PROFILE: <+pipeline.variables.BUILD_PROFILE>
+                    command: |
+                      set -Eeuo pipefail
+                      if [[ "$BUILD_PROFILE" != "lavender-4.19" ]]; then
+                        echo "[zairenkai] skipped for $BUILD_PROFILE"
+                        exit 0
+                      fi
+                      if [[ -z "${ZAIRENKAI_LICENSE_INC:-}" ]]; then
+                        echo "[zairenkai] missing Harness secret: zairenkai_license_inc" >&2
+                        exit 1
+                      fi
+                      license_file=/tmp/zairenkai-zkfc-license.inc
+                      printf '%s\n' "$ZAIRENKAI_LICENSE_INC" > "$license_file"
+                      chmod 600 "$license_file"
+                      byte_count="$(grep -oE '0x[0-9A-Fa-f]{2}' "$license_file" | wc -l | tr -d ' ')"
+                      if [[ "$byte_count" != "200" ]]; then
+                        echo "[zairenkai] invalid .inc secret: expected 200 bytes, found $byte_count" >&2
+                        rm -f "$license_file"
+                        exit 1
+                      fi
+                      echo "[zairenkai] embedded license prepared (200 bytes)"
+                  when:
+                    condition: <+pipeline.variables.BUILD_PROFILE> == "lavender-4.19"
+
+              - step:
+                  type: Run
                   name: Build Universal Kernel Matrix
                   identifier: build_universal_kernel_matrix
                   timeout: 2h 30m
@@ -120,6 +153,7 @@ pipeline:
                       CI_ARTIFACT_STAGE: "true"
                       CI_ARTIFACT_RELEASE_TAG: harness-<+pipeline.executionId>
                       CI_GITHUB_STATUS_ENABLED: "false"
+                      ZAIRENKAI_LICENSE_INC_FILE: /tmp/zairenkai-zkfc-license.inc
                       BUILD_PROFILE: <+pipeline.variables.BUILD_PROFILE>
                       ROOT_VARIANTS: <+pipeline.variables.ROOT_VARIANTS>
                       KERNEL_REPO: <+pipeline.variables.KERNEL_REPO_OVERRIDE>
@@ -186,6 +220,14 @@ pipeline:
                         set +e
 
                         mkdir -p "$PWD/work" "$PWD/release/assets"
+
+                        # Never persist owner-issued ZKFC token material into the
+                        # release handoff, even on failed builds.
+                        rm -f /tmp/zairenkai-zkfc-license.inc
+                        find "$PWD/work" -type f \
+                          \( -path '*/Zairenkai/kernel/license/zkfc_license.inc' -o -path '*/Zairenkai/kernel/license/zkfc_crl.inc' \) \
+                          -delete 2>/dev/null || true
+
                         printf 'status=%s\nprofile=%s\nexecution_id=%s\nexit_code=%s\n' \
                           "$([[ "$rc" == 0 ]] && echo SUCCEEDED || echo FAILED)" \
                           "$BUILD_PROFILE" "$HARNESS_EXECUTION_ID" "$rc" > "$PWD/work/harness-result.txt"
@@ -267,6 +309,22 @@ pipeline:
                       fi
 
                       exit "$matrix_rc"
+
+              - step:
+                  type: Run
+                  name: Cleanup Zairenkai license
+                  identifier: cleanup_zairenkai_license
+                  timeout: 2m
+                  spec:
+                    shell: Bash
+                    command: |
+                      set -Eeuo pipefail
+                      rm -f /tmp/zairenkai-zkfc-license.inc
+                      find "$PWD/work" -type f \
+                        \( -path '*/Zairenkai/kernel/license/zkfc_license.inc' -o -path '*/Zairenkai/kernel/license/zkfc_crl.inc' \) \
+                        -delete 2>/dev/null || true
+                  when:
+                    stageStatus: All
 
               - step:
                   type: Plugin

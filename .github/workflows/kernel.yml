@@ -220,6 +220,28 @@ jobs:
           printf 'PROFILE_ID=%s\nPROFILE_DEVICE=%s\nPROFILE_KERNEL_FAMILY=%s\nPROFILE_KERNEL_REPO=%s\nPROFILE_DEFCONFIG=%s\nPROFILE_ANYKERNEL_PROFILE=%s\n' \
             "$PROFILE_ID" "$PROFILE_DEVICE" "$PROFILE_KERNEL_FAMILY" "$PROFILE_KERNEL_REPO" "$PROFILE_DEFCONFIG" "$PROFILE_ANYKERNEL_PROFILE"
 
+      - name: Prepare Zairenkai embedded license
+        if: inputs.build_profile == 'lavender-4.19'
+        env:
+          ZAIRENKAI_LICENSE_INC: ${{ secrets.ZAIRENKAI_LICENSE_INC }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ZAIRENKAI_LICENSE_INC:-}" ]]; then
+            echo "::error::Missing required repository secret: ZAIRENKAI_LICENSE_INC"
+            exit 1
+          fi
+          license_file="$RUNNER_TEMP/zkfc_license.inc"
+          printf '%s\n' "$ZAIRENKAI_LICENSE_INC" > "$license_file"
+          chmod 600 "$license_file"
+          byte_count="$(grep -oE '0x[0-9A-Fa-f]{2}' "$license_file" | wc -l | tr -d ' ')"
+          if [[ "$byte_count" != "200" ]]; then
+            echo "::error::Invalid Zairenkai .inc secret: expected 200 bytes, found $byte_count"
+            rm -f "$license_file"
+            exit 1
+          fi
+          echo "ZAIRENKAI_LICENSE_INC_FILE=$license_file" >> "$GITHUB_ENV"
+          echo "Zairenkai embedded license prepared (200 bytes)"
+
       - name: Build kernel
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
@@ -261,6 +283,7 @@ jobs:
           APT_PACKAGES: ${{ inputs.apt_packages }}
           INSTALL_SHELLCHECK: "false"
           TG_SEND_ARTIFACTS: "false"
+          ZAIRENKAI_LICENSE_INC_FILE: ${{ runner.temp }}/zkfc_license.inc
         run: |
           set -euo pipefail
           bash scripts/build_kernel.sh
@@ -276,6 +299,13 @@ jobs:
             work/failure-build.log.gz
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Remove temporary Zairenkai license
+        if: always() && inputs.build_profile == 'lavender-4.19'
+        run: |
+          set -euo pipefail
+          rm -f "${RUNNER_TEMP}/zkfc_license.inc"
+          rm -f "work/kernel/Zairenkai/kernel/license/zkfc_license.inc"
 
   release:
     name: Release ${{ inputs.build_profile }}

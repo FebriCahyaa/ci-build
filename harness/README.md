@@ -24,6 +24,29 @@ Verify a token before storing it with
 (creates and deletes a temporary draft release).
 Optional: `tg_bot_token`, `tg_chat_id` for the live build dashboard.
 
+### Zairenkai / ZKFC license handling
+
+The `lavender-4.19` build uses Zairenkai/ZKFC manual hooks and the pinned
+profile integration. Do **not** add the Zairenkai license as a pipeline input:
+that would consume one of Harness/GitHub Actions' limited runtime-input slots
+and would expose secret material to the variable bridge.
+
+Create the following Harness secret once:
+
+```text
+identifier: zairenkai_license_inc
+value: complete contents of the owner-issued zkfc_license.inc
+```
+
+The pipeline writes that secret to `/tmp/zairenkai-zkfc-license.inc` with mode
+`0600`, validates the 200-byte payload, and passes only the file path to
+`build_kernel.sh`. The same secret-backed file is reused by all variants in a
+Harness matrix execution and is removed in pipeline finalization. Any embedded
+copy under `work/*/kernel/Zairenkai/kernel/license/` is also deleted.
+
+Runtime `.zkl` tokens and owner signing material are never stored in ci-build
+or published as artifacts.
+
 ### Artifact persistence and failure diagnostics
 
 Each finished variant is staged immediately into the per-execution prerelease

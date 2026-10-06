@@ -152,6 +152,12 @@ jobs:
           python3 -m py_compile scripts/*.py
           bash -n scripts/*.sh scripts/lib/*.sh
           test -f profiles/targets/${{ inputs.build_profile }}.conf
+          if [[ "${{ inputs.build_profile }}" == "lavender-4.19" ]]; then
+            test -f scripts/apply_zairenkai.sh
+            test -f patches/features/zairenkai/lavender-4.19/series.conf
+            test -f patches/features/zairenkai/lavender-4.19/config.fragment
+            test -f patches/features/zairenkai/lavender-4.19/0001-zairenkai-lavender-4.19-manual-hooks.patch
+          fi
           test -f anykernel/anykernel.sh
           git rev-parse HEAD
           echo "Harness runtime-input contract"

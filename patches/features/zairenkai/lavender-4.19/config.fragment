@@ -1,0 +1,5 @@
+# Zairenkai ZKFC for Xiaomi Redmi Note 7 (lavender) / SDM660 / Linux 4.19.
+# Manual hooks are required because the target tree is intentionally built without KPROBES.
+CONFIG_ZKFC=y
+CONFIG_ZKFC_HOOK_MANUAL=y
+CONFIG_ZKFC_LICENSEE_TAG="zairenkai-sdm660-lavender"

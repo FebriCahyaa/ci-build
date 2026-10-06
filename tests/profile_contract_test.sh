@@ -14,7 +14,14 @@ for profile in lavender-4.4 lavender-4.19 garnet-gki; do
     [[ -f "$ROOT/anykernel/profiles/$PROFILE_ANYKERNEL_PROFILE.conf" ]] || fail "$profile: AnyKernel profile missing"
     case "$profile" in
       lavender-4.4) [[ "$PROFILE_DEFCONFIG" == lavender_defconfig && "$PROFILE_CONFIG_FRAGMENT" == none ]] || fail "$profile defconfig" ;;
-      lavender-4.19) [[ "$PROFILE_DEFCONFIG" == vendor/xiaomi/sdm660_defconfig && "$PROFILE_CONFIG_FRAGMENT" == vendor/xiaomi/lavender.config ]] || fail "$profile defconfig" ;;
+      lavender-4.19)
+        [[ "$PROFILE_DEFCONFIG" == vendor/xiaomi/sdm660_defconfig && "$PROFILE_CONFIG_FRAGMENT" == vendor/xiaomi/lavender.config ]] || fail "$profile defconfig"
+        [[ "$PROFILE_ZAIRENKAI" == true ]] || fail "$profile Zairenkai enabled"
+        [[ "$PROFILE_ZAIRENKAI_REPO" == https://github.com/FebriCahyaa/Zairenkai.git ]] || fail "$profile Zairenkai repo"
+        [[ "$PROFILE_ZAIRENKAI_TAG" == zairenkai-sdm660-lavender ]] || fail "$profile Zairenkai tag"
+        [[ "$PROFILE_ZAIRENKAI_HOOK_MODE" == manual ]] || fail "$profile Zairenkai hook mode"
+        [[ "$PROFILE_ZAIRENKAI_REF" =~ ^[0-9a-f]{40}$ ]] || fail "$profile Zairenkai ref pin"
+        ;;
       garnet-gki) [[ "$PROFILE_GKI" == true ]] || fail "$profile GKI" ;;
     esac
   ) || exit 1

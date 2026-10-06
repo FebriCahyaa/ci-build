@@ -32,6 +32,12 @@ LTO_PLUS="${LTO_PLUS:-false}"
 ENABLE_SUSFS="${ENABLE_SUSFS:-false}"
 KSU_PREINTEGRATED="${KSU_PREINTEGRATED:-false}"
 TWEAKS="${TWEAKS:-none}"
+ZAIRENKAI="${ZAIRENKAI:-false}"
+ZAIRENKAI_REPO="${ZAIRENKAI_REPO:-https://github.com/FebriCahyaa/Zairenkai.git}"
+ZAIRENKAI_REF="${ZAIRENKAI_REF:-main}"
+ZAIRENKAI_TAG="${ZAIRENKAI_TAG:-}"
+ZAIRENKAI_HOOK_MODE="${ZAIRENKAI_HOOK_MODE:-manual}"
+ZAIRENKAI_LICENSE_INC_FILE="${ZAIRENKAI_LICENSE_INC_FILE:-}"
 SOUTHWEST_NG_REPO="pix106/android_kernel_xiaomi_sdm660_southwest-ng"
 
 # root_manager_apply.sh reports official KernelSU as "official"; the patch
@@ -249,6 +255,19 @@ case "$PHASE" in
       none|"") ;;
       *) series_apply "$PATCH_ROOT/upstream/$UPSTREAM_PROFILE/$KERNEL_MM/series.conf" ;;
     esac
+
+    # Zairenkai is a target feature, not a root-manager variant. Integrate it
+    # into every Lavender 4.19 matrix variant after host/upstream patches.
+    if is_true "$ZAIRENKAI" && [[ "$DEVICE" == "lavender" && "$KERNEL_MM" == "4.19" ]]; then
+      ZAIRENKAI="$ZAIRENKAI" \
+      ZAIRENKAI_REPO="$ZAIRENKAI_REPO" \
+      ZAIRENKAI_REF="$ZAIRENKAI_REF" \
+      ZAIRENKAI_TAG="$ZAIRENKAI_TAG" \
+      ZAIRENKAI_HOOK_MODE="$ZAIRENKAI_HOOK_MODE" \
+      ZAIRENKAI_LICENSE_INC_FILE="$ZAIRENKAI_LICENSE_INC_FILE" \
+        bash "$SCRIPT_DIR/apply_zairenkai.sh"
+      series_apply "$PATCH_ROOT/features/zairenkai/lavender-4.19/series.conf"
+    fi
     ;;
 
   config)
@@ -275,6 +294,10 @@ case "$PHASE" in
       [[ -n "$susfs_config" ]] || susfs_config="$PATCH_ROOT/features/susfs/kernel-$KERNEL_MM/config.fragment"
       [[ -f "$susfs_config" ]] || fail "SUSFS config fragment missing: $susfs_config"
       config_apply "$susfs_config"
+    fi
+
+    if is_true "$ZAIRENKAI" && [[ "$DEVICE" == "lavender" && "$KERNEL_MM" == "4.19" ]]; then
+      config_apply "$PATCH_ROOT/features/zairenkai/lavender-4.19/config.fragment"
     fi
 
     # Tweaks go last so they are the final word before olddefconfig.

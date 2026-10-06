@@ -170,6 +170,30 @@ prerelease as soon as it finishes; the GitHub bridge materializes that handoff
 as an Actions artifact, relays Telegram, then removes transient assets. See
 [`harness/README.md`](harness/README.md).
 
+## Zairenkai / ZKFC
+
+`lavender-4.19` integrates Zairenkai Kernel Framework Core (ZKFC) from the
+owner-maintained repository at build time. The profile pins the reviewed
+Zairenkai source revision, runs `kernel/setup.sh`, and applies the manual hook
+series for `fs/exec.c` and `kernel/sched/core.c`.
+
+The Lavender profile enables:
+
+```text
+CONFIG_ZKFC=y
+CONFIG_ZKFC_HOOK_MANUAL=y
+CONFIG_ZKFC_LICENSEE_TAG="zairenkai-sdm660-lavender"
+```
+
+The signed owner-issued `zkfc_license.inc` is never committed to this
+repository. GitHub Actions reads it from the `ZAIRENKAI_LICENSE_INC` repository
+secret, while Harness reads the same material from the
+`zairenkai_license_inc` Harness secret. CI validates the embedded token as the
+200-byte ZKFC license structure, stages it only in temporary storage, and
+removes both the temporary file and any copied license from the build tree
+after the build. Runtime `.zkl` tokens and signing/private key material must
+remain outside the repository and release artifacts.
+
 ## Kernel identity
 
 `kernel-name`, `kernel-codename`, `kernel-build`, and `localversion-st` define
