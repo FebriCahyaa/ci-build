@@ -126,8 +126,6 @@ pipeline:
                         exit 1
                       fi
                       echo "[zairenkai] embedded license prepared (200 bytes)"
-                  when:
-                    condition: <+pipeline.variables.BUILD_PROFILE> == "lavender-4.19"
 
               - step:
                   type: Run

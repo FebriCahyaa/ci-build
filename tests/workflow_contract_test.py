@@ -80,7 +80,13 @@ for pipeline in (KERNEL_PIPELINE, ROM_PIPELINE):
             spec = step["step"].get("spec", {})
             if "command" in spec:
                 bash_syntax(f"{pipeline.name}:{step['step']['identifier']}", spec["command"])
-    print(f"PASS {pipeline.name}: command blocks parse")
+            when = step["step"].get("when")
+            if when is not None:
+                if not isinstance(when, dict):
+                    fail(f"{pipeline.name}:{step['step']['identifier']}: when must be a mapping")
+                if "stageStatus" not in when:
+                    fail(f"{pipeline.name}:{step['step']['identifier']}: when.stageStatus is required")
+    print(f"PASS {pipeline.name}: command blocks + Harness when contracts")
 
 # 3. GitHub -> Harness runtime input bridge.
 pipeline = yaml.safe_load(KERNEL_PIPELINE.read_text(encoding="utf-8"))
