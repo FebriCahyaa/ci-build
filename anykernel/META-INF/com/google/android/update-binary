@@ -288,6 +288,68 @@ abort() {
   fi;
   exit 1;
 }
+# Zairenkai: runtime detection of the installed Android version and ROM name.
+# Detection only - the supported.versions gate stays in do_versioncheck.
+rom_prop() { # rom_prop <prop> -> value (getprop first, build.prop files as fallback)
+  local v f;
+  v=$(getprop "$1" 2>/dev/null);
+  if [ ! "$v" ]; then
+    for f in /system/build.prop /system_root/system/build.prop /vendor/build.prop /product/etc/build.prop /product/build.prop /system_ext/etc/build.prop; do
+      [ -f "$f" ] && v=$(file_getprop "$f" "$1" 2>/dev/null);
+      [ "$v" ] && break;
+    done;
+  fi;
+  echo "$v" | tr -cd '[:print:]';
+}
+detect_android_rom() {
+  local rel sdk entry prop name val flavor;
+  rel=$(rom_prop ro.build.version.release);
+  [ "$rel" ] || rel=$(rom_prop ro.build.version.release_or_codename);
+  sdk=$(rom_prop ro.build.version.sdk);
+  AK_ANDROID="${rel:-Unknown}";
+  [ "$sdk" ] && AK_ANDROID="$AK_ANDROID (SDK $sdk)";
+  AK_ROM="";
+  # prop:Name (a "~" stands for a space in the display name). Forks come first because
+  # many of them also inherit ro.lineage.version; plain LineageOS is checked last.
+  for entry in \
+    ro.crdroid.version:crDroid ro.pixelexperience.version:PixelExperience \
+    ro.evolution.version:Evolution~X ro.pixelos.version:PixelOS ro.aospa.version:Paranoid~Android \
+    ro.arrow.version:ArrowOS ro.derp.version:DerpFest ro.havoc.version:Havoc-OS \
+    ro.rising.version:RisingOS ro.risingos.version:RisingOS ro.voltage.version:VoltageOS \
+    ro.superior.version:SuperiorOS ro.potato.version:POSP ro.corvus.version:Corvus \
+    ro.spark.version:Spark ro.matrixx.version:MatrixxOS ro.yaap.version:YAAP \
+    ro.infinity.version:Infinity~X ro.axion.version:AxionOS \
+    ro.lineage.version:LineageOS \
+    ro.mi.os.version.name:HyperOS ro.miui.ui.version.name:MIUI; do
+    prop=${entry%%:*}; name=$(echo "${entry#*:}" | tr '~' ' ');
+    val=$(rom_prop $prop);
+    if [ "$val" ]; then
+      val=${val%%-*};
+      AK_ROM="$name $val";
+      break;
+    fi;
+  done;
+  if [ ! "$AK_ROM" ]; then
+    val=$(rom_prop ro.modversion);
+    [ "$val" ] && AK_ROM=$(echo "$val" | cut -d- -f1-2);
+  fi;
+  if [ ! "$AK_ROM" ]; then
+    flavor=$(rom_prop ro.build.flavor);
+    case "$flavor" in
+      aosp_*) AK_ROM="AOSP";;
+      *_*) AK_ROM=$(echo "$flavor" | cut -d_ -f1);;
+    esac;
+  fi;
+  [ "$AK_ROM" ] || AK_ROM="Unknown";
+  AK_ANDROID=$(echo "$AK_ANDROID" | cut -c1-28);
+  AK_ROM=$(echo "$AK_ROM" | cut -c1-28);
+}
+render_banner() { # fill the @RT_*@ tokens of the banner with the detected values
+  local a r;
+  a=$(echo "$AK_ANDROID" | sed 's/[\\&|]/\\&/g');
+  r=$(echo "$AK_ROM" | sed 's/[\\&|]/\\&/g');
+  sed -i -e "s|@RT_ANDROID@|$a|" -e "s|@RT_ROM@|$r|" banner;
+}
 do_devicecheck() {
   [ "$(file_getprop anykernel.sh do.devicecheck)" == 1 ] || return 1;
   local device devicename match product testname vendordevice vendorproduct;
@@ -538,23 +600,21 @@ fi;
 OLD_PATH="$PATH";
 export PATH="$AKHOME/tools:$AKHOME/bin:$PATH";
 
+# Mount/prop environment first, so ROM and Android detection also works in recovery.
+setup_env;
+detect_android_rom;
+
 if [ -f banner ]; then
+  render_banner;
   ui_printfile banner;
   ui_print " " " ";
 fi;
 
 KERNEL_STRING="$(file_getprop anykernel.sh kernel.string)";
 ui_print "$KERNEL_STRING";
-if [ -f version ]; then
-  ui_print " ";
-  ui_printfile version;
-  ui_print " ";
-fi;
 ui_print " " "AnyKernel3 by osm0sis @ xda-developers" " ";
 grep -oE 'AK_BASE.*' META-INF/com/google/android/updater-script >&2;
 ui_print " ";
-
-setup_env;
 
 do_devicecheck;
 do_versioncheck;

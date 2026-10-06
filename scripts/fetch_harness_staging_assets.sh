@@ -106,12 +106,16 @@ PY
 count=0
 while IFS=$'\t' read -r asset_id name url; do
   [[ -n "$asset_id" && -n "$name" && -n "$url" ]] || continue
-  echo "[harness-fetch] downloading $name"
+  # "handoff-" only marks transient staging assets on the release; users should
+  # get the canonical file name. Keep the prefix if stripping would collide.
+  local_name="${name#handoff-}"
+  [[ -e "$OUT_DIR/$local_name" || -z "$local_name" ]] && local_name="$name"
+  echo "[harness-fetch] downloading $name -> $local_name"
   curl -fsSL --retry 4 --retry-delay 2 \
     -H 'Accept: application/octet-stream' \
     -H "Authorization: Bearer ${GH_TOKEN}" \
     -H 'X-GitHub-Api-Version: 2022-11-28' \
-    "$url" -o "$OUT_DIR/$name"
+    "$url" -o "$OUT_DIR/$local_name"
   count=$((count + 1))
 done < "$OUT_DIR/assets.tsv"
 

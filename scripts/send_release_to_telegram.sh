@@ -113,8 +113,10 @@ PY
   for marker in "$WORK"/*.url; do
     [[ -f "$marker" ]] || continue
     name="$(basename "$marker" .url)"; url="$(cat "$marker")"
-    if ! curl -fsSL --retry 2 --retry-delay 2 -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/octet-stream" -H "X-GitHub-Api-Version: 2022-11-28" "$url" -o "$WORK/$name"; then
-      tg_release_text "⚠️ <b>Asset gagal diunduh</b>\n<code>$(html_escape "$name")</code>" || true; rm -f "$WORK/$name"
+    # Drop the transient "handoff-" prefix so Telegram receives the canonical file name.
+    out_name="${name#handoff-}"; [[ -e "$WORK/$out_name" || -z "$out_name" ]] && out_name="$name"
+    if ! curl -fsSL --retry 2 --retry-delay 2 -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/octet-stream" -H "X-GitHub-Api-Version: 2022-11-28" "$url" -o "$WORK/$out_name"; then
+      tg_release_text "⚠️ <b>Asset gagal diunduh</b>\n<code>$(html_escape "$out_name")</code>" || true; rm -f "$WORK/$out_name"
     fi
   done
   rm -f "$WORK"/*.url

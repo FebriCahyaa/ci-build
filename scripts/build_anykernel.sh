@@ -86,7 +86,8 @@ KERNEL_RELEASE="${KERNEL_RELEASE:-}" SCHEDULER="${SCHEDULER:-}" TOOLCHAIN="${TOO
 BUILD_USER="${KBUILD_BUILD_USER:-}" BUILD_HOST="${KBUILD_BUILD_HOST:-}" SOURCE="${SOURCE:-}" \
   bash "$AK_WORK/ci-patch.sh" --profile "$PROFILE_ID" --variant "$VARIANT" --dir "$AK_WORK" >&2
 
-[[ -f "$ARTIFACT_DIR/build-info.txt" ]] && cp -f "$ARTIFACT_DIR/build-info.txt" "$AK_WORK/version"
+# Shipped for traceability only. update-binary no longer prints it while flashing.
+[[ -f "$ARTIFACT_DIR/build-info.txt" ]] && cp -f "$ARTIFACT_DIR/build-info.txt" "$AK_WORK/build-info.txt"
 rm -rf "$AK_WORK/ci-patch.sh" "$AK_WORK/build.sh" "$AK_WORK/version.conf" "$AK_WORK/README.md" \
        "$AK_WORK/CI.md" "$AK_WORK/profiles" "$AK_WORK/images" "$AK_WORK/out"
 

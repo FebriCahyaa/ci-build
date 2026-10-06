@@ -12,6 +12,10 @@
 # Optional environment (empty -> auto-detected from the kernel image / fallback):
 #   KERNEL_NAME KERNEL_CODENAME KERNEL_BUILD BUILD_LABEL KERNEL_RELEASE SCHEDULER
 #   TOOLCHAIN BUILD_USER BUILD_HOST BUILD_DATE MAINTAINER SOURCE
+#
+# The banner is kept narrow (<= 42 columns) so KernelSU/Magisk/APatch managers and
+# recoveries do not wrap it. @RT_ANDROID@ and @RT_ROM@ are intentionally left in the
+# rendered banner: update-binary resolves them on the device while flashing.
 set -euo pipefail
 shopt -u patsub_replacement 2>/dev/null || true   # '&' in values is not special
 
@@ -84,9 +88,37 @@ fi
 
 case "$DYNAMIC_PARTITIONS" in
   required)  PARTITION_LABEL="Dynamic (super) required" ;;
-  supported) PARTITION_LABEL="Legacy + Dynamic (super/retrofit)" ;;
+  supported) PARTITION_LABEL="Legacy + Dynamic (retrofit)" ;;
   *)         PARTITION_LABEL="Legacy" ;;
 esac
+
+# clip <text> [max]: single-line banner value, ellipsised so a row never wraps.
+clip() {
+  local v="${1//$'\n'/ }" n="${2:-28}"
+  v="${v//[^[:print:]]/}"
+  if ((${#v} > n)); then v="${v:0:n-3}..."; fi
+  printf '%s' "$v"
+}
+
+# compact_toolchain <raw compiler string>: "Clang 12.0.5 (r416183b)" instead of the
+# full "Android (..., based on r416183b) clang version 12.0.5 (https://...)" line.
+compact_toolchain() {
+  local raw="$1" ver rev
+  ver="$(grep -oE 'clang version [0-9][0-9.]*' <<< "$raw" | head -n1 | awk '{print $3}' || true)"
+  rev="$(grep -oE '\br[0-9]{5,}[a-z]?' <<< "$raw" | head -n1 || true)"
+  if [[ -n "$ver" ]]; then
+    printf 'Clang %s%s' "$ver" "${rev:+ ($rev)}"
+  else
+    sed 's/ (.*//' <<< "$raw"
+  fi
+}
+
+# compact_source <repo url|name>: "xiaomi_sdm660_southwest-ng" from the full repo URL.
+compact_source() {
+  local v="$1"
+  v="${v%/}"; v="${v##*/}"; v="${v%.git}"; v="${v#android_kernel_}"
+  printf '%s' "${v:-unknown}"
+}
 
 DEVICE_PROPS=""
 i=1
@@ -105,11 +137,11 @@ declare -A VALUES=(
   [SUPPORTED_VERSIONS]="$SUPPORTED_VERSIONS" [BLOCK]="$BLOCK" [IS_SLOT_DEVICE]="$IS_SLOT_DEVICE"
   [KERNEL_FAMILY]="$KERNEL_FAMILY" [DYNAMIC_PARTITIONS]="$DYNAMIC_PARTITIONS" [GKI]="$GKI"
   [FLASH_DTBO]="$FLASH_DTBO" [SCHEDULER]="$SCHED" [ROOT]="$ROOT" [MODE]="$MODE"
-  [KERNEL_RELEASE]="$K_REL" [CODENAME]="$CODENAME" [BUILD_LABEL]="$BUILD_LABEL"
-  [DEVICE_LABEL]="$DEVICE_LABEL" [ANDROID_LABEL]="$ANDROID_LABEL" [PARTITION_LABEL]="$PARTITION_LABEL"
-  [TOOLCHAIN]="$TC" [BUILD_USER]="$B_USER" [BUILD_HOST]="$B_HOST"
+  [KERNEL_RELEASE]="$(clip "$K_REL")" [CODENAME]="$CODENAME" [BUILD_LABEL]="$(clip "$BUILD_LABEL")"
+  [DEVICE_LABEL]="$(clip "$DEVICE_LABEL")" [PARTITION_LABEL]="$(clip "$PARTITION_LABEL")"
+  [TOOLCHAIN]="$(clip "$(compact_toolchain "$TC")")" [BUILD_USER]="$(clip "$B_USER")" [BUILD_HOST]="$(clip "$B_HOST")"
   [BUILD_DATE]="${BUILD_DATE:-$(date -u +%Y-%m-%d)}"
-  [MAINTAINER]="${MAINTAINER:-Febrian Rahmad Cahya}" [SOURCE]="${SOURCE:-unknown}"
+  [MAINTAINER]="$(clip "${MAINTAINER:-Febrian Rahmad Cahya}")" [SOURCE]="$(clip "$(compact_source "${SOURCE:-unknown}")")"
 )
 
 render() {
@@ -125,7 +157,8 @@ render() {
 render "$DIR/banner"
 render "$DIR/anykernel.sh"
 
-if grep -nE '@[A-Z_]+@' "$DIR/banner" "$DIR/anykernel.sh"; then
+# @RT_*@ tokens are resolved on the device by update-binary, so they are not errors.
+if grep -nE '@[A-Z_]+@' "$DIR/banner" "$DIR/anykernel.sh" | grep -vE '@RT_(ANDROID|ROM)@'; then
   echo "[ci-patch] unresolved placeholders remain" >&2
   exit 1
 fi

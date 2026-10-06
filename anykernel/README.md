@@ -22,6 +22,20 @@ Root variants: `vanilla`, `kernelsu`, `kernelsu-next`, `resukisu`,
 The renderer fails when a profile is missing or an `@PLACEHOLDER@` token
 remains unresolved. Values are inserted literally (`&` is not special).
 
+## Flash-time detection
+
+`update-binary` detects the installed Android version and ROM name while
+flashing and fills the `@RT_ANDROID@` / `@RT_ROM@` tokens that `ci-patch.sh`
+deliberately leaves in the banner. ROM detection reads vendor props
+(`ro.crdroid.version`, `ro.lineage.version`, `ro.mi.os.version.name`, ...) and
+falls back to `ro.modversion`, then `ro.build.flavor`, then `Unknown`. Forks are
+checked before plain LineageOS because many of them also inherit its props.
+
+The banner is capped at 42 columns so it does not wrap in KernelSU/Magisk/APatch
+managers or recoveries. `build-info.txt` is still shipped inside the ZIP for
+traceability, but it is no longer printed while flashing. `lavender-4.19`
+accepts Android 11 - 17 (`supported.versions`).
+
 ## Local packaging
 
 Place compiled images at `images/<variant>/<image>` (first match of the

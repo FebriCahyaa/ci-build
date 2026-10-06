@@ -25,7 +25,10 @@ for profile_conf in "$ROOT"/anykernel/profiles/*.conf; do
     cp -a "$profile_conf" "$dir/profiles/"
     printf 'fake kernel payload' > "$dir/$image"
     KERNEL_NAME='Zai&<ren>' bash "$dir/ci-patch.sh" --profile "$profile" --variant "$variant" --dir "$dir" >/dev/null
-    ! grep -qE '@[A-Z_]+@' "$dir/anykernel.sh" "$dir/banner" || fail "unresolved placeholder: $profile/$variant"
+    # @RT_ANDROID@/@RT_ROM@ are resolved on the device by update-binary, everything else must be rendered.
+    ! grep -hE '@[A-Z_]+@' "$dir/anykernel.sh" "$dir/banner" | grep -vE '@RT_(ANDROID|ROM)@' | grep -q . || fail "unresolved placeholder: $profile/$variant"
+    grep -q '@RT_ANDROID@' "$dir/banner" && grep -q '@RT_ROM@' "$dir/banner" || fail "runtime tokens missing from banner: $profile/$variant"
+    ! awk 'length($0) > 46 { bad = 1 } END { exit !bad }' "$dir/banner" || fail "banner line wider than 46 columns: $profile/$variant"
     grep -qF 'Zai&<ren>' "$dir/banner" || fail "'&' in values must render literally ($profile/$variant)"
     bash -n "$dir/anykernel.sh" || fail "rendered anykernel.sh syntax: $profile/$variant"
   done
