@@ -78,18 +78,26 @@ esac
 
 # Discover device fragments first. They provide strong evidence for the base config.
 FRAGMENT=""
+FRAGMENT_LIST=()
 if [[ "$FRAGMENT_REQ" != "none" ]]; then
   if [[ "$FRAGMENT_REQ" == "auto" && "$D" == "lavender" && -f "$CONFIG_ROOT/vendor/xiaomi/lavender.config" ]]; then
     FRAGMENT="$CONFIG_ROOT/vendor/xiaomi/lavender.config"
   elif [[ "$FRAGMENT_REQ" != "auto" ]]; then
-    if [[ -f "$CONFIG_ROOT/$FRAGMENT_REQ" ]]; then
-      FRAGMENT="$CONFIG_ROOT/$FRAGMENT_REQ"
-    elif [[ -f "$FRAGMENT_REQ" ]]; then
-      FRAGMENT="$FRAGMENT_REQ"
-    else
-      echo "ERROR: CONFIG_FRAGMENT not found: $FRAGMENT_REQ" >&2
-      exit 1
-    fi
+    # Comma-separated fragments are merged in order (SoC fragment first,
+    # device fragment last) by build_kernel.sh.
+    IFS=',' read -r -a requested_fragments <<< "$FRAGMENT_REQ"
+    for req in "${requested_fragments[@]}"; do
+      [[ -n "$req" ]] || continue
+      if [[ -f "$CONFIG_ROOT/$req" ]]; then
+        FRAGMENT_LIST+=("$req")
+      elif [[ -f "$req" ]]; then
+        FRAGMENT_LIST+=("$req")
+      else
+        echo "ERROR: CONFIG_FRAGMENT not found: $req" >&2
+        exit 1
+      fi
+    done
+    FRAGMENT="${FRAGMENT_LIST[0]:-}"
   else
     while IFS= read -r f; do
       base="$(basename "$f")"
@@ -103,6 +111,9 @@ if [[ "$FRAGMENT_REQ" != "none" ]]; then
       done
     done < <(find "$CONFIG_ROOT" -type f \( -name '*.config' -o -name '*.fragment' \) | sort)
   fi
+fi
+if [[ -n "$FRAGMENT" && ${#FRAGMENT_LIST[@]} -eq 0 ]]; then
+  FRAGMENT_LIST+=("${FRAGMENT#"$CONFIG_ROOT/"}")
 fi
 
 if [[ "$DEFCONFIG_REQ" != "auto" ]]; then
@@ -211,8 +222,10 @@ printf 'DETECTED_DEFCONFIG=%q\n' "$DEFCONFIG"
 if [[ -n "$FRAGMENT" ]]; then
   relfrag="${FRAGMENT#"$CONFIG_ROOT/"}"
   printf 'DETECTED_FRAGMENT=%q\n' "$relfrag"
+printf 'DETECTED_FRAGMENTS=%q\n' "${FRAGMENT_LIST[*]}"
 else
   printf 'DETECTED_FRAGMENT=%q\n' ""
+  printf 'DETECTED_FRAGMENTS=%q\n' ""
 fi
 
->&2 echo "[detect] kernel=${KVER_MAJOR}.${KVER_MINOR}.${KVER_SUB:-0} arch=$ARCH defconfig=$DEFCONFIG fragment=${relfrag:-none}"
+>&2 echo "[detect] kernel=${KVER_MAJOR}.${KVER_MINOR}.${KVER_SUB:-0} arch=$ARCH defconfig=$DEFCONFIG fragment=${FRAGMENT_LIST[*]:-none}"

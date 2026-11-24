@@ -11,7 +11,7 @@ export DEBIAN_FRONTEND=noninteractive
 PACKAGES=(
   bc bison flex build-essential cpio git curl ca-certificates
   python3 zip unzip xz-utils zstd lz4 tar gzip ccache
-  libssl-dev libelf-dev
+  libssl-dev libelf-dev libncurses-dev device-tree-compiler
   clang lld llvm
   libz3-4
   gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-aarch64-linux-gnu

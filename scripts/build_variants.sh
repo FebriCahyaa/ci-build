@@ -43,21 +43,22 @@ export KERNEL_REPO KERNEL_BRANCH KERNEL_REF_TYPE
 mkdir -p "$MATRIX_WORK_DIR" "$CCACHE_DIR"
 
 prepare_seed() {
-  if [[ -d "$SEED_DIR/.git" ]]; then
-    ci_log "reuse source seed: $SEED_DIR"
-    git -C "$SEED_DIR" reset -q --hard
-    git -C "$SEED_DIR" clean -qfdx
+  local ref="$1" dir="$2"
+  if [[ -d "$dir/.git" ]]; then
+    ci_log "reuse source seed: $dir"
+    git -C "$dir" reset -q --hard
+    git -C "$dir" clean -qfdx
     return 0
   fi
 
-  rm -rf "$SEED_DIR"
-  ci_log "clone source seed: $KERNEL_REPO @ $KERNEL_BRANCH"
-  git_fetch_ref "$KERNEL_REPO" "$KERNEL_BRANCH" "$SEED_DIR" || ci_die "unable to prepare kernel source seed"
-  git -C "$SEED_DIR" reset -q --hard
-  git -C "$SEED_DIR" clean -qfdx
+  rm -rf "$dir"
+  ci_log "clone source seed: $KERNEL_REPO @ $ref"
+  git_fetch_ref "$KERNEL_REPO" "$ref" "$dir" || ci_die "unable to prepare kernel source seed"
+  git -C "$dir" reset -q --hard
+  git -C "$dir" clean -qfdx
 }
 
-prepare_seed
+prepare_seed "$KERNEL_BRANCH" "$SEED_DIR"
 
 # Harness uses one durable per-execution staging release whenever artifact staging
 # is enabled. This is independent of public release publication so failures and
@@ -83,6 +84,26 @@ for variant in "${VARIANTS[@]}"; do
   rm -rf "$VARIANT_WORK"
   mkdir -p "$VARIANT_WORK"
 
+  # Variant-specific source refs: pre-integrated root trees (SUSFS, FinaSU)
+  # carry their provider in the kernel source itself and therefore need a
+  # different seed from the vanilla tree.
+  VARIANT_KEY="$(printf '%s' "$variant" | tr '[:lower:]-' '[:upper:]_')"
+  variant_ref_var="PROFILE_KERNEL_REF_${VARIANT_KEY}"
+  variant_ref="${!variant_ref_var:-$KERNEL_BRANCH}"
+  # Profile-specific refs belong to the profile's own kernel repository. When
+  # the caller overrides the source/ref, build every variant from that override
+  # instead of silently mixing in feature branches from another tree.
+  if [[ "$KERNEL_REPO" != "$PROFILE_KERNEL_REPO" || "$KERNEL_BRANCH" != "$PROFILE_KERNEL_REF" ]]; then
+    variant_ref="$KERNEL_BRANCH"
+  fi
+  seed_key="$(printf '%s' "$variant_ref" | tr -c '[:alnum:]' '_')"
+  variant_seed="$MATRIX_WORK_DIR/source-seed-$seed_key"
+  if [[ "$variant_ref" != "$KERNEL_BRANCH" ]]; then
+    prepare_seed "$variant_ref" "$variant_seed"
+  else
+    variant_seed="$SEED_DIR"
+  fi
+
   # Each child gets an isolated source/output tree, while git objects and ccache
   # remain shared. This avoids cross-variant source contamination.
   export BUILD_PROFILE
@@ -91,9 +112,9 @@ for variant in "${VARIANTS[@]}"; do
   export DEVICE
   export KERNEL_FAMILY
   export KERNEL_REPO
-  export KERNEL_BRANCH
+  export KERNEL_BRANCH="$variant_ref"
   export KERNEL_REF_TYPE
-  export KERNEL_SOURCE_SEED="$SEED_DIR"
+  export KERNEL_SOURCE_SEED="$variant_seed"
   export CCACHE_DIR
   export WORK_DIR="$VARIANT_WORK"
   export KERNEL_OUT="$VARIANT_WORK/kernel-out"

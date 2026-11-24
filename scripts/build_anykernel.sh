@@ -46,7 +46,8 @@ case "$ANYKERNEL3_REPO" in
     rm -rf "$AK_WORK/.git"
     # Upstream osm0sis/AnyKernel3 has no Zairenkai templates: overlay them.
     if [[ ! -f "$AK_WORK/ci-patch.sh" ]]; then
-      cp -a "$CI_ROOT/anykernel/"{anykernel.sh,banner,ci-patch.sh,version.conf,profiles} "$AK_WORK/"
+      cp -a "$CI_ROOT/anykernel/"{anykernel.sh,ci-patch.sh,version.conf,profiles} "$AK_WORK/"
+      cp -a "$CI_ROOT/anykernel"/banner* "$AK_WORK/"
     fi
     ;;
 esac
@@ -90,6 +91,7 @@ BUILD_USER="${KBUILD_BUILD_USER:-}" BUILD_HOST="${KBUILD_BUILD_HOST:-}" SOURCE="
 [[ -f "$ARTIFACT_DIR/build-info.txt" ]] && cp -f "$ARTIFACT_DIR/build-info.txt" "$AK_WORK/build-info.txt"
 rm -rf "$AK_WORK/ci-patch.sh" "$AK_WORK/build.sh" "$AK_WORK/version.conf" "$AK_WORK/README.md" \
        "$AK_WORK/CI.md" "$AK_WORK/profiles" "$AK_WORK/images" "$AK_WORK/out"
+rm -f "$AK_WORK"/banner.*
 
 # Lavender 4.4 ships HMP and EAS builds; keep the scheduler in the file name.
 SCHED_TAG=""

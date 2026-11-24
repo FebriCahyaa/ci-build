@@ -108,6 +108,8 @@ normalize_variant() {
     suki|sukisu|sukisu-ultra|sukisu_ultra|sukisuultra) echo "sukisu-ultra" ;;
     resukisu|re-sukisu) echo "resukisu" ;;
     resukisu-susfs|resukisu+susfs|re-sukisu-susfs) echo "resukisu-susfs" ;;
+    kernelsu-next-susfs|ksu-next-susfs|ksun-susfs|ksunsusfs) echo "kernelsu-next-susfs" ;;
+    finasu|fina-su|finasu-ksu) echo "finasu" ;;
     *) return 1 ;;
   esac
 }
@@ -121,6 +123,8 @@ variant_label() {
     resukisu) echo "ReSukiSU" ;;
     resukisu-susfs) echo "ReSukiSU-SUSFS" ;;
     sukisu-ultra|sukisu_ultra|sukisuultra) echo "SukiSU Ultra" ;;
+    kernelsu-next-susfs) echo "KernelSU-Next+SUSFS" ;;
+    finasu) echo "FinaSU" ;;
     *) echo "$1" ;;
   esac
 }
@@ -139,7 +143,7 @@ expand_variants() {
   local raw="${1:-$fallback}" item v seen=" "
   case "${raw,,}" in all|default|auto) raw="$fallback" ;; esac
   for item in ${raw//,/ }; do
-    v="$(normalize_variant "$item")" || ci_die "unknown variant: $item (use vanilla, kernelsu, kernelsu-next, resukisu, resukisu-susfs, sukisu-ultra)"
+    v="$(normalize_variant "$item")" || ci_die "unknown variant: $item (use vanilla, kernelsu, kernelsu-next, resukisu, resukisu-susfs, sukisu-ultra, kernelsu-next-susfs, finasu)"
     [[ "$seen" == *" $v "* ]] && continue
     seen+="$v "
     echo "$v"

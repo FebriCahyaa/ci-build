@@ -6,8 +6,8 @@
 #   ./ci-patch.sh --profile <profile> --variant <variant> [--dir DIR]
 #   ./ci-patch.sh <variant> [DIR]                 # legacy form, profile from $PROFILE_ID
 #
-#   profile : lavender-4.4 | lavender-4.19 | garnet-gki   (see profiles/)
-#   variant : vanilla | kernelsu | kernelsu-next | resukisu | resukisu-susfs | sukisu-ultra (aliases: ksu, ksun)
+#   profile : lavender-4.4 | lavender-4.19 | garnet-gki | garnet-6.6   (see profiles/)
+#   variant : vanilla | kernelsu | kernelsu-next | resukisu | resukisu-susfs | sukisu-ultra | kernelsu-next-susfs | finasu
 #
 # Optional environment (empty -> auto-detected from the kernel image / fallback):
 #   KERNEL_NAME KERNEL_CODENAME KERNEL_BUILD BUILD_LABEL KERNEL_RELEASE SCHEDULER
@@ -43,7 +43,9 @@ case "${VARIANT,,}" in
   resukisu)                ROOT="ReSukiSU";      MODE="ReSukiSU integrated" ;;
   resukisu-susfs)          ROOT="ReSukiSU";      MODE="ReSukiSU + SUSFS integrated" ;;
   sukisu-ultra|sukisu_ultra|sukisuultra) ROOT="SukiSU Ultra"; MODE="SukiSU Ultra integrated" ;;
-  *) echo "[ci-patch] unknown variant '$VARIANT' (vanilla|kernelsu|kernelsu-next|resukisu|resukisu-susfs|sukisu-ultra)" >&2; exit 1 ;;
+  kernelsu-next-susfs|ksu-next-susfs|ksun-susfs|ksunsusfs) ROOT="KernelSU-Next"; MODE="KernelSU-Next + SUSFS integrated" ;;
+  finasu|fina-su|finasu-ksu) ROOT="FinaSU"; MODE="FinaSU integrated" ;;
+  *) echo "[ci-patch] unknown variant '$VARIANT' (vanilla|kernelsu|kernelsu-next|resukisu|resukisu-susfs|sukisu-ultra|kernelsu-next-susfs|finasu)" >&2; exit 1 ;;
 esac
 
 PROFILE_FILE="$DIR/profiles/$PROFILE.conf"
@@ -145,16 +147,20 @@ declare -A VALUES=(
 )
 
 render() {
-  local f="$1" c key
-  [[ -f "$f" ]] || { echo "[ci-patch] missing template: $f" >&2; exit 1; }
-  c="$(cat "$f")"
+  local src="$1" out="${2:-$1}" c key
+  [[ -f "$src" ]] || { echo "[ci-patch] missing template: $src" >&2; exit 1; }
+  c="$(cat "$src")"
   for key in "${!VALUES[@]}"; do
     c="${c//@${key}@/${VALUES[$key]}}"
   done
-  printf '%s\n' "$c" > "$f"   # overwrite content only; keep file mode
+  printf '%s\n' "$c" > "$out"   # overwrite content only; keep file mode
 }
 
-render "$DIR/banner"
+BANNER_TEMPLATE="$DIR/banner"
+# Profile-specific identity (e.g. the ZairenOX wordmark for garnet 6.6) is
+# selected here so the shared ci-build banner stays device-neutral.
+[[ -f "$DIR/banner.$PROFILE" ]] && BANNER_TEMPLATE="$DIR/banner.$PROFILE"
+render "$BANNER_TEMPLATE" "$DIR/banner"
 render "$DIR/anykernel.sh"
 
 # @RT_*@ tokens are resolved on the device by update-binary, so they are not errors.

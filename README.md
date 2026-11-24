@@ -8,10 +8,19 @@ implementation drives GitHub Actions, Harness, and local builds.
 | `lavender-4.4` | Linux 4.4 non-GKI, HMP/EAS | `projects-nexus/nexus_kernel_xiaomi_lavender@13` | vanilla, kernelsu-next, resukisu |
 | `lavender-4.19` | Linux 4.19 non-GKI | `pix106/android_kernel_xiaomi_sdm660_southwest-ng@main` | vanilla, kernelsu-next, resukisu, resukisu-susfs |
 | `garnet-gki` | Linux 5.10 GKI, A/B | `FebriCahyaa/kernel_xiaomi_garnet@garnet-t-oss` | vanilla, kernelsu-next, resukisu, sukisu-ultra |
+| `garnet-6.6` | Linux 6.6 GKI (ZairenOX), A/B | `FebriCahyaa/android_kernel_xiaomi_garnet_6.6@garnet-6.6` | vanilla, kernelsu-next, kernelsu-next-susfs, finasu |
 
 Profiles live in `profiles/targets/`; AnyKernel flash metadata in
 `anykernel/profiles/`. `VARIANTS=default` (or `all`) expands to the profile's
 `PROFILE_DEFAULT_VARIANTS`; an explicit list is honoured as given.
+
+`garnet-6.6` replaces the retired `FebriCahyaa/garnet-kernel-builder`. Its base
+source is the full `kernel/common` `android15-6.6-lts` history with the
+`garnet-6.6` integration branch; KSU-Next+SUSFS and FinaSU are pre-integrated
+kernel branches used as source seeds for those variants. AnyKernel for this
+profile replaces only `boot` (kernel `Image`); `init_boot`, vendor `DTBO`, and
+ROM-owned `system_dlkm` are left untouched. The exact `.ko` files built from
+the same source are included in the kernel tarball for traceability.
 
 ## Repository layout
 
@@ -74,17 +83,18 @@ results keep completed variants and failure diagnostics.
 `toolchain` selects a family or a validated preset. Each preset fails fast on
 kernel generations it is not known to build (`TOOLCHAIN_FORCE=true` overrides).
 
-| `toolchain` | Compiler | Linux 4.4 | 4.19 | 5.10 GKI |
-|---|---|:-:|:-:|:-:|
-| `auto` | build.config AOSP clang, else per-kernel default | ✓ | ✓ | ✓ |
-| `aosp` | AOSP prebuilt (`toolchain_version=clang-rXXXXXX`) | ✓ | ✓ | ✓ |
-| `aosp-r416183b` | AOSP Clang 12 (LineageOS mirror) — GKI 5.10 reference | ✓ | ✓ | ✓ |
-| `zyc-10` | ZyC Clang 10.0.1 | ✓ | ✓ | – |
-| `proton` | Proton Clang 13 | – | ✓ | ✓ |
-| `llvm-18` | LLVM 18.1.8 release | – | ✓ | ✓ |
-| `neutron` | Neutron Clang (latest or tag), sha256-verified | – | ✓ | ✓ |
-| `llvm` / `system` | distro clang | | | |
-| `gcc` | distro GNU cross compiler | ✓ | | |
+| `toolchain` | Compiler | Linux 4.4 | 4.19 | 5.10 GKI | Linux 6.6 GKI |
+|---|---|:-:|:-:|:-:|:-:|
+| `auto` | build.config AOSP clang, else per-kernel default | ✓ | ✓ | ✓ | profile preset |
+| `aosp` | AOSP prebuilt (`toolchain_version=clang-rXXXXXX`) | ✓ | ✓ | ✓ | – |
+| `aosp-sparse` | AOSP clang via blobless sparse checkout (`main-kernel-build-2024`, `clang-r510928` for garnet 6.6) | – | – | – | ✓ |
+| `aosp-r416183b` | AOSP Clang 12 (LineageOS mirror) — GKI 5.10 reference | ✓ | ✓ | ✓ | – |
+| `zyc-10` | ZyC Clang 10.0.1 | ✓ | ✓ | – | – |
+| `proton` | Proton Clang 13 | – | ✓ | ✓ | – |
+| `llvm-18` | LLVM 18.1.8 release | – | ✓ | ✓ | – |
+| `neutron` | Neutron Clang (latest or tag), sha256-verified | – | ✓ | ✓ | – |
+| `llvm` / `system` | distro clang | | | | |
+| `gcc` | distro GNU cross compiler | ✓ | | | |
 
 `toolchain_url` builds with a custom archive (clang, or GCC when
 `toolchain=gcc`). Downloads are cached per profile/toolchain
@@ -99,12 +109,14 @@ receives only KMI-safe tweaks so the stock vendor modules keep loading. See
 
 ## Root managers
 
-| Provider | Linux 4.4 (Nexus) | Linux 4.19 (SouthWest-NG) | Linux 5.10 GKI |
-|---|---|---|---|
-| KernelSU-Next | `v3.4.0-legacy`, manual hooks | `v3.4.0-legacy`, manual hooks | `v3.4.0` (kprobes) |
-| ReSukiSU | `v4.2.0-rc3`, manual hooks | `v4.2.0-rc3`, manual hooks, optional SUSFS v2.2.0 | `v4.2.0-rc3` (tracepoint) |
-| SukiSU Ultra | not supported (fails closed) | `main` (kprobes only; not in the default matrix) | `main` |
-| KernelSU (official) | not supported (fails closed) | `v0.9.5` (+ SUSFS 1.5.5) | `main` |
+| Provider | Linux 4.4 (Nexus) | Linux 4.19 (SouthWest-NG) | Linux 5.10 GKI | Linux 6.6 GKI (garnet) |
+|---|---|---|---|---|
+| KernelSU-Next | `v3.4.0-legacy`, manual hooks | `v3.4.0-legacy`, manual hooks | `v3.4.0` (kprobes) | `896f45a…` via profile ref |
+| KernelSU-Next + SUSFS | – | – | – | pre-integrated `feature/ksu-next-susfs` branch (SUSFS `gki-android15-6.6`) |
+| FinaSU | – | – | – | pre-integrated `feature/finasu` branch |
+| ReSukiSU | `v4.2.0-rc3`, manual hooks | `v4.2.0-rc3`, manual hooks, optional SUSFS v2.2.0 | `v4.2.0-rc3` (tracepoint) | – |
+| SukiSU Ultra | not supported (fails closed) | `main` (kprobes only; not in the default matrix) | `main` | – |
+| KernelSU (official) | not supported (fails closed) | `v0.9.5` (+ SUSFS 1.5.5) | `main` | – |
 
 Non-GKI kernels use manual hooks only: kprobe/tracepoint hooks bootloop on the
 SouthWest-NG Clang CFI + LTO tree, and the Nexus 4.4 tree already carries
@@ -145,6 +157,13 @@ bash scripts/sync_root_managers.sh remote
 * **garnet** source release omits `drivers/misc/hwid` and carries
   `drivers/misc/plaid` as an orphan gitlink; `patches/devices/garnet/5.10`
   drops those references so `gki_defconfig` and the Image build work.
+* **garnet 6.6** builds `gki_defconfig` plus `vendor/parrot_perf.config` and
+  `vendor/garnet_GKI.config` in that order. AOSP removed
+  `build.config.gki-debug.aarch64`; the source now falls back to
+  `build.config.gki.aarch64` and honours `GKI_BUILD_CONFIG` for standalone
+  vendor-only builds. `clang-r510928` is too large for gitiles `+archive`, so
+  the profile uses a blobless sparse checkout from
+  `main-kernel-build-2024`.
 
 ## Telegram
 

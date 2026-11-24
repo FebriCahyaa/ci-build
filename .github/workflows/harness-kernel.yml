@@ -7,10 +7,10 @@ on:
         description: "Canonical target profile"
         required: true
         type: choice
-        options: [lavender-4.4, lavender-4.19, garnet-gki]
+        options: [lavender-4.4, lavender-4.19, garnet-gki, garnet-6.6]
         default: lavender-4.4
       root_variants:
-        description: "Root variants: default (profile set), all, or e.g. vanilla,kernelsu-next,resukisu,resukisu-susfs,sukisu-ultra"
+        description: "Root variants: default (profile set), all, or e.g. vanilla,kernelsu-next,kernelsu-next-susfs,finasu,resukisu,resukisu-susfs,sukisu-ultra"
         required: true
         type: string
         default: default
@@ -43,7 +43,7 @@ on:
         description: "Toolchain family"
         required: true
         type: choice
-        options: [auto, aosp, aosp-r416183b, zyc-10, proton, llvm-18, neutron, llvm, gcc, system]
+        options: [auto, aosp, aosp-sparse, aosp-r416183b, zyc-10, proton, llvm-18, neutron, llvm, gcc, system]
         default: auto
       toolchain_version:
         description: "Toolchain revision/tag"
@@ -360,7 +360,7 @@ jobs:
           HARNESS_PLAN_EXECUTION_ID: ${{ steps.trigger.outputs.plan_execution_id }}
           CI_BUILD_SHA: ${{ github.sha }}
           HARNESS_EXECUTION_URL: https://app.harness.io/ng/account/${{ secrets.HARNESS_ACCOUNT_ID }}/module/ci/orgs/default/projects/ci_build/pipelines/Universal_Kernel_Build/executions/${{ steps.trigger.outputs.plan_execution_id }}/pipeline
-          DEVICE: ${{ inputs.build_profile == 'garnet-gki' && 'garnet' || 'lavender' }}
+          DEVICE: ${{ (inputs.build_profile == 'garnet-gki' || inputs.build_profile == 'garnet-6.6') && 'garnet' || 'lavender' }}
           KERNEL_BRANCH: ${{ inputs.build_profile }}
           # Live build progress is emitted directly by the Harness build step.
           # Keep the lifecycle monitor Telegram-free to avoid duplicate dashboards.

@@ -50,6 +50,10 @@ TOOLCHAIN="${TOOLCHAIN:-auto}"
 TOOLCHAIN_VERSION="${TOOLCHAIN_VERSION:-auto}"
 LLVM="${LLVM:-auto}"
 LLVM_IAS="${LLVM_IAS:-auto}"
+# "auto" from a workflow means "use the target profile's validated preset".
+if [[ "$TOOLCHAIN" == auto && -n "${PROFILE_TOOLCHAIN:-}" ]]; then TOOLCHAIN="$PROFILE_TOOLCHAIN"; fi
+if [[ "$TOOLCHAIN_VERSION" == auto && -n "${PROFILE_TOOLCHAIN_VERSION:-}" ]]; then TOOLCHAIN_VERSION="$PROFILE_TOOLCHAIN_VERSION"; fi
+if [[ "$LLVM_IAS" == auto && -n "${PROFILE_LLVM_IAS:-}" ]]; then LLVM_IAS="$PROFILE_LLVM_IAS"; fi
 CROSS_COMPILE="${CROSS_COMPILE:-auto}"
 CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32:-}"
 CLANG_URL="${CLANG_URL:-}"
@@ -93,6 +97,25 @@ SUSFS_REF="${SUSFS_REF:-001e69919c6271f690fd00b17e4c721c9e599152}"
 ROOT_PROVIDER="$(variant_provider "$ROOT_VARIANT")"
 variant_susfs "$ROOT_VARIANT" && ENABLE_SUSFS=true
 [[ "$ROOT_VARIANT" == vanilla ]] && ENABLE_SUSFS=false
+
+# Pre-integrated variants build a kernel branch that already carries the root
+# provider (and, where applicable, SUSFS). Do not inject a second provider.
+PREINTEGRATED=false
+for pv in ${PROFILE_PREINTEGRATED_VARIANTS//,/ }; do
+  [[ "$pv" == "$ROOT_VARIANT" ]] && PREINTEGRATED=true && break
+done
+if [[ "$PREINTEGRATED" == true ]]; then
+  ENABLE_SUSFS=false
+  KSU_HOOK_MODE=none
+  # Standalone callers that only pass ROOT_VARIANT should build the matching
+  # pre-integrated source branch instead of the vanilla profile ref.
+  if [[ -z "${KERNEL_SOURCE_SEED:-}" && "$KERNEL_BRANCH" == "${PROFILE_KERNEL_REF:-}" ]]; then
+    variant_key="$(printf '%s' "$ROOT_VARIANT" | tr '[:lower:]-' '[:upper:]_')"
+    variant_ref_var="PROFILE_KERNEL_REF_${variant_key}"
+    variant_ref="${!variant_ref_var:-}"
+    [[ -n "$variant_ref" ]] && KERNEL_BRANCH="$variant_ref"
+  fi
+fi
 
 PACKAGE_ANYKERNEL="${PACKAGE_ANYKERNEL:-${PROFILE_PACKAGE_ANYKERNEL:-true}}"
 ANYKERNEL_PROFILE="${ANYKERNEL_PROFILE:-${PROFILE_ANYKERNEL_PROFILE:-auto}}"
@@ -139,7 +162,7 @@ export CI_HEARTBEAT_SECONDS="${CI_HEARTBEAT_SECONDS:-15}"
 # Kbuild identity (KBUILD_BUILD_USER/HOST) and kernel name.
 source "$SCRIPT_DIR/kbuild_identity.sh"
 if [[ -z "$KERNEL_NAME" || "$KERNEL_NAME" == "auto" ]]; then
-  KERNEL_NAME="$(read_value_file "$CI_ROOT/kernel-name")"
+  KERNEL_NAME="${PROFILE_KERNEL_NAME:-$(read_value_file "$CI_ROOT/kernel-name")}"
 fi
 
 ci_phase() { echo "[CI-PHASE] $1" | tee -a "$BUILD_LOG"; }
@@ -380,10 +403,13 @@ source "$DETECT_ENV"
 KMM="$DETECTED_KERNEL_VERSION"
 
 SELECTED_FRAGMENT=""
-if [[ -n "${DETECTED_FRAGMENT:-}" ]]; then
-  SELECTED_FRAGMENT="$SRC_DIR/arch/$DETECTED_ARCH/configs/$DETECTED_FRAGMENT"
-  [[ -f "$SELECTED_FRAGMENT" ]] || fail "detected fragment missing"
-fi
+SELECTED_FRAGMENTS=()
+for frag in ${DETECTED_FRAGMENTS:-}; do
+  fp="$SRC_DIR/arch/$DETECTED_ARCH/configs/$frag"
+  [[ -f "$fp" ]] || fail "detected fragment missing: $frag"
+  SELECTED_FRAGMENTS+=("$fp")
+  [[ -n "$SELECTED_FRAGMENT" ]] || SELECTED_FRAGMENT="$fp"
+done
 
 if [[ -n "$BUILD_ENV" ]]; then
   eval "$BUILD_ENV"
@@ -398,11 +424,11 @@ fi
 # ------------------------------------------------------------
 KSU_PREINTEGRATED=false
 if grep -qE 'kernelsu' "$SRC_DIR/drivers/Makefile" 2>/dev/null ||
-   grep -qE '^CONFIG_KSU=(y|m)' "$SRC_DIR/arch/$DETECTED_ARCH/configs/$DETECTED_DEFCONFIG" ${SELECTED_FRAGMENT:+"$SELECTED_FRAGMENT"} 2>/dev/null; then
+   grep -qE '^CONFIG_KSU=(y|m)' "$SRC_DIR/arch/$DETECTED_ARCH/configs/$DETECTED_DEFCONFIG" "${SELECTED_FRAGMENTS[@]}" 2>/dev/null; then
   KSU_PREINTEGRATED=true
 fi
 
-if [[ "$ROOT_VARIANT" == vanilla ]]; then
+if [[ "$ROOT_VARIANT" == vanilla || "$PREINTEGRATED" == true ]]; then
   KSU_REQUIRED=false
   KSU_PROVIDER=none
   KSU_REPO="" KSU_REF="" KSU_PROVIDER_COMMIT=none KSU_PROVIDER_VERSION=none KSU_LAYOUT_RESOLVED=none
@@ -455,6 +481,8 @@ TOOLCHAIN_ENV="$WORK/toolchain.env"
 progress_update 15 "toolchain" "resolving ${TOOLCHAIN}${TOOLCHAIN_VERSION:+ $TOOLCHAIN_VERSION}"
 TOOLCHAIN="$TOOLCHAIN" TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" TOOLCHAIN_URL="${TOOLCHAIN_URL:-}" ARCH="$DETECTED_ARCH" \
 CLANG_URL="$CLANG_URL" GCC_URL="$GCC_URL" \
+AOSP_CLANG_REF="${AOSP_CLANG_REF:-${PROFILE_AOSP_CLANG_REF:-main-kernel-build-2024}}" \
+AOSP_CLANG_DIR="${AOSP_CLANG_DIR:-${PROFILE_AOSP_CLANG_DIR:-}}" \
   bash "$SCRIPT_DIR/toolchain_resolver.sh" "$SRC_DIR" "$WORK" \
   > "$TOOLCHAIN_ENV" 2> >(tee -a "$BUILD_LOG" >&2) || fail "toolchain resolution"
 source "$TOOLCHAIN_ENV"
@@ -542,13 +570,13 @@ for kv in \
   "kernel_repo=$KERNEL_REPO" "ref_type=$KERNEL_REF_TYPE" "ref=$KERNEL_BRANCH" "commit=$COMMIT" "commit_sha=$COMMIT_SHA" "commit_subject=$COMMIT_SUBJECT" \
   "ci_build_sha=$CI_BUILD_SHA" "build_profile=${BUILD_PROFILE:-$PROFILE_ID}" "kernel_family=$KERNEL_FAMILY" \
   "dynamic_partition=$DYNAMIC_PARTITION" "gki=$GKI" "source_label=$SOURCE_LABEL" "anykernel_profile=$ANYKERNEL_PROFILE" \
-  "defconfig=$DETECTED_DEFCONFIG" "fragment=${DETECTED_FRAGMENT:-}" \
+  "defconfig=$DETECTED_DEFCONFIG" "fragment=${DETECTED_FRAGMENTS:-}" \
   "toolchain=$RESOLVED_TOOLCHAIN" "toolchain_version=$RESOLVED_TOOLCHAIN_VERSION" "compiler=$RESOLVED_COMPILER_STRING" \
   "llvm=$LLVM_VALUE" "llvm_ias=$LLVM_IAS_VALUE" "clang_triple=$CLANG_TRIPLE" "cross_compile=$CROSS_DEFAULT" \
   "cross_compile_arm32=$CROSS_COMPILE_ARM32" "ccache=${CCACHE_PREFIX:+true}" \
   "scheduler_profile=$SCHEDULER_PROFILE" "patch_profile=$PATCH_PROFILE" "upstream_profile=$UPSTREAM_PROFILE" \
   "lto_plus=$LTO_PLUS" "tweaks=$TWEAKS" "kernel_name=$KERNEL_NAME" "build_user=$KBUILD_BUILD_USER" "build_host=$KBUILD_BUILD_HOST" "maintainer=$PROJECT_MAINTAINER" \
-  "root_variant=$ROOT_VARIANT" "ksu_preintegrated=$KSU_PREINTEGRATED" "ksu_provider=$KSU_PROVIDER" \
+  "root_variant=$ROOT_VARIANT" "ksu_preintegrated=$KSU_PREINTEGRATED" "variant_preintegrated=$PREINTEGRATED" "ksu_provider=$KSU_PROVIDER" \
   "ksu_repo=${KSU_REPO:-}" "ksu_ref=${KSU_REF:-}" "ksu_version=${KSU_PROVIDER_VERSION:-none}" \
   "ksu_commit=${KSU_PROVIDER_COMMIT:-none}" "ksu_layout=${KSU_LAYOUT_RESOLVED:-none}" "ksu_hook_mode=$KSU_HOOK_MODE" \
   "susfs_enabled=$ENABLE_SUSFS" "susfs_source=$SUSFS_SOURCE" "susfs_ref=$SUSFS_REF" \
@@ -577,16 +605,16 @@ ci_phase "defconfig"
 run_live "defconfig" "${MAKE_CMD[@]}" "$DETECTED_DEFCONFIG" || fail "defconfig"
 progress_update 30 "defconfig" "$DETECTED_DEFCONFIG"
 
-if [[ -n "$SELECTED_FRAGMENT" ]]; then
+if ((${#SELECTED_FRAGMENTS[@]} > 0)); then
   if [[ -x "$SRC_DIR/scripts/kconfig/merge_config.sh" ]]; then
     # merge only (-m); dependencies are resolved by olddefconfig with the real toolchain.
     run_live "config-fragment-merge" "$SRC_DIR/scripts/kconfig/merge_config.sh" -m -O "$OUT" \
-      "$OUT/.config" "$SELECTED_FRAGMENT" || fail "config fragment merge"
+      "$OUT/.config" "${SELECTED_FRAGMENTS[@]}" || fail "config fragment merge"
   else
-    cat "$SELECTED_FRAGMENT" >> "$OUT/.config"
+    for fp in "${SELECTED_FRAGMENTS[@]}"; do cat "$fp" >> "$OUT/.config"; done
   fi
   run_live "config-fragment-olddefconfig" "${MAKE_CMD[@]}" olddefconfig || fail "config fragment olddefconfig"
-  progress_update 35 "defconfig" "fragment resolved"
+  progress_update 35 "defconfig" "fragments resolved"
 elif [[ "$CONFIG_FRAGMENT" != none && "$CONFIG_FRAGMENT" != auto ]]; then
   fail "config fragment not resolved"
 fi
@@ -598,15 +626,17 @@ run_helper apply_patch_series.sh "${PATCH_ENV[@]}" PHASE=verify KERNEL_OUT="$OUT
 # The selected provider/SUSFS symbols must survive config resolution.
 if [[ "$KSU_REQUIRED" == true ]]; then
   grep -qE '^CONFIG_KSU=(y|m)' "$OUT/.config" || fail "CONFIG_KSU is not enabled after config resolution"
-else
+elif [[ "$ROOT_VARIANT" == vanilla ]]; then
   ! grep -qE '^CONFIG_KSU=(y|m)' "$OUT/.config" || fail "vanilla variant still has CONFIG_KSU enabled"
+else
+  echo "[build] pre-integrated root variant: CONFIG_KSU state comes from the source tree" | tee -a "$BUILD_LOG"
 fi
 if [[ "$ENABLE_SUSFS" == true ]]; then
   grep -qE '^CONFIG_KSU_SUSFS=(y|m)' "$OUT/.config" || fail "CONFIG_KSU_SUSFS is not enabled after config resolution"
 fi
 # Manual-hook providers: the host hook call sites exist only under
 # CONFIG_KSU_MANUAL_HOOK; without it the driver would build with no hooks.
-if [[ "${KSU_HOOK_MODE:-}" == manual && ( "$KSU_PROVIDER" == kernelsu-next || "$KSU_PROVIDER" == resukisu ) ]]; then
+if [[ "$KSU_REQUIRED" == true && "${KSU_HOOK_MODE:-}" == manual && ( "$KSU_PROVIDER" == kernelsu-next || "$KSU_PROVIDER" == resukisu ) ]]; then
   grep -qE '^CONFIG_KSU_MANUAL_HOOK=y' "$OUT/.config" || fail "CONFIG_KSU_MANUAL_HOOK is not enabled after config resolution"
 fi
 
@@ -703,6 +733,14 @@ if [[ ! -f "$ARTIFACTS/Image.gz-dtb" && ! -f "$ARTIFACTS/Image-dtb" && -d "$BOOT
 fi
 cp -f "$OUT/.config" "$ARTIFACTS/kernel.config"
 [[ -f "$OUT/System.map" ]] && cp -f "$OUT/System.map" "$ARTIFACTS/System.map"
+# GKI vendor modules are shipped in system_dlkm by the ROM. Keep the modules
+# built from this exact source in the tarball for traceability / manual flashing;
+# the AnyKernel ZIP deliberately touches boot only.
+while IFS= read -r -d '' ko; do
+  rel="${ko#"$OUT"/}"
+  mkdir -p "$ARTIFACTS/modules/$(dirname -- "$rel")"
+  cp -f "$ko" "$ARTIFACTS/modules/$rel"
+done < <(find "$OUT" -type f -name '*.ko' -print0 2>/dev/null || true)
 
 KERNEL_RELEASE="$(cat "$OUT/include/config/kernel.release" 2>/dev/null || true)"
 info kernel_release "$KERNEL_RELEASE"

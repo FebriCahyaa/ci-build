@@ -7,10 +7,10 @@ on:
         description: "Canonical target profile"
         required: true
         type: choice
-        options: [lavender-4.4, lavender-4.19, garnet-gki]
+        options: [lavender-4.4, lavender-4.19, garnet-gki, garnet-6.6]
         default: lavender-4.4
       variants:
-        description: "Root variants: default (profile set), all, or e.g. vanilla,kernelsu-next,resukisu,resukisu-susfs,sukisu-ultra"
+        description: "Root variants: default (profile set), all, or e.g. vanilla,kernelsu-next,kernelsu-next-susfs,finasu,resukisu,resukisu-susfs,sukisu-ultra"
         required: true
         type: string
         default: default
@@ -43,7 +43,7 @@ on:
         description: "Toolchain family"
         required: true
         type: choice
-        options: [auto, aosp, aosp-r416183b, zyc-10, proton, llvm-18, neutron, llvm, gcc, system]
+        options: [auto, aosp, aosp-sparse, aosp-r416183b, zyc-10, proton, llvm-18, neutron, llvm, gcc, system]
         default: auto
       toolchain_version:
         description: "Toolchain revision/tag"

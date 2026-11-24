@@ -29,6 +29,7 @@ case "$REQUESTED" in
     case "$DEVICE:$FAMILY" in
       lavender:4.4) PROFILE="lavender-4.4" ;;
       lavender:4.19) PROFILE="lavender-4.19" ;;
+      garnet:6.6|garnet:6*) PROFILE="garnet-6.6" ;;
       garnet:5.10) PROFILE="garnet-gki" ;;
       *)
         echo "ERROR: cannot auto-select AnyKernel profile for DEVICE=$DEVICE KERNEL_VERSION=$KERNEL_VERSION ROM_FAMILY=$ROM_FAMILY" >&2

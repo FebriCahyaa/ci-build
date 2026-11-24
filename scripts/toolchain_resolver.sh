@@ -32,6 +32,11 @@ VERSION_REQUEST="${TOOLCHAIN_VERSION:-auto}"
 ARCH="${ARCH:-arm64}"
 TC_ROOT="${TOOLCHAIN_CACHE_DIR:-$WORK_DIR/toolchain}"
 TOOLCHAIN_FORCE="${TOOLCHAIN_FORCE:-false}"
+# AOSP sparse-clang presets (used for GKI trees whose clang revision is too
+# large for gitiles +archive). Profiles pin both values for reproducibility.
+AOSP_CLANG_REF="${AOSP_CLANG_REF:-main-kernel-build-2024}"
+AOSP_CLANG_DIR="${AOSP_CLANG_DIR:-}"
+AOSP_SOURCES_REF="${AOSP_SOURCES_REF:-main}"
 # One URL input for custom archives; the family decides how it is used.
 if [[ -n "${TOOLCHAIN_URL:-}" ]]; then
   case "$REQUESTED" in
@@ -179,6 +184,43 @@ fetch_git() {
   touch "$dest/.ci-toolchain-ready"
 }
 
+# Sparse clone of platform/prebuilts/clang/host/linux-x86. gitiles refuses to
+# archive very large revisions (e.g. clang-r510928), but a blobless sparse
+# checkout of a single clang directory is small and reproducible.
+fetch_sparse_clang() {
+  local rev="$1" dir="$2" dest="$TC_ROOT/aosp-sparse-$rev-$AOSP_CLANG_REF"
+  if [[ -f "$dest/.ci-toolchain-ready" ]]; then
+    log "reusing cached aosp-sparse-$rev"
+    return 0
+  fi
+  rm -rf "$dest"
+  log "sparse-cloning clang $rev ($dir) from $AOSP_CLANG_REF"
+  git clone -q --depth=1 --filter=blob:none --sparse -b "$AOSP_CLANG_REF" \
+    https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 "$dest" || return 1
+  git -C "$dest" sparse-checkout set "$dir" || return 1
+  # The legacy build.config expects the toolchain under prebuilts/ relative to
+  # ROOT_DIR. Cache it at $dest/prebuilts/... and symlink it into the build tree
+  # from build_kernel.sh.
+  mkdir -p "$dest/prebuilts/clang/host/linux-x86"
+  mv "$dest/$dir" "$dest/prebuilts/clang/host/linux-x86/$dir"
+  rm -rf "$dest/.git"
+  touch "$dest/.ci-toolchain-ready"
+}
+
+# Fetch a single hermetic build-tools directory from AOSP platform/prebuilts/clang
+# (e.g. host/linux-x86/bin for dtc). gitiles +archive supports this small subtree.
+fetch_sparse_build_tools() {
+  local dest="$TC_ROOT/aosp-build-tools"
+  [[ -f "$dest/.ci-toolchain-ready" ]] && { log "reusing cached aosp build-tools"; return 0; }
+  rm -rf "$dest"
+  log "sparse-cloning AOSP build-tools path"
+  git clone -q --depth=1 --filter=blob:none --sparse -b "$AOSP_SOURCES_REF" \
+    https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 "$dest" || return 1
+  git -C "$dest" sparse-checkout set host/linux-x86 || return 1
+  rm -rf "$dest/.git"
+  touch "$dest/.ci-toolchain-ready"
+}
+
 find_clang_bin() {
   local bin
   # bin/clang is often a symlink to clang-NN inside release archives.
@@ -300,6 +342,19 @@ case "$family" in
     done < <(aosp_sources "$rev")
     [[ "$ok" == true ]] || die "unable to download AOSP Clang $rev from any configured source"
     bin_dir="$(find_clang_bin "aosp-$rev")"
+    use_clang "$bin_dir"
+    RESOLVED_VERSION="$rev"
+    ;;
+
+  aosp-sparse|clang-sparse)
+    require_kernel_range "$family" 600 999
+    rev="$VERSION_REQUEST"
+    [[ "$rev" == auto ]] && rev="$BUILD_CONFIG_CLANG_REV"
+    [[ -n "$rev" ]] || die "cannot detect AOSP Clang revision; set TOOLCHAIN_VERSION=clang-rXXXXXX"
+    [[ "$rev" == clang-* ]] || rev="clang-$rev"
+    fetch_sparse_clang "$rev" "${AOSP_CLANG_DIR:-$rev}" ||
+      die "unable to sparse-clone AOSP Clang $rev from $AOSP_CLANG_REF"
+    bin_dir="$(find_clang_bin "aosp-sparse-$rev-$AOSP_CLANG_REF")"
     use_clang "$bin_dir"
     RESOLVED_VERSION="$rev"
     ;;

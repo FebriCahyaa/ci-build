@@ -4,7 +4,7 @@ set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-for profile in lavender-4.4 lavender-4.19 garnet-gki; do
+for profile in lavender-4.4 lavender-4.19 garnet-gki garnet-6.6; do
   (
     eval "$(BUILD_PROFILE="$profile" bash "$ROOT/scripts/resolve_build_profile.sh")"
     [[ "$PROFILE_ID" == "$profile" ]] || fail "$profile: PROFILE_ID"
@@ -23,6 +23,16 @@ for profile in lavender-4.4 lavender-4.19 garnet-gki; do
         [[ "$PROFILE_ZAIRENKAI_REF" =~ ^[0-9a-f]{40}$ ]] || fail "$profile Zairenkai ref pin"
         ;;
       garnet-gki) [[ "$PROFILE_GKI" == true ]] || fail "$profile GKI" ;;
+      garnet-6.6)
+        [[ "$PROFILE_KERNEL_FAMILY" == 6.6 && "$PROFILE_GKI" == true ]] || fail "$profile identity"
+        [[ "$PROFILE_DEFCONFIG" == gki_defconfig ]] || fail "$profile defconfig"
+        [[ "$PROFILE_CONFIG_FRAGMENT" == 'vendor/parrot_perf.config,vendor/garnet_GKI.config' ]] || fail "$profile fragments"
+        [[ "$PROFILE_KERNEL_NAME" == ZairenOX && "$PROFILE_TOOLCHAIN" == aosp-sparse ]] || fail "$profile toolchain preset"
+        [[ "$PROFILE_TOOLCHAIN_VERSION" == clang-r510928 && "$PROFILE_AOSP_CLANG_REF" == main-kernel-build-2024 ]] || fail "$profile clang pin"
+        [[ "$PROFILE_DEFAULT_VARIANTS" == 'vanilla,kernelsu-next,kernelsu-next-susfs,finasu' ]] || fail "$profile default variants"
+        [[ "$PROFILE_PREINTEGRATED_VARIANTS" == 'kernelsu-next-susfs,finasu' ]] || fail "$profile preintegrated variants"
+        [[ -n "$PROFILE_KERNEL_REF_KSU_NEXT_SUSFS" && -n "$PROFILE_KERNEL_REF_FINASU" ]] || fail "$profile variant refs"
+        ;;
     esac
   ) || exit 1
   echo "PASS profile $profile"
@@ -35,6 +45,7 @@ fi
 [[ "$(BUILD_PROFILE=lavender-4.4 VARIANTS=default bash "$ROOT/scripts/resolve_variants.sh" --json)" == '["vanilla","kernelsu-next","resukisu"]' ]] || fail "lavender-4.4 default variants"
 [[ "$(BUILD_PROFILE=lavender-4.19 VARIANTS=default bash "$ROOT/scripts/resolve_variants.sh" --json)" == '["vanilla","kernelsu-next","resukisu","resukisu-susfs"]' ]] || fail "lavender-4.19 default variants (manual-hook providers + SUSFS)"
 [[ "$(BUILD_PROFILE=garnet-gki VARIANTS=all bash "$ROOT/scripts/resolve_variants.sh" --json)" == '["vanilla","kernelsu-next","resukisu","sukisu-ultra"]' ]] || fail "garnet all variants"
+[[ "$(BUILD_PROFILE=garnet-6.6 VARIANTS=default bash "$ROOT/scripts/resolve_variants.sh" --json)" == '["vanilla","kernelsu-next","kernelsu-next-susfs","finasu"]' ]] || fail "garnet-6.6 default variants"
 [[ "$(BUILD_PROFILE=lavender-4.19 VARIANTS='ksun, vanilla ksun' bash "$ROOT/scripts/resolve_variants.sh" --json)" == '["kernelsu-next","vanilla"]' ]] || fail "alias/dedupe"
 if BUILD_PROFILE=lavender-4.19 VARIANTS='vanilla,bogus' bash "$ROOT/scripts/resolve_variants.sh" >/dev/null 2>&1; then
   fail "unknown variant must fail the resolver"
