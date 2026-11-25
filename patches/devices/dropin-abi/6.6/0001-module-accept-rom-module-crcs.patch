@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Febrian Rahmad Cahya <febricahya12345@gmail.com>
+Date: Wed, 25 Nov 2026 13:45:00 +0700
+Subject: [PATCH] module: accept modversion CRCs from the ROM vendor modules
+
+The RisingOS OTA modules carry CRCs generated from a kernel tree with
+KSU/SUSFS headers. They share our vermagic but disagree on many symbol
+CRCs, so the stock loader rejects them. For the compatibility profile,
+accept those CRCs instead of replacing the ROM modules.
+---
+--- a/kernel/module/version.c
++++ b/kernel/module/version.c
+@@ -19,6 +19,10 @@
+ 	unsigned int versindex = info->index.vers;
+ 	unsigned int i, num_versions;
+ 	struct modversion_info *versions;
++	/* RisingOS drop-in: vendor modules were built against the ROM kernel
++	 * tree with KSU/SUSFS headers. Keep vermagic identical, but accept
++	 * their modversion CRCs so those modules can still be loaded. */
++	return 1;
+ 
+ 	/* Exporting module didn't supply crcs?  OK, we're already tainted. */
+ 	if (!crc)

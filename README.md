@@ -29,8 +29,13 @@ kernel tree, use the ROM's exact kernel source, defconfig, and `.config`. The
 `6fd2a958edae375757172ec0bc17dee107227cd6` and the `.config` extracted from
 the OTA `boot.img` (`profiles/fragments/garnet-6.6-risingos-dropin.config`). It
 also sets `PROFILE_KEEP_SOURCE_LOCALVERSION=true` so module vermagic stays
-identical. Build a different prebuilt ROM by overriding the source/ref/fragment
-inputs, but never mix a changed config with unmodified vendor modules.
+identical. The ROM modules still carry CRCs from a KSU/SUSFS-patched header
+tree, so the profile applies `PATCH_PROFILE=dropin-abi`: a single patch that
+accepts module CRCs without changing any module-visible struct. This is a
+compatibility experiment, not a daily-driver source; revert to the stock boot
+image if any module misbehaves. Build a different prebuilt ROM by overriding
+the source/ref/fragment inputs, but never mix a changed config with unmodified
+vendor modules.
 
 ## Repository layout
 
