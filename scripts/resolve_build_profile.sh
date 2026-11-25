@@ -17,7 +17,7 @@ case "$REQUESTED" in
       *) echo "ERROR: BUILD_PROFILE=auto needs DEVICE and KERNEL_FAMILY" >&2; exit 2 ;;
     esac
     ;;
-  lavender-4.4|lavender-4.19|garnet-gki|garnet-6.6|garnet-6.6-dropin) PROFILE="$REQUESTED" ;;
+  lavender-4.4|lavender-4.19|garnet-gki|garnet-6.6|garnet-6.6-dropin|garnet-6.6-romcompat) PROFILE="$REQUESTED" ;;
   *) echo "ERROR: unknown build profile: $REQUESTED" >&2; ls -1 "$PROFILE_DIR"/*.conf 2>/dev/null | sed 's#.*/##; s#\.conf$##' >&2; exit 2 ;;
 esac
 

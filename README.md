@@ -10,6 +10,7 @@ implementation drives GitHub Actions, Harness, and local builds.
 | `garnet-gki` | Linux 5.10 GKI, A/B | `FebriCahyaa/kernel_xiaomi_garnet@garnet-t-oss` | vanilla, kernelsu-next, resukisu, sukisu-ultra |
 | `garnet-6.6` | Linux 6.6 GKI (ZairenOX), A/B | `FebriCahyaa/android_kernel_xiaomi_garnet_6.6@garnet-6.6` | vanilla, kernelsu-next, kernelsu-next-susfs, finasu |
 | `garnet-6.6-dropin` | Linux 6.6 GKI, exact risingOS OTA kernel | `sudo-joaopuser/android_kernel_xiaomi_sm7435-6.6@6fd2a958edae` | vanilla |
+| `garnet-6.6-romcompat` | Linux 6.6 GKI ZairenOX with cross-ROM loader bridge | `FebriCahyaa/android_kernel_xiaomi_garnet_6.6@0ae595b6` | vanilla |
 
 Profiles live in `profiles/targets/`; AnyKernel flash metadata in
 `anykernel/profiles/`. `VARIANTS=default` (or `all`) expands to the profile's
@@ -37,6 +38,45 @@ image if any module misbehaves. Build a different prebuilt ROM by overriding
 the source/ref/fragment inputs, but never mix a changed config with unmodified
 vendor modules.
 
+### One source for other garnet 6.6 ROMs
+
+`garnet-6.6-romcompat` uses the managed ZairenOX source instead of a ROM-specific
+fork. Its pinned commit adds `CONFIG_GARNET_ROM_MODULE_COMPAT`, a Kconfig gate in
+`kernel/module/version.c` that skips `vermagic` and `CONFIG_MODVERSIONS` CRC
+rejection for vendor modules from another garnet 6.6 ROM. The bridge is compiled
+into vmlinux only; it does not change any module-visible struct and stays off in
+the daily-driver `garnet-6.6` profile.
+
+Prepare a ROM from its stock `boot.img`:
+
+```sh
+python3 scripts/extract_rom_config.py ROM_boot.img --name my-rom-261120
+git add profiles/fragments/garnet-6.6-my-rom-261120.config*
+git commit -s -m "config: add my-rom-261120 garnet 6.6 drop-in config"
+git push
+```
+
+The extractor writes the exact embedded `.config` plus a metadata JSON with the
+kernel release, `CONFIG_LOCALVERSION`, and detected Clang revision. Then build
+with both fragments — the ROM config first, the loader bridge second:
+
+```sh
+BUILD_PROFILE=garnet-6.6-romcompat \
+  CONFIG_FRAGMENT_OVERRIDE=profiles/fragments/garnet-6.6-my-rom-261120.config,profiles/fragments/garnet-6.6-rom-module-compat.config \
+  ./scripts/start_local_ci.sh
+```
+
+Finally replace only the kernel in the untouched stock boot image:
+
+```sh
+python3 scripts/repack_boot.py ROM_boot.img work/artifacts/Image garnet-romcompat-boot.img
+```
+
+`repack_boot.py` preserves the ramdisk, cmdline, dtb, embedded vbmeta block and
+AVB footer layout. Flashing it still requires an unlocked bootloader with AVB
+verification disabled, or a ROM-key-signed replacement; the script cannot forge
+the ROM's vbmeta signature. Keep the stock boot image for recovery.
+
 ## Repository layout
 
 ```text
@@ -56,7 +96,9 @@ aws/                 ephemeral self-hosted runner for ROM builds
 
 Entry points: `build_variants.sh` (matrix of variants from one source seed),
 `build_kernel.sh` (one variant), `assemble_release_assets.sh` +
-`publish_ci_release.sh` (release), `start_local_ci.sh` (trigger from a shell).
+`publish_ci_release.sh` (release), `start_local_ci.sh` (trigger from a shell),
+`extract_rom_config.py` (per-ROM config from a boot image), `repack_boot.py`
+(kernel-only boot image repack).
 
 ## Build flow
 

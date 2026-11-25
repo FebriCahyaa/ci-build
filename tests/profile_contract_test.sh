@@ -4,7 +4,7 @@ set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-for profile in lavender-4.4 lavender-4.19 garnet-gki garnet-6.6 garnet-6.6-dropin; do
+for profile in lavender-4.4 lavender-4.19 garnet-gki garnet-6.6 garnet-6.6-dropin garnet-6.6-romcompat; do
   (
     eval "$(BUILD_PROFILE="$profile" bash "$ROOT/scripts/resolve_build_profile.sh")"
     [[ "$PROFILE_ID" == "$profile" ]] || fail "$profile: PROFILE_ID"
@@ -37,6 +37,15 @@ for profile in lavender-4.4 lavender-4.19 garnet-gki garnet-6.6 garnet-6.6-dropi
         [[ "$PROFILE_KERNEL_FAMILY" == 6.6 && "$PROFILE_GKI" == true ]] || fail "$profile identity"
         [[ "$PROFILE_CONFIG_FRAGMENT" == profiles/fragments/garnet-6.6-risingos-dropin.config ]] || fail "$profile fragment"
         [[ -f "$ROOT/$PROFILE_CONFIG_FRAGMENT" ]] || fail "$profile fragment missing"
+        [[ "$PROFILE_KEEP_SOURCE_LOCALVERSION" == true ]] || fail "$profile localversion policy"
+        [[ "$PROFILE_DEFAULT_VARIANTS" == vanilla ]] || fail "$profile default variants"
+        ;;
+      garnet-6.6-romcompat)
+        [[ "$PROFILE_KERNEL_FAMILY" == 6.6 && "$PROFILE_GKI" == true ]] || fail "$profile identity"
+        [[ "$PROFILE_KERNEL_REPO" == https://github.com/FebriCahyaa/android_kernel_xiaomi_garnet_6.6.git ]] || fail "$profile source repo"
+        [[ "$PROFILE_PATCH_PROFILE" == none ]] || fail "$profile patch must live in the source branch"
+        [[ -f "$ROOT/profiles/fragments/garnet-6.6-rom-module-compat.config" ]] || fail "$profile compat fragment missing"
+        grep -q '^CONFIG_GARNET_ROM_MODULE_COMPAT=y$' "$ROOT/profiles/fragments/garnet-6.6-rom-module-compat.config" || fail "$profile compat symbol"
         [[ "$PROFILE_KEEP_SOURCE_LOCALVERSION" == true ]] || fail "$profile localversion policy"
         [[ "$PROFILE_DEFAULT_VARIANTS" == vanilla ]] || fail "$profile default variants"
         ;;
