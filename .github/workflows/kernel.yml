@@ -7,7 +7,7 @@ on:
         description: "Canonical target profile"
         required: true
         type: choice
-        options: [lavender-4.4, lavender-4.19, garnet-gki, garnet-6.6]
+        options: [lavender-4.4, lavender-4.19, garnet-gki, garnet-6.6, garnet-6.6-dropin]
         default: lavender-4.4
       variants:
         description: "Root variants: default (profile set), all, or e.g. vanilla,kernelsu-next,kernelsu-next-susfs,finasu,resukisu,resukisu-susfs,sukisu-ultra"

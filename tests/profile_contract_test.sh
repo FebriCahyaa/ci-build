@@ -4,7 +4,7 @@ set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-for profile in lavender-4.4 lavender-4.19 garnet-gki garnet-6.6; do
+for profile in lavender-4.4 lavender-4.19 garnet-gki garnet-6.6 garnet-6.6-dropin; do
   (
     eval "$(BUILD_PROFILE="$profile" bash "$ROOT/scripts/resolve_build_profile.sh")"
     [[ "$PROFILE_ID" == "$profile" ]] || fail "$profile: PROFILE_ID"
@@ -32,6 +32,13 @@ for profile in lavender-4.4 lavender-4.19 garnet-gki garnet-6.6; do
         [[ "$PROFILE_DEFAULT_VARIANTS" == 'vanilla,kernelsu-next,kernelsu-next-susfs,finasu' ]] || fail "$profile default variants"
         [[ "$PROFILE_PREINTEGRATED_VARIANTS" == 'kernelsu-next-susfs,finasu' ]] || fail "$profile preintegrated variants"
         [[ -n "$PROFILE_KERNEL_REF_KSU_NEXT_SUSFS" && -n "$PROFILE_KERNEL_REF_FINASU" ]] || fail "$profile variant refs"
+        ;;
+      garnet-6.6-dropin)
+        [[ "$PROFILE_KERNEL_FAMILY" == 6.6 && "$PROFILE_GKI" == true ]] || fail "$profile identity"
+        [[ "$PROFILE_CONFIG_FRAGMENT" == profiles/fragments/garnet-6.6-risingos-dropin.config ]] || fail "$profile fragment"
+        [[ -f "$ROOT/$PROFILE_CONFIG_FRAGMENT" ]] || fail "$profile fragment missing"
+        [[ "$PROFILE_KEEP_SOURCE_LOCALVERSION" == true ]] || fail "$profile localversion policy"
+        [[ "$PROFILE_DEFAULT_VARIANTS" == vanilla ]] || fail "$profile default variants"
         ;;
     esac
   ) || exit 1

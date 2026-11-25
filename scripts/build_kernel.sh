@@ -72,6 +72,9 @@ ZAIRENKAI_TAG="${ZAIRENKAI_TAG:-${PROFILE_ZAIRENKAI_TAG:-}}"
 ZAIRENKAI_HOOK_MODE="${ZAIRENKAI_HOOK_MODE:-${PROFILE_ZAIRENKAI_HOOK_MODE:-manual}}"
 ZAIRENKAI_LICENSE_INC_FILE="${ZAIRENKAI_LICENSE_INC_FILE:-}"
 KERNEL_NAME="${KERNEL_NAME:-}"
+# Drop-in builds of a prebuilt ROM must keep the source CONFIG_LOCALVERSION so
+# module vermagic stays identical; the project name suffix would break loading.
+KEEP_SOURCE_LOCALVERSION="${KEEP_SOURCE_LOCALVERSION:-${PROFILE_KEEP_SOURCE_LOCALVERSION:-false}}"
 # PATCH_PROFILE=southwest-ng also labels the scheduler profile (keeps workflow inputs <= 25).
 if [[ "$PATCH_PROFILE" == "southwest-ng" && "$SCHEDULER_PROFILE" == "auto" ]]; then
   SCHEDULER_PROFILE="southwest-ng"
@@ -405,7 +408,10 @@ KMM="$DETECTED_KERNEL_VERSION"
 SELECTED_FRAGMENT=""
 SELECTED_FRAGMENTS=()
 for frag in ${DETECTED_FRAGMENTS:-}; do
-  fp="$SRC_DIR/arch/$DETECTED_ARCH/configs/$frag"
+  case "$frag" in
+    /*) fp="$frag" ;;
+    *) fp="$SRC_DIR/arch/$DETECTED_ARCH/configs/$frag" ;;
+  esac
   [[ -f "$fp" ]] || fail "detected fragment missing: $frag"
   SELECTED_FRAGMENTS+=("$fp")
   [[ -n "$SELECTED_FRAGMENT" ]] || SELECTED_FRAGMENT="$fp"
@@ -641,8 +647,12 @@ if [[ "$KSU_REQUIRED" == true && "${KSU_HOOK_MODE:-}" == manual && ( "$KSU_PROVI
 fi
 
 ci_phase "kernel-name"
-run_helper set_kernel_name.sh CONFIG_FILE="$OUT/.config" KERNEL_NAME="$KERNEL_NAME" || fail "kernel name"
-run_helper sync_localversion_files.sh KERNEL_SRC="$SRC_DIR" || fail "localversion sync"
+if is_true "$KEEP_SOURCE_LOCALVERSION"; then
+  echo "[kernel-name] keeping source CONFIG_LOCALVERSION for module vermagic compatibility" | tee -a "$BUILD_LOG"
+else
+  run_helper set_kernel_name.sh CONFIG_FILE="$OUT/.config" KERNEL_NAME="$KERNEL_NAME" || fail "kernel name"
+  run_helper sync_localversion_files.sh KERNEL_SRC="$SRC_DIR" || fail "localversion sync"
+fi
 progress_update 41 "identity" "kernel name synchronized"
 
 # Scheduler evidence (reporting only; the source/defconfig stays authoritative).

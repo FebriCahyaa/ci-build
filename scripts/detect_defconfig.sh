@@ -9,6 +9,7 @@ USAGE
   exit 2
 }
 
+CI_ROOT="${CI_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
 REPO=""
 ARCH_REQ="auto"
 DEVICE="generic"
@@ -90,6 +91,10 @@ if [[ "$FRAGMENT_REQ" != "none" ]]; then
       [[ -n "$req" ]] || continue
       if [[ -f "$CONFIG_ROOT/$req" ]]; then
         FRAGMENT_LIST+=("$req")
+      elif [[ -f "$CI_ROOT/$req" ]]; then
+        # CI-relative fragment (e.g. profiles/fragments/...). Emit an absolute
+        # path so build_kernel.sh does not reinterpret it under the kernel tree.
+        FRAGMENT_LIST+=("$CI_ROOT/$req")
       elif [[ -f "$req" ]]; then
         FRAGMENT_LIST+=("$req")
       else

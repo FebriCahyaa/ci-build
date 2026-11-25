@@ -9,6 +9,7 @@ implementation drives GitHub Actions, Harness, and local builds.
 | `lavender-4.19` | Linux 4.19 non-GKI | `pix106/android_kernel_xiaomi_sdm660_southwest-ng@main` | vanilla, kernelsu-next, resukisu, resukisu-susfs |
 | `garnet-gki` | Linux 5.10 GKI, A/B | `FebriCahyaa/kernel_xiaomi_garnet@garnet-t-oss` | vanilla, kernelsu-next, resukisu, sukisu-ultra |
 | `garnet-6.6` | Linux 6.6 GKI (ZairenOX), A/B | `FebriCahyaa/android_kernel_xiaomi_garnet_6.6@garnet-6.6` | vanilla, kernelsu-next, kernelsu-next-susfs, finasu |
+| `garnet-6.6-dropin` | Linux 6.6 GKI, exact risingOS OTA kernel | `sudo-joaopuser/android_kernel_xiaomi_sm7435-6.6@19a3d095cd97` | vanilla |
 
 Profiles live in `profiles/targets/`; AnyKernel flash metadata in
 `anykernel/profiles/`. `VARIANTS=default` (or `all`) expands to the profile's
@@ -22,6 +23,15 @@ profile replaces only `boot` (kernel `Image`); `init_boot`, vendor `DTBO`, and
 ROM-owned `system_dlkm` are left untouched. The exact `.ko` files built from
 the same source are included in the kernel tarball for traceability.
 
+For a prebuilt ROM whose vendor modules were compiled against a different
+kernel tree, use the ROM's exact kernel source, defconfig, and `.config`. The
+`garnet-6.6-dropin` profile pins the risingOS 9 garnet source at
+`19a3d095cd97e3ba3515ded677637dfe3fcb2ae8` and the `.config` extracted from
+the OTA `boot.img` (`profiles/fragments/garnet-6.6-risingos-dropin.config`). It
+also sets `PROFILE_KEEP_SOURCE_LOCALVERSION=true` so module vermagic stays
+identical. Build a different prebuilt ROM by overriding the source/ref/fragment
+inputs, but never mix a changed config with unmodified vendor modules.
+
 ## Repository layout
 
 ```text
@@ -29,6 +39,7 @@ the same source are included in the kernel tarball for traceability.
                      rom.yml (ROM), ci-validation.yml (tests)
 harness/             Harness pipelines (kernel, ROM)
 profiles/targets/    one file per target: source, defconfig, pins, default variants
+profiles/fragments/  exact extracted configs for drop-in/compatibility profiles
 patches/             patch registry (devices, root-manager, upstream, features)
 anykernel/           vendored AnyKernel3 + templates (anykernel.sh, banner) + profiles
 scripts/             build, release, Telegram, and helper scripts (entry points below)
